@@ -46,6 +46,24 @@ async function getGraphToken() {
   return res.data.access_token;
 }
 
+// ---- Check the file itself is reachable (isolates file-access vs sheet-lookup errors) ----
+async function getFileMetadata(token) {
+  const url = `https://graph.microsoft.com/v1.0/drives/${DRIVE_ID}/items/${ITEM_ID}`;
+  const res = await axios.get(url, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return res.data;
+}
+
+// ---- List worksheet names in the workbook (helps confirm the exact name Graph sees) ----
+async function listWorksheetNames(token) {
+  const url = `https://graph.microsoft.com/v1.0/drives/${DRIVE_ID}/items/${ITEM_ID}/workbook/worksheets`;
+  const res = await axios.get(url, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return (res.data.value || []).map((w) => w.name);
+}
+
 // ---- Read the whole used range of the target sheet ----
 async function readSheet(token) {
   const url = `https://graph.microsoft.com/v1.0/drives/${DRIVE_ID}/items/${ITEM_ID}/workbook/worksheets('${encodeURIComponent(
@@ -187,6 +205,44 @@ async function runCheck() {
 }
 
 app.get("/health", (req, res) => res.json({ ok: true }));
+
+// Diagnostic endpoint: checks file access and lists actual worksheet names Graph sees.
+app.get("/debug", async (req, res) => {
+  try {
+    requireEnv();
+    if (req.query.secret !== RUN_SECRET) {
+      return res.status(401).json({ error: "unauthorized" });
+    }
+    const token = await getGraphToken();
+
+    let fileInfo = null;
+    let fileError = null;
+    try {
+      const meta = await getFileMetadata(token);
+      fileInfo = { name: meta.name, id: meta.id, webUrl: meta.webUrl };
+    } catch (e) {
+      fileError = e.response?.data || e.message;
+    }
+
+    let sheetNames = null;
+    let sheetError = null;
+    try {
+      sheetNames = await listWorksheetNames(token);
+    } catch (e) {
+      sheetError = e.response?.data || e.message;
+    }
+
+    res.json({
+      configuredSheetName: SHEET_NAME,
+      fileInfo,
+      fileError,
+      sheetNames,
+      sheetError,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.response?.data || err.message });
+  }
+});
 
 app.get("/run-check", async (req, res) => {
   try {
