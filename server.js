@@ -87,7 +87,7 @@ function rowsToObjects(values) {
     status: findCol(["status"]),
     owner: findCol(["owner"]),
     site: findCol(["site", "customer"]),
-    task: findCol(["task detail", "task"]),
+    task: findCol(["task detail", "task", "task/case"]),
     targetDate: findCol(["target date"]),
     remark: findCol(["remark", "comment"]),
   };
