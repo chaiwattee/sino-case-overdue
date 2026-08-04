@@ -182,6 +182,9 @@ async function runCheck() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
+  const twoMonthsAgo = new Date(today);
+  twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2);
+
   const overdueRows = rows
     .map((r) => {
       const targetDate = parseExcelDate(r.targetDateRaw);
@@ -190,7 +193,9 @@ async function runCheck() {
     .filter((r) => {
       if (!r.targetDate) return false;
       const isSuccess = r.status.trim().toLowerCase() === "success";
-      return !isSuccess && r.targetDate.getTime() < today.getTime();
+      const isOverdue = r.targetDate.getTime() < today.getTime();
+      const withinLookback = r.targetDate.getTime() >= twoMonthsAgo.getTime();
+      return !isSuccess && isOverdue && withinLookback;
     })
     .map((r) => ({
       ...r,
@@ -199,9 +204,9 @@ async function runCheck() {
     }))
     .sort((a, b) => b.daysOverdue - a.daysOverdue);
 
-  const message = buildMessage(overdueRows, today);
-  await sendTelegram(message);
-  return { overdueCount: overdueRows.length, message };
+  const messages = buildMessages(overdueRows, today);
+  await sendTelegramMessages(messages);
+  return { overdueCount: overdueRows.length, messageCount: messages.length };
 }
 
 app.get("/health", (req, res) => res.json({ ok: true }));
