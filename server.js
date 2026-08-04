@@ -13,7 +13,7 @@ const {
   SHEET_NAME = "TASK NX TEAM",
   TELEGRAM_BOT_TOKEN,
   TELEGRAM_CHAT_ID,
-  RUN_SECRET, // shared secret so only cron-job.org (who knows it) can trigger the check
+  RUN_SECRET,
   PORT = 3000,
 } = process.env;
 
@@ -33,7 +33,6 @@ function requireEnv() {
   }
 }
 
-// ---- Get an app-only Microsoft Graph access token (client credentials flow) ----
 async function getGraphToken() {
   const url = `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`;
   const params = new URLSearchParams();
@@ -46,7 +45,6 @@ async function getGraphToken() {
   return res.data.access_token;
 }
 
-// ---- Check the file itself is reachable (isolates file-access vs sheet-lookup errors) ----
 async function getFileMetadata(token) {
   const url = `https://graph.microsoft.com/v1.0/drives/${DRIVE_ID}/items/${ITEM_ID}`;
   const res = await axios.get(url, {
@@ -55,7 +53,6 @@ async function getFileMetadata(token) {
   return res.data;
 }
 
-// ---- List worksheet names in the workbook (helps confirm the exact name Graph sees) ----
 async function listWorksheetNames(token) {
   const url = `https://graph.microsoft.com/v1.0/drives/${DRIVE_ID}/items/${ITEM_ID}/workbook/worksheets`;
   const res = await axios.get(url, {
@@ -64,7 +61,6 @@ async function listWorksheetNames(token) {
   return (res.data.value || []).map((w) => w.name);
 }
 
-// ---- Read the whole used range of the target sheet ----
 async function readSheet(token) {
   const url = `https://graph.microsoft.com/v1.0/drives/${DRIVE_ID}/items/${ITEM_ID}/workbook/worksheets('${encodeURIComponent(
     SHEET_NAME
@@ -73,10 +69,9 @@ async function readSheet(token) {
   const res = await axios.get(url, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  return res.data.values; // array of arrays, first row = headers
+  return res.data.values;
 }
 
-// ---- Turn raw rows into objects keyed by header name (case-insensitive, trimmed) ----
 function rowsToObjects(values) {
   if (!values || values.length === 0) return [];
   const headers = values[0].map((h) => String(h || "").trim().toLowerCase());
@@ -95,7 +90,7 @@ function rowsToObjects(values) {
   const rows = [];
   for (let i = 1; i < values.length; i++) {
     const r = values[i];
-    if (!r || r.every((c) => c === "" || c === null)) continue; // skip empty rows
+    if (!r || r.every((c) => c === "" || c === null)) continue;
     rows.push({
       status: idx.status >= 0 ? String(r[idx.status] || "").trim() : "",
       owner: idx.owner >= 0 ? String(r[idx.owner] || "").trim() : "",
@@ -108,15 +103,12 @@ function rowsToObjects(values) {
   return rows;
 }
 
-// ---- Parse an Excel date value (serial number or string) into a JS Date ----
 function parseExcelDate(val) {
   if (val === null || val === undefined || val === "") return null;
   if (typeof val === "number") {
-    // Excel serial date (days since 1899-12-30)
     return new Date(Math.round((val - 25569) * 86400 * 1000));
   }
   const s = String(val).trim();
-  // Try dd/mm/yyyy first (common in this workbook), then fall back to native parsing
   const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
   if (m) {
     let [, d, mo, y] = m;
@@ -139,8 +131,9 @@ function severityEmoji(daysOverdue) {
   return "🟡";
 }
 
-// ---- Build the Telegram summary message ----
-function buildMessage(overdueRows, today) {
+const TELEGRAM_MAX_LEN = 3500;
+
+function buildMessages(overdueRows, today) {
   const dateStr = today.toLocaleDateString("th-TH", {
     day: "numeric",
     month: "short",
@@ -148,22 +141,37 @@ function buildMessage(overdueRows, today) {
   });
 
   if (overdueRows.length === 0) {
-    return `✅ TASK NX TEAM - วันนี้ไม่มีรายการ overdue\n🗓 ${dateStr}`;
+    return [`✅ TASK NX TEAM - วันนี้ไม่มีรายการ overdue\n🗓 ${dateStr}`];
   }
 
-  let msg = `📋 สรุป Case Overdue - TASK NX TEAM\n🗓 วันที่ ${dateStr}\n\n`;
-  msg += `พบรายการค้าง ${overdueRows.length} รายการ (เรียงจากเกินกำหนดมากสุด):\n\n`;
+  const header = `📋 สรุป Case Overdue - TASK NX TEAM\n🗓 วันที่ ${dateStr}\n\nพบรายการค้าง ${overdueRows.length} รายการ (เรียงจากเกินกำหนดมากสุด):\n\n`;
+  const footer = `\n—\nรวมทั้งหมด: ${overdueRows.length} รายการค้าง`;
 
-  overdueRows.forEach((r) => {
-    msg += `${severityEmoji(r.daysOverdue)} ${r.task || "(ไม่มีชื่องาน)"}\n`;
-    msg += `   👤 Owner: ${r.owner || "-"}\n`;
-    msg += `   🏢 Site: ${r.site || "-"}\n`;
-    msg += `   📌 Status: ${r.status || "-"}\n`;
-    msg += `   ⏰ เกินกำหนด ${r.daysOverdue} วัน (Target date: ${r.targetDateStr})\n\n`;
+  const itemTexts = overdueRows.map((r) => {
+    return `${severityEmoji(r.daysOverdue)} ${r.task || "(ไม่มีชื่องาน)"}\n   👤 Owner: ${
+      r.owner || "-"
+    }\n   🏢 Site: ${r.site || "-"}\n   📌 Status: ${r.status || "-"}\n   ⏰ เกินกำหนด ${
+      r.daysOverdue
+    } วัน (Target date: ${r.targetDateStr})\n\n`;
   });
 
-  msg += `—\nรวมทั้งหมด: ${overdueRows.length} รายการค้าง`;
-  return msg;
+  const messages = [];
+  let current = header;
+  let partNum = 1;
+
+  for (const item of itemTexts) {
+    if (current.length + item.length + footer.length > TELEGRAM_MAX_LEN) {
+      messages.push(current + `\n(ต่อหน้า ${partNum + 1}...)`);
+      partNum++;
+      current = `📋 สรุป Case Overdue - TASK NX TEAM (ต่อ ${partNum})\n\n` + item;
+    } else {
+      current += item;
+    }
+  }
+  current += footer;
+  messages.push(current);
+
+  return messages;
 }
 
 async function sendTelegram(text) {
@@ -172,6 +180,12 @@ async function sendTelegram(text) {
     chat_id: TELEGRAM_CHAT_ID,
     text,
   });
+}
+
+async function sendTelegramMessages(messages) {
+  for (const msg of messages) {
+    await sendTelegram(msg);
+  }
 }
 
 async function runCheck() {
@@ -211,7 +225,6 @@ async function runCheck() {
 
 app.get("/health", (req, res) => res.json({ ok: true }));
 
-// Diagnostic endpoint: checks file access and lists actual worksheet names Graph sees.
 app.get("/debug", async (req, res) => {
   try {
     requireEnv();
