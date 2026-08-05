@@ -13,7 +13,9 @@ const {
   SHEET_NAME = "TASK NX TEAM",
   TELEGRAM_BOT_TOKEN,
   TELEGRAM_CHAT_ID,
-  RUN_SECRET, // shared secret so only cron-job.org (who knows it) can trigger the check
+  RUN_SECRET,
+  SUPABASE_URL,
+  SUPABASE_SERVICE_KEY,
   PORT = 3000,
 } = process.env;
 
@@ -27,13 +29,14 @@ function requireEnv() {
     "TELEGRAM_BOT_TOKEN",
     "TELEGRAM_CHAT_ID",
     "RUN_SECRET",
+    "SUPABASE_URL",
+    "SUPABASE_SERVICE_KEY",
   ].filter((k) => !process.env[k]);
   if (missing.length) {
     throw new Error("Missing required env vars: " + missing.join(", "));
   }
 }
 
-// ---- Get an app-only Microsoft Graph access token (client credentials flow) ----
 async function getGraphToken() {
   const url = `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`;
   const params = new URLSearchParams();
@@ -46,7 +49,6 @@ async function getGraphToken() {
   return res.data.access_token;
 }
 
-// ---- Check the file itself is reachable (isolates file-access vs sheet-lookup errors) ----
 async function getFileMetadata(token) {
   const url = `https://graph.microsoft.com/v1.0/drives/${DRIVE_ID}/items/${ITEM_ID}`;
   const res = await axios.get(url, {
@@ -55,7 +57,6 @@ async function getFileMetadata(token) {
   return res.data;
 }
 
-// ---- List worksheet names in the workbook (helps confirm the exact name Graph sees) ----
 async function listWorksheetNames(token) {
   const url = `https://graph.microsoft.com/v1.0/drives/${DRIVE_ID}/items/${ITEM_ID}/workbook/worksheets`;
   const res = await axios.get(url, {
@@ -64,7 +65,6 @@ async function listWorksheetNames(token) {
   return (res.data.value || []).map((w) => w.name);
 }
 
-// ---- Read the whole used range of the target sheet ----
 async function readSheet(token) {
   const url = `https://graph.microsoft.com/v1.0/drives/${DRIVE_ID}/items/${ITEM_ID}/workbook/worksheets('${encodeURIComponent(
     SHEET_NAME
@@ -73,10 +73,9 @@ async function readSheet(token) {
   const res = await axios.get(url, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  return res.data.values; // array of arrays, first row = headers
+  return res.data.values;
 }
 
-// ---- Turn raw rows into objects keyed by header name (case-insensitive, trimmed) ----
 function rowsToObjects(values) {
   if (!values || values.length === 0) return [];
   const headers = values[0].map((h) => String(h || "").trim().toLowerCase());
@@ -90,12 +89,13 @@ function rowsToObjects(values) {
     task: findCol(["task detail", "task", "task/case"]),
     targetDate: findCol(["target date"]),
     remark: findCol(["remark", "comment"]),
+    csNumber: findCol(["cs number", "cs no", "cs no."]),
   };
 
   const rows = [];
   for (let i = 1; i < values.length; i++) {
     const r = values[i];
-    if (!r || r.every((c) => c === "" || c === null)) continue; // skip empty rows
+    if (!r || r.every((c) => c === "" || c === null)) continue;
     rows.push({
       status: idx.status >= 0 ? String(r[idx.status] || "").trim() : "",
       owner: idx.owner >= 0 ? String(r[idx.owner] || "").trim() : "",
@@ -103,20 +103,23 @@ function rowsToObjects(values) {
       task: idx.task >= 0 ? String(r[idx.task] || "").trim() : "",
       targetDateRaw: idx.targetDate >= 0 ? r[idx.targetDate] : null,
       remark: idx.remark >= 0 ? String(r[idx.remark] || "").trim() : "",
+      csNumber: idx.csNumber >= 0 ? String(r[idx.csNumber] || "").trim() : "",
     });
   }
   return rows;
 }
 
-// ---- Parse an Excel date value (serial number or string) into a JS Date ----
+function getCaseKey(row) {
+  if (row.csNumber) return `cs:${row.csNumber}`;
+  return `combo:${row.owner}|${row.site}|${row.task}`;
+}
+
 function parseExcelDate(val) {
   if (val === null || val === undefined || val === "") return null;
   if (typeof val === "number") {
-    // Excel serial date (days since 1899-12-30)
     return new Date(Math.round((val - 25569) * 86400 * 1000));
   }
   const s = String(val).trim();
-  // Try dd/mm/yyyy first (common in this workbook), then fall back to native parsing
   const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
   if (m) {
     let [, d, mo, y] = m;
@@ -139,8 +142,7 @@ function severityEmoji(daysOverdue) {
   return "🟡";
 }
 
-// ---- Build one or more Telegram messages (splits if the list would exceed Telegram's ~4096 char limit) ----
-const TELEGRAM_MAX_LEN = 3500; // leave headroom under the real 4096 limit
+const TELEGRAM_MAX_LEN = 3500;
 
 function buildMessages(overdueRows, today) {
   const dateStr = today.toLocaleDateString("th-TH", {
@@ -183,6 +185,116 @@ function buildMessages(overdueRows, today) {
   return messages;
 }
 
+function buildOwnerStatsMessage(overdueRows) {
+  const counts = {};
+  overdueRows.forEach((r) => {
+    const owner = r.owner || "(ไม่ระบุ)";
+    counts[owner] = (counts[owner] || 0) + 1;
+  });
+
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+
+  let msg = `📊 สรุปจำนวนเคส Overdue แยกตาม Owner\n\n`;
+  sorted.forEach(([owner, count]) => {
+    msg += `👤 ${owner}: ${count} เคส\n`;
+  });
+  msg += `\nรวมทั้งหมด: ${overdueRows.length} เคส`;
+  return msg;
+}
+
+function supabaseHeaders(extra = {}) {
+  return {
+    apikey: SUPABASE_SERVICE_KEY,
+    Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+    "Content-Type": "application/json",
+    ...extra,
+  };
+}
+
+async function fetchSnapshots(caseKeys) {
+  if (caseKeys.length === 0) return {};
+  const list = caseKeys.map((k) => `"${k.replace(/"/g, '""')}"`).join(",");
+  const url = `${SUPABASE_URL}/rest/v1/case_snapshots?case_key=in.(${encodeURIComponent(
+    list
+  )})&select=case_key,target_date,status`;
+  const res = await axios.get(url, { headers: supabaseHeaders() });
+  const map = {};
+  (res.data || []).forEach((row) => {
+    map[row.case_key] = row;
+  });
+  return map;
+}
+
+async function upsertSnapshots(snapshotRows) {
+  if (snapshotRows.length === 0) return;
+  const url = `${SUPABASE_URL}/rest/v1/case_snapshots`;
+  await axios.post(url, snapshotRows, {
+    headers: supabaseHeaders({
+      Prefer: "resolution=merge-duplicates,return=minimal",
+    }),
+  });
+}
+
+async function insertChangeLog(entries) {
+  if (entries.length === 0) return;
+  const url = `${SUPABASE_URL}/rest/v1/case_change_log`;
+  await axios.post(url, entries, {
+    headers: supabaseHeaders({ Prefer: "return=minimal" }),
+  });
+}
+
+async function cleanupOldData() {
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 86400 * 1000).toISOString();
+  const sixMonthsAgo = new Date(Date.now() - 182 * 86400 * 1000).toISOString();
+  try {
+    await axios.delete(
+      `${SUPABASE_URL}/rest/v1/case_snapshots?status=eq.success&last_seen_at=lt.${encodeURIComponent(
+        thirtyDaysAgo
+      )}`,
+      { headers: supabaseHeaders() }
+    );
+  } catch (e) {
+    console.error("cleanup case_snapshots failed:", e.message);
+  }
+  try {
+    await axios.delete(
+      `${SUPABASE_URL}/rest/v1/case_change_log?detected_at=lt.${encodeURIComponent(
+        sixMonthsAgo
+      )}`,
+      { headers: supabaseHeaders() }
+    );
+  } catch (e) {
+    console.error("cleanup case_change_log failed:", e.message);
+  }
+}
+
+async function getLastModifiedBy(token) {
+  const url = `https://graph.microsoft.com/v1.0/drives/${DRIVE_ID}/items/${ITEM_ID}?$select=lastModifiedBy,lastModifiedDateTime`;
+  const res = await axios.get(url, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return {
+    name: res.data.lastModifiedBy?.user?.displayName || "(ไม่ทราบ)",
+    dateTime: res.data.lastModifiedDateTime || null,
+  };
+}
+
+function buildFlaggedChangesMessage(flaggedChanges) {
+  if (flaggedChanges.length === 0) {
+    return `✅ ไม่พบการเลื่อน Target date ในวันนี้`;
+  }
+  let msg = `⚠️ พบการเลื่อน Target date (เลื่อนออกไปจากเดิม)\n\n`;
+  flaggedChanges.forEach((c) => {
+    msg += `🔸 ${c.task || "(ไม่มีชื่องาน)"}\n`;
+    msg += `   👤 Owner: ${c.owner || "-"}\n`;
+    msg += `   🏢 Site: ${c.site || "-"}\n`;
+    msg += `   📅 เดิม: ${c.oldDateStr} → ใหม่: ${c.newDateStr}\n`;
+    msg += `   ✏️ แก้ไขไฟล์ล่าสุดโดย: ${c.lastModifiedBy}\n\n`;
+  });
+  msg += `หมายเหตุ: "แก้ไขล่าสุดโดย" คือคนที่แก้ไฟล์ล่าสุดในภาพรวม อาจไม่ใช่คนที่แก้บรรทัดนี้เป๊ะๆ ถ้ามีหลายคนแก้ไฟล์วันเดียวกัน`;
+  return msg;
+}
+
 async function sendTelegram(text) {
   const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
   await axios.post(url, {
@@ -208,11 +320,83 @@ async function runCheck() {
   const twoMonthsAgo = new Date(today);
   twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2);
 
-  const overdueRows = rows
-    .map((r) => {
-      const targetDate = parseExcelDate(r.targetDateRaw);
-      return { ...r, targetDate };
-    })
+  const parsedRows = rows.map((r) => ({
+    ...r,
+    targetDate: parseExcelDate(r.targetDateRaw),
+  }));
+
+  const trackable = parsedRows.filter(
+    (r) => r.targetDate && r.status.trim().toLowerCase() !== "success"
+  );
+  const caseKeys = trackable.map(getCaseKey);
+  const uniqueKeys = [...new Set(caseKeys)];
+
+  let flaggedChanges = [];
+  let lastModifiedBy = { name: "(ไม่ทราบ)", dateTime: null };
+
+  try {
+    const snapshotMap = await fetchSnapshots(uniqueKeys);
+
+    try {
+      lastModifiedBy = await getLastModifiedBy(token);
+    } catch (e) {
+      console.error("getLastModifiedBy failed:", e.message);
+    }
+
+    const changeLogEntries = [];
+    const snapshotUpserts = [];
+    const seenKeys = new Set();
+
+    for (const r of trackable) {
+      const key = getCaseKey(r);
+      if (seenKeys.has(key)) continue;
+      seenKeys.add(key);
+
+      const newDateStr = r.targetDate.toISOString().slice(0, 10);
+      const existing = snapshotMap[key];
+
+      if (existing && existing.target_date && existing.target_date !== newDateStr) {
+        const oldDate = new Date(existing.target_date + "T00:00:00");
+        const pushedLater = r.targetDate.getTime() > oldDate.getTime();
+
+        changeLogEntries.push({
+          case_key: key,
+          owner_name: r.owner,
+          task: r.task,
+          old_target_date: existing.target_date,
+          new_target_date: newDateStr,
+          last_modified_by: lastModifiedBy.name,
+        });
+
+        if (pushedLater) {
+          flaggedChanges.push({
+            owner: r.owner,
+            site: r.site,
+            task: r.task,
+            oldDateStr: oldDate.toLocaleDateString("th-TH"),
+            newDateStr: r.targetDate.toLocaleDateString("th-TH"),
+            lastModifiedBy: lastModifiedBy.name,
+          });
+        }
+      }
+
+      snapshotUpserts.push({
+        case_key: key,
+        target_date: newDateStr,
+        status: r.status,
+        owner_name: r.owner,
+        last_seen_at: new Date().toISOString(),
+      });
+    }
+
+    await upsertSnapshots(snapshotUpserts);
+    await insertChangeLog(changeLogEntries);
+    await cleanupOldData();
+  } catch (e) {
+    console.error("change-detection step failed:", e.response?.data || e.message);
+  }
+
+  const overdueRows = parsedRows
     .filter((r) => {
       if (!r.targetDate) return false;
       const isSuccess = r.status.trim().toLowerCase() === "success";
@@ -228,13 +412,34 @@ async function runCheck() {
     .sort((a, b) => b.daysOverdue - a.daysOverdue);
 
   const messages = buildMessages(overdueRows, today);
-  await sendTelegramMessages(messages);
-  return { overdueCount: overdueRows.length, messageCount: messages.length };
+  const allMessages =
+    overdueRows.length > 0
+      ? [buildOwnerStatsMessage(overdueRows), ...messages]
+      : messages;
+
+  allMessages.push(buildFlaggedChangesMessage(flaggedChanges));
+
+  await sendTelegramMessages(allMessages);
+  return {
+    overdueCount: overdueRows.length,
+    flaggedChangeCount: flaggedChanges.length,
+    messageCount: allMessages.length,
+  };
 }
 
 app.get("/health", (req, res) => res.json({ ok: true }));
 
-// Diagnostic endpoint: checks file access and lists actual worksheet names Graph sees.
+app.get("/version", (req, res) =>
+  res.json({ version: "v3-with-flagged-changes-and-supabase" })
+);
+
+function shortError(e) {
+  const raw = e.response?.data
+    ? JSON.stringify(e.response.data)
+    : e.message || String(e);
+  return raw.length > 300 ? raw.slice(0, 300) + "...(truncated)" : raw;
+}
+
 app.get("/debug", async (req, res) => {
   try {
     requireEnv();
@@ -249,7 +454,7 @@ app.get("/debug", async (req, res) => {
       const meta = await getFileMetadata(token);
       fileInfo = { name: meta.name, id: meta.id, webUrl: meta.webUrl };
     } catch (e) {
-      fileError = e.response?.data || e.message;
+      fileError = shortError(e);
     }
 
     let sheetNames = null;
@@ -257,7 +462,7 @@ app.get("/debug", async (req, res) => {
     try {
       sheetNames = await listWorksheetNames(token);
     } catch (e) {
-      sheetError = e.response?.data || e.message;
+      sheetError = shortError(e);
     }
 
     res.json({
@@ -268,7 +473,7 @@ app.get("/debug", async (req, res) => {
       sheetError,
     });
   } catch (err) {
-    res.status(500).json({ error: err.response?.data || err.message });
+    res.status(500).json({ error: shortError(err) });
   }
 });
 
@@ -282,7 +487,7 @@ app.get("/run-check", async (req, res) => {
     res.json({ ok: true, ...result });
   } catch (err) {
     console.error(err.response?.data || err.message);
-    res.status(500).json({ ok: false, error: err.response?.data || err.message });
+    res.status(500).json({ ok: false, error: shortError(err) });
   }
 });
 
