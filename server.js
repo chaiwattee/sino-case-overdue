@@ -1,5 +1,7 @@
 const express = require("express");
 const axios = require("axios");
+const ExcelJS = require("exceljs");
+const FormData = require("form-data");
 
 const app = express();
 
@@ -13,7 +15,7 @@ const {
   SHEET_NAME = "TASK NX TEAM",
   TELEGRAM_BOT_TOKEN,
   TELEGRAM_CHAT_ID,
-  RUN_SECRET, // shared secret so only cron-job.org (who knows it) can trigger the check
+  RUN_SECRET,
   SUPABASE_URL,
   SUPABASE_SERVICE_KEY,
   PORT = 3000,
@@ -37,7 +39,6 @@ function requireEnv() {
   }
 }
 
-// ---- Get an app-only Microsoft Graph access token (client credentials flow) ----
 async function getGraphToken() {
   const url = `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`;
   const params = new URLSearchParams();
@@ -50,7 +51,6 @@ async function getGraphToken() {
   return res.data.access_token;
 }
 
-// ---- Check the file itself is reachable (isolates file-access vs sheet-lookup errors) ----
 async function getFileMetadata(token) {
   const url = `https://graph.microsoft.com/v1.0/drives/${DRIVE_ID}/items/${ITEM_ID}`;
   const res = await axios.get(url, {
@@ -59,7 +59,6 @@ async function getFileMetadata(token) {
   return res.data;
 }
 
-// ---- List worksheet names in the workbook (helps confirm the exact name Graph sees) ----
 async function listWorksheetNames(token) {
   const url = `https://graph.microsoft.com/v1.0/drives/${DRIVE_ID}/items/${ITEM_ID}/workbook/worksheets`;
   const res = await axios.get(url, {
@@ -68,7 +67,6 @@ async function listWorksheetNames(token) {
   return (res.data.value || []).map((w) => w.name);
 }
 
-// ---- Read the whole used range of the target sheet ----
 async function readSheet(token) {
   const url = `https://graph.microsoft.com/v1.0/drives/${DRIVE_ID}/items/${ITEM_ID}/workbook/worksheets('${encodeURIComponent(
     SHEET_NAME
@@ -77,10 +75,9 @@ async function readSheet(token) {
   const res = await axios.get(url, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  return res.data.values; // array of arrays, first row = headers
+  return res.data.values;
 }
 
-// ---- Turn raw rows into objects keyed by header name (case-insensitive, trimmed) ----
 function rowsToObjects(values) {
   if (!values || values.length === 0) return [];
   const headers = values[0].map((h) => String(h || "").trim().toLowerCase());
@@ -100,7 +97,7 @@ function rowsToObjects(values) {
   const rows = [];
   for (let i = 1; i < values.length; i++) {
     const r = values[i];
-    if (!r || r.every((c) => c === "" || c === null)) continue; // skip empty rows
+    if (!r || r.every((c) => c === "" || c === null)) continue;
     rows.push({
       status: idx.status >= 0 ? String(r[idx.status] || "").trim() : "",
       owner: idx.owner >= 0 ? String(r[idx.owner] || "").trim() : "",
@@ -114,21 +111,17 @@ function rowsToObjects(values) {
   return rows;
 }
 
-// ---- Build a stable key to identify the same case across daily runs ----
 function getCaseKey(row) {
   if (row.csNumber) return `cs:${row.csNumber}`;
   return `combo:${row.owner}|${row.site}|${row.task}`;
 }
 
-// ---- Parse an Excel date value (serial number or string) into a JS Date ----
 function parseExcelDate(val) {
   if (val === null || val === undefined || val === "") return null;
   if (typeof val === "number") {
-    // Excel serial date (days since 1899-12-30)
     return new Date(Math.round((val - 25569) * 86400 * 1000));
   }
   const s = String(val).trim();
-  // Try dd/mm/yyyy first (common in this workbook), then fall back to native parsing
   const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
   if (m) {
     let [, d, mo, y] = m;
@@ -151,8 +144,7 @@ function severityEmoji(daysOverdue) {
   return "🟡";
 }
 
-// ---- Build one or more Telegram messages (splits if the list would exceed Telegram's ~4096 char limit) ----
-const TELEGRAM_MAX_LEN = 3500; // leave headroom under the real 4096 limit
+const TELEGRAM_MAX_LEN = 3500;
 
 function buildMessages(overdueRows, today) {
   const dateStr = today.toLocaleDateString("th-TH", {
@@ -195,7 +187,6 @@ function buildMessages(overdueRows, today) {
   return messages;
 }
 
-// ---- Build a per-owner overdue count summary ----
 function buildOwnerStatsMessage(overdueRows) {
   const counts = {};
   overdueRows.forEach((r) => {
@@ -213,7 +204,6 @@ function buildOwnerStatsMessage(overdueRows) {
   return msg;
 }
 
-// ---- Supabase REST helpers (using service_role key, no extra SDK needed) ----
 function supabaseHeaders(extra = {}) {
   return {
     apikey: SUPABASE_SERVICE_KEY,
@@ -280,7 +270,6 @@ async function cleanupOldData() {
   }
 }
 
-// ---- Get who last modified the workbook file (file-level only, not per-cell) ----
 async function getLastModifiedBy(token) {
   const url = `https://graph.microsoft.com/v1.0/drives/${DRIVE_ID}/items/${ITEM_ID}?$select=lastModifiedBy,lastModifiedDateTime`;
   const res = await axios.get(url, {
@@ -308,10 +297,8 @@ function buildFlaggedChangesMessage(flaggedChanges) {
   return msg;
 }
 
-// ---- Date range helpers for weekly/monthly reports ----
 function getPreviousWeekRange(today) {
-  // Monday-Sunday of the week before the current one
-  const dayOfWeek = today.getDay(); // 0=Sun..6=Sat
+  const dayOfWeek = today.getDay();
   const daysSinceMonday = (dayOfWeek + 6) % 7;
   const thisMonday = new Date(today);
   thisMonday.setDate(today.getDate() - daysSinceMonday);
@@ -329,14 +316,17 @@ function getPreviousMonthRange(today) {
   return { start, end };
 }
 
-// ---- Build a report grouped by owner for a given date range ----
-function buildOwnerPeriodReport(parsedRows, today, range, label) {
-  const inRange = parsedRows.filter(
+function getRowsInRange(parsedRows, range) {
+  return parsedRows.filter(
     (r) =>
       r.targetDate &&
       r.targetDate.getTime() >= range.start.getTime() &&
       r.targetDate.getTime() <= range.end.getTime()
   );
+}
+
+function buildOwnerPeriodReport(parsedRows, today, range, label) {
+  const inRange = getRowsInRange(parsedRows, range);
 
   const byOwner = {};
   inRange.forEach((r) => {
@@ -377,6 +367,41 @@ function buildOwnerPeriodReport(parsedRows, today, range, label) {
   return msg;
 }
 
+async function buildExcelBuffer(rows, sheetTitle, includeDaysOverdue) {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet(sheetTitle.slice(0, 31));
+
+  const columns = [
+    { header: "Owner", key: "owner", width: 20 },
+    { header: "Site", key: "site", width: 20 },
+    { header: "Task/Case", key: "task", width: 35 },
+    { header: "Status", key: "status", width: 15 },
+    { header: "Target Date", key: "targetDateStr", width: 15 },
+  ];
+  if (includeDaysOverdue) {
+    columns.push({ header: "Days Overdue", key: "daysOverdue", width: 12 });
+  }
+  sheet.columns = columns;
+  sheet.getRow(1).font = { bold: true };
+
+  rows.forEach((r) => sheet.addRow(r));
+
+  return workbook.xlsx.writeBuffer();
+}
+
+async function sendTelegramDocument(buffer, filename, caption) {
+  const form = new FormData();
+  form.append("chat_id", TELEGRAM_CHAT_ID);
+  if (caption) form.append("caption", caption);
+  form.append("document", buffer, filename);
+
+  await axios.post(
+    `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument`,
+    form,
+    { headers: form.getHeaders() }
+  );
+}
+
 async function sendTelegram(text) {
   const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
   await axios.post(url, {
@@ -411,9 +436,6 @@ async function runCheck() {
   const twoMonthsAgo = new Date(today);
   twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2);
 
-  // ---- Change detection: track ALL non-success cases with a target date, ----
-  // not just currently-overdue ones (a date pushed forward could escape the
-  // overdue filter entirely, which is exactly the case we want to catch).
   const trackable = parsedRows.filter(
     (r) => r.targetDate && r.status.trim().toLowerCase() !== "success"
   );
@@ -438,7 +460,7 @@ async function runCheck() {
 
     for (const r of trackable) {
       const key = getCaseKey(r);
-      if (seenKeys.has(key)) continue; // avoid double-processing duplicate keys in one run
+      if (seenKeys.has(key)) continue;
       seenKeys.add(key);
 
       const newDateStr = r.targetDate.toISOString().slice(0, 10);
@@ -482,12 +504,9 @@ async function runCheck() {
     await insertChangeLog(changeLogEntries);
     await cleanupOldData();
   } catch (e) {
-    // Change-detection is a best-effort add-on: if Supabase has an issue,
-    // don't let it block the core overdue notification.
     console.error("change-detection step failed:", e.response?.data || e.message);
   }
 
-  // ---- Build the main overdue list (last 2 months, not yet success) ----
   const overdueRows = parsedRows
     .filter((r) => {
       if (!r.targetDate) return false;
@@ -512,6 +531,25 @@ async function runCheck() {
   allMessages.push(buildFlaggedChangesMessage(flaggedChanges));
 
   await sendTelegramMessages(allMessages);
+
+  if (overdueRows.length > 0) {
+    try {
+      const excelBuffer = await buildExcelBuffer(
+        overdueRows,
+        "Overdue Cases",
+        true
+      );
+      const dateTag = today.toISOString().slice(0, 10);
+      await sendTelegramDocument(
+        excelBuffer,
+        `overdue-cases-${dateTag}.xlsx`,
+        `📎 ไฟล์ Excel รายการ Case Overdue วันที่ ${today.toLocaleDateString("th-TH")}`
+      );
+    } catch (e) {
+      console.error("Excel export failed:", e.response?.data || e.message);
+    }
+  }
+
   return {
     overdueCount: overdueRows.length,
     flaggedChangeCount: flaggedChanges.length,
@@ -526,6 +564,25 @@ async function runWeeklyReport() {
   const range = getPreviousWeekRange(today);
   const message = buildOwnerPeriodReport(parsedRows, today, range, "รายสัปดาห์");
   await sendTelegram(message);
+
+  const inRange = getRowsInRange(parsedRows, range).map((r) => ({
+    ...r,
+    targetDateStr: r.targetDate.toLocaleDateString("th-TH"),
+  }));
+  if (inRange.length > 0) {
+    try {
+      const excelBuffer = await buildExcelBuffer(inRange, "Weekly Report", false);
+      const dateTag = today.toISOString().slice(0, 10);
+      await sendTelegramDocument(
+        excelBuffer,
+        `weekly-report-${dateTag}.xlsx`,
+        `📎 ไฟล์ Excel รายงานรายสัปดาห์`
+      );
+    } catch (e) {
+      console.error("Weekly Excel export failed:", e.response?.data || e.message);
+    }
+  }
+
   return { ok: true };
 }
 
@@ -536,16 +593,34 @@ async function runMonthlyReport() {
   const range = getPreviousMonthRange(today);
   const message = buildOwnerPeriodReport(parsedRows, today, range, "รายเดือน");
   await sendTelegram(message);
+
+  const inRange = getRowsInRange(parsedRows, range).map((r) => ({
+    ...r,
+    targetDateStr: r.targetDate.toLocaleDateString("th-TH"),
+  }));
+  if (inRange.length > 0) {
+    try {
+      const excelBuffer = await buildExcelBuffer(inRange, "Monthly Report", false);
+      const dateTag = today.toISOString().slice(0, 10);
+      await sendTelegramDocument(
+        excelBuffer,
+        `monthly-report-${dateTag}.xlsx`,
+        `📎 ไฟล์ Excel รายงานรายเดือน`
+      );
+    } catch (e) {
+      console.error("Monthly Excel export failed:", e.response?.data || e.message);
+    }
+  }
+
   return { ok: true };
 }
 
 app.get("/health", (req, res) => res.json({ ok: true }));
 
 app.get("/version", (req, res) =>
-  res.json({ version: "v3-with-flagged-changes-and-supabase" })
+  res.json({ version: "v5-with-excel-export" })
 );
 
-// Diagnostic endpoint: checks file access and lists actual worksheet names Graph sees.
 function shortError(e) {
   const raw = e.response?.data
     ? JSON.stringify(e.response.data)
