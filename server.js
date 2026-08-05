@@ -3,7 +3,6 @@ const axios = require("axios");
 
 const app = express();
 
-// ---- Config (all from environment variables) ----
 const {
   TENANT_ID,
   CLIENT_ID,
@@ -225,6 +224,13 @@ async function runCheck() {
 
 app.get("/health", (req, res) => res.json({ ok: true }));
 
+function shortError(e) {
+  const raw = e.response?.data
+    ? JSON.stringify(e.response.data)
+    : e.message || String(e);
+  return raw.length > 300 ? raw.slice(0, 300) + "...(truncated)" : raw;
+}
+
 app.get("/debug", async (req, res) => {
   try {
     requireEnv();
@@ -239,7 +245,7 @@ app.get("/debug", async (req, res) => {
       const meta = await getFileMetadata(token);
       fileInfo = { name: meta.name, id: meta.id, webUrl: meta.webUrl };
     } catch (e) {
-      fileError = e.response?.data || e.message;
+      fileError = shortError(e);
     }
 
     let sheetNames = null;
@@ -247,7 +253,7 @@ app.get("/debug", async (req, res) => {
     try {
       sheetNames = await listWorksheetNames(token);
     } catch (e) {
-      sheetError = e.response?.data || e.message;
+      sheetError = shortError(e);
     }
 
     res.json({
@@ -258,7 +264,7 @@ app.get("/debug", async (req, res) => {
       sheetError,
     });
   } catch (err) {
-    res.status(500).json({ error: err.response?.data || err.message });
+    res.status(500).json({ error: shortError(err) });
   }
 });
 
@@ -272,7 +278,7 @@ app.get("/run-check", async (req, res) => {
     res.json({ ok: true, ...result });
   } catch (err) {
     console.error(err.response?.data || err.message);
-    res.status(500).json({ ok: false, error: err.response?.data || err.message });
+    res.status(500).json({ ok: false, error: shortError(err) });
   }
 });
 
