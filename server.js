@@ -173,6 +173,23 @@ function buildMessages(overdueRows, today) {
   return messages;
 }
 
+function buildOwnerStatsMessage(overdueRows) {
+  const counts = {};
+  overdueRows.forEach((r) => {
+    const owner = r.owner || "(ไม่ระบุ)";
+    counts[owner] = (counts[owner] || 0) + 1;
+  });
+
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+
+  let msg = `📊 สรุปจำนวนเคส Overdue แยกตาม Owner\n\n`;
+  sorted.forEach(([owner, count]) => {
+    msg += `👤 ${owner}: ${count} เคส\n`;
+  });
+  msg += `\nรวมทั้งหมด: ${overdueRows.length} เคส`;
+  return msg;
+}
+
 async function sendTelegram(text) {
   const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
   await axios.post(url, {
@@ -218,8 +235,12 @@ async function runCheck() {
     .sort((a, b) => b.daysOverdue - a.daysOverdue);
 
   const messages = buildMessages(overdueRows, today);
-  await sendTelegramMessages(messages);
-  return { overdueCount: overdueRows.length, messageCount: messages.length };
+  const allMessages =
+    overdueRows.length > 0
+      ? [buildOwnerStatsMessage(overdueRows), ...messages]
+      : messages;
+  await sendTelegramMessages(allMessages);
+  return { overdueCount: overdueRows.length, messageCount: allMessages.length };
 }
 
 app.get("/health", (req, res) => res.json({ ok: true }));
