@@ -3,6 +3,7 @@ const axios = require("axios");
 
 const app = express();
 
+// ---- Config (all from environment variables) ----
 const {
   TENANT_ID,
   CLIENT_ID,
@@ -12,7 +13,7 @@ const {
   SHEET_NAME = "TASK NX TEAM",
   TELEGRAM_BOT_TOKEN,
   TELEGRAM_CHAT_ID,
-  RUN_SECRET,
+  RUN_SECRET, // shared secret so only cron-job.org (who knows it) can trigger the check
   PORT = 3000,
 } = process.env;
 
@@ -32,6 +33,7 @@ function requireEnv() {
   }
 }
 
+// ---- Get an app-only Microsoft Graph access token (client credentials flow) ----
 async function getGraphToken() {
   const url = `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`;
   const params = new URLSearchParams();
@@ -44,6 +46,7 @@ async function getGraphToken() {
   return res.data.access_token;
 }
 
+// ---- Check the file itself is reachable (isolates file-access vs sheet-lookup errors) ----
 async function getFileMetadata(token) {
   const url = `https://graph.microsoft.com/v1.0/drives/${DRIVE_ID}/items/${ITEM_ID}`;
   const res = await axios.get(url, {
@@ -52,6 +55,7 @@ async function getFileMetadata(token) {
   return res.data;
 }
 
+// ---- List worksheet names in the workbook (helps confirm the exact name Graph sees) ----
 async function listWorksheetNames(token) {
   const url = `https://graph.microsoft.com/v1.0/drives/${DRIVE_ID}/items/${ITEM_ID}/workbook/worksheets`;
   const res = await axios.get(url, {
@@ -60,6 +64,7 @@ async function listWorksheetNames(token) {
   return (res.data.value || []).map((w) => w.name);
 }
 
+// ---- Read the whole used range of the target sheet ----
 async function readSheet(token) {
   const url = `https://graph.microsoft.com/v1.0/drives/${DRIVE_ID}/items/${ITEM_ID}/workbook/worksheets('${encodeURIComponent(
     SHEET_NAME
@@ -68,9 +73,10 @@ async function readSheet(token) {
   const res = await axios.get(url, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  return res.data.values;
+  return res.data.values; // array of arrays, first row = headers
 }
 
+// ---- Turn raw rows into objects keyed by header name (case-insensitive, trimmed) ----
 function rowsToObjects(values) {
   if (!values || values.length === 0) return [];
   const headers = values[0].map((h) => String(h || "").trim().toLowerCase());
@@ -89,7 +95,7 @@ function rowsToObjects(values) {
   const rows = [];
   for (let i = 1; i < values.length; i++) {
     const r = values[i];
-    if (!r || r.every((c) => c === "" || c === null)) continue;
+    if (!r || r.every((c) => c === "" || c === null)) continue; // skip empty rows
     rows.push({
       status: idx.status >= 0 ? String(r[idx.status] || "").trim() : "",
       owner: idx.owner >= 0 ? String(r[idx.owner] || "").trim() : "",
@@ -102,12 +108,15 @@ function rowsToObjects(values) {
   return rows;
 }
 
+// ---- Parse an Excel date value (serial number or string) into a JS Date ----
 function parseExcelDate(val) {
   if (val === null || val === undefined || val === "") return null;
   if (typeof val === "number") {
+    // Excel serial date (days since 1899-12-30)
     return new Date(Math.round((val - 25569) * 86400 * 1000));
   }
   const s = String(val).trim();
+  // Try dd/mm/yyyy first (common in this workbook), then fall back to native parsing
   const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
   if (m) {
     let [, d, mo, y] = m;
@@ -130,7 +139,8 @@ function severityEmoji(daysOverdue) {
   return "🟡";
 }
 
-const TELEGRAM_MAX_LEN = 3500;
+// ---- Build one or more Telegram messages (splits if the list would exceed Telegram's ~4096 char limit) ----
+const TELEGRAM_MAX_LEN = 3500; // leave headroom under the real 4096 limit
 
 function buildMessages(overdueRows, today) {
   const dateStr = today.toLocaleDateString("th-TH", {
@@ -171,23 +181,6 @@ function buildMessages(overdueRows, today) {
   messages.push(current);
 
   return messages;
-}
-
-function buildOwnerStatsMessage(overdueRows) {
-  const counts = {};
-  overdueRows.forEach((r) => {
-    const owner = r.owner || "(ไม่ระบุ)";
-    counts[owner] = (counts[owner] || 0) + 1;
-  });
-
-  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-
-  let msg = `📊 สรุปจำนวนเคส Overdue แยกตาม Owner\n\n`;
-  sorted.forEach(([owner, count]) => {
-    msg += `👤 ${owner}: ${count} เคส\n`;
-  });
-  msg += `\nรวมทั้งหมด: ${overdueRows.length} เคส`;
-  return msg;
 }
 
 async function sendTelegram(text) {
@@ -235,23 +228,13 @@ async function runCheck() {
     .sort((a, b) => b.daysOverdue - a.daysOverdue);
 
   const messages = buildMessages(overdueRows, today);
-  const allMessages =
-    overdueRows.length > 0
-      ? [buildOwnerStatsMessage(overdueRows), ...messages]
-      : messages;
-  await sendTelegramMessages(allMessages);
-  return { overdueCount: overdueRows.length, messageCount: allMessages.length };
+  await sendTelegramMessages(messages);
+  return { overdueCount: overdueRows.length, messageCount: messages.length };
 }
 
 app.get("/health", (req, res) => res.json({ ok: true }));
 
-function shortError(e) {
-  const raw = e.response?.data
-    ? JSON.stringify(e.response.data)
-    : e.message || String(e);
-  return raw.length > 300 ? raw.slice(0, 300) + "...(truncated)" : raw;
-}
-
+// Diagnostic endpoint: checks file access and lists actual worksheet names Graph sees.
 app.get("/debug", async (req, res) => {
   try {
     requireEnv();
@@ -266,7 +249,7 @@ app.get("/debug", async (req, res) => {
       const meta = await getFileMetadata(token);
       fileInfo = { name: meta.name, id: meta.id, webUrl: meta.webUrl };
     } catch (e) {
-      fileError = shortError(e);
+      fileError = e.response?.data || e.message;
     }
 
     let sheetNames = null;
@@ -274,7 +257,7 @@ app.get("/debug", async (req, res) => {
     try {
       sheetNames = await listWorksheetNames(token);
     } catch (e) {
-      sheetError = shortError(e);
+      sheetError = e.response?.data || e.message;
     }
 
     res.json({
@@ -285,7 +268,7 @@ app.get("/debug", async (req, res) => {
       sheetError,
     });
   } catch (err) {
-    res.status(500).json({ error: shortError(err) });
+    res.status(500).json({ error: err.response?.data || err.message });
   }
 });
 
@@ -299,7 +282,7 @@ app.get("/run-check", async (req, res) => {
     res.json({ ok: true, ...result });
   } catch (err) {
     console.error(err.response?.data || err.message);
-    res.status(500).json({ ok: false, error: shortError(err) });
+    res.status(500).json({ ok: false, error: err.response?.data || err.message });
   }
 });
 
