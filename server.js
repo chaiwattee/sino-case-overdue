@@ -389,25 +389,67 @@ async function buildExcelBuffer(rows, sheetTitle, includeDaysOverdue) {
   return workbook.xlsx.writeBuffer();
 }
 
+// ---- Telegram helpers with rate-limit (429) retry + spacing between sends ----
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Minimum gap enforced between any two outgoing Telegram API calls,
+// to avoid tripping Telegram's per-chat rate limit in the first place.
+const TELEGRAM_MIN_GAP_MS = 1200;
+const TELEGRAM_MAX_RETRIES = 5;
+
+async function telegramRequestWithRetry(requestFn) {
+  let attempt = 0;
+  while (true) {
+    try {
+      return await requestFn();
+    } catch (e) {
+      const status = e.response?.status;
+      const retryAfterSec =
+        e.response?.data?.parameters?.retry_after ??
+        e.response?.headers?.["retry-after"];
+
+      if (status === 429 && attempt < TELEGRAM_MAX_RETRIES) {
+        attempt++;
+        const waitMs = (Number(retryAfterSec) || 5) * 1000 + 500; // small buffer
+        console.error(
+          `Telegram 429, retry ${attempt}/${TELEGRAM_MAX_RETRIES} after ${waitMs}ms`
+        );
+        await sleep(waitMs);
+        continue;
+      }
+      throw e;
+    }
+  }
+}
+
 async function sendTelegramDocument(buffer, filename, caption) {
+  await sleep(TELEGRAM_MIN_GAP_MS);
   const form = new FormData();
   form.append("chat_id", TELEGRAM_CHAT_ID);
   if (caption) form.append("caption", caption);
   form.append("document", buffer, filename);
 
-  await axios.post(
-    `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument`,
-    form,
-    { headers: form.getHeaders() }
+  await telegramRequestWithRetry(() =>
+    axios.post(
+      `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument`,
+      form,
+      { headers: form.getHeaders() }
+    )
   );
 }
 
 async function sendTelegram(text) {
+  await sleep(TELEGRAM_MIN_GAP_MS);
   const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-  await axios.post(url, {
-    chat_id: TELEGRAM_CHAT_ID,
-    text,
-  });
+  await telegramRequestWithRetry(() =>
+    axios.post(url, {
+      chat_id: TELEGRAM_CHAT_ID,
+      text,
+    })
+  );
 }
 
 async function sendTelegramMessages(messages) {
@@ -530,7 +572,13 @@ async function runCheck() {
 
   allMessages.push(buildFlaggedChangesMessage(flaggedChanges));
 
-  await sendTelegramMessages(allMessages);
+  let telegramError = null;
+  try {
+    await sendTelegramMessages(allMessages);
+  } catch (e) {
+    telegramError = e.response?.data || e.message;
+    console.error("sendTelegramMessages failed:", telegramError);
+  }
 
   if (overdueRows.length > 0) {
     try {
@@ -554,6 +602,7 @@ async function runCheck() {
     overdueCount: overdueRows.length,
     flaggedChangeCount: flaggedChanges.length,
     messageCount: allMessages.length,
+    telegramError,
   };
 }
 
@@ -618,7 +667,7 @@ async function runMonthlyReport() {
 app.get("/health", (req, res) => res.json({ ok: true }));
 
 app.get("/version", (req, res) =>
-  res.json({ version: "v5-with-excel-export" })
+  res.json({ version: "v6-telegram-retry" })
 );
 
 function shortError(e) {
