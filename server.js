@@ -17,7 +17,14 @@ app.set("trust proxy", true);
 
 app.use(router); // /health, /version, /run-* and /debug (secret-protected)
 app.use("/api", api); // dashboard API (basic auth)
-app.use(basicAuth, express.static(path.join(__dirname, "public"), { index: "index.html" }));
+app.use(
+  basicAuth,
+  express.static(path.join(__dirname, "public"), {
+    index: "index.html",
+    // Always revalidate, so a new release shows up without a hard refresh.
+    setHeaders: (res) => res.setHeader("Cache-Control", "no-cache"),
+  })
+);
 
 app.listen(config.port, () => {
   console.log(
