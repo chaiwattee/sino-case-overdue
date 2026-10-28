@@ -78,15 +78,47 @@
   function renderSources(sources) {
     if (!sources) return;
     document.getElementById("nav-sources").innerHTML =
-      "แหล่งข้อมูล (tab Case List)<br>" +
+      "ข้อมูลจาก tab Case List ของ " +
       sources
         .map((s) =>
           s.webUrl
-            ? `<a href="${esc(s.webUrl)}" target="_blank" rel="noopener">${esc(s.label)}</a>${s.error ? " ⚠" : ""}`
-            : `${esc(s.label)}${s.error ? " ⚠" : ""}`
+            ? `<a href="${esc(s.webUrl)}" target="_blank" rel="noopener">${esc(s.label)}</a>${s.error ? " (อ่านไม่ได้)" : ""}`
+            : `${esc(s.label)}${s.error ? " (อ่านไม่ได้)" : ""}`
         )
-        .join("<br>");
+        .join(", ");
   }
+
+  // Top bar: last sync time, source errors, and the dry-run banner.
+  async function refreshStatus() {
+    try {
+      const s = await api("/status");
+      const pill = document.getElementById("sync-pill");
+      const failed = (s.sources || []).filter((x) => x.error);
+      pill.classList.toggle("bad", !!s.error || failed.length > 0);
+      document.getElementById("sync-text").textContent = s.error
+        ? "อ่านข้อมูลไม่ได้"
+        : failed.length
+        ? `อ่านไม่ได้ ${failed.length} เอกสาร`
+        : s.syncedAt
+        ? `Sync ${fdt(s.syncedAt)}`
+        : "ยังไม่ได้ Sync";
+      document.getElementById("dry-banner").hidden = !s.dryRunEmail;
+      renderSources(s.sources);
+    } catch (e) {
+      /* the page itself shows the error */
+    }
+  }
+
+  (function themeToggle() {
+    const btn = document.getElementById("theme");
+    btn.onclick = () => {
+      const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+      document.documentElement.dataset.theme = next;
+      try {
+        localStorage.setItem("theme", next);
+      } catch (e) {}
+    };
+  })();
 
   const qs = (o) =>
     Object.entries(o)
@@ -160,12 +192,34 @@ ${showOwner ? `<td><a href="#/owner/${encodeURIComponent(c.ownerId)}" style="tex
     const failed = data.sources.filter((s) => s.error);
 
     const kpi = (stage, label, value, sub) =>
-      `<a class="kpi" href="#/cases?${qs({ stage: stage === "all" ? "" : stage, source: params.source, open: stage === "all" ? 1 : "" })}">
-<div class="l"><span class="dot d-${stage}" aria-hidden="true"></span>${label}</div><div class="v">${value}</div><div class="s">${sub}</div></a>`;
+      `<a class="kpi k-${stage}" href="#/cases?${qs({ stage: stage === "all" ? "" : stage, source: params.source, open: stage === "all" ? 1 : "" })}">
+<div class="l">${label}</div><div class="v">${value}</div><div class="s">${sub}</div></a>`;
+
+    // SLA runway: every open case placed on its day since Start date.
+    const zoneOf = (day) => (day < cfg.alert1Day ? "normal" : day < cfg.alert2Day ? "r1" : "r2");
+    const cols = [];
+    for (let day = 0; day <= cfg.slaDays; day++) cols.push({ day, zone: zoneOf(day), items: data.runway.filter((c) => c.age === day) });
+    const over = data.runway.filter((c) => c.age > cfg.slaDays).sort((a, b) => b.daysOverdue - a.daysOverdue);
+    const dotHtml = (c) =>
+      `<a class="rw-dot c-${c.stage}" href="#/owner/${encodeURIComponent(c.ownerId)}" title="${esc(
+        `${c.csNumber || "-"} · ${c.site || "-"} · ${c.owner || "-"} · วันที่ ${c.age}${c.daysOverdue ? ` (เกิน ${c.daysOverdue} วัน)` : ""}`
+      )}" aria-label="${esc(`${c.csNumber || "เคส"} ของ ${c.owner || "-"} วันที่ ${c.age}`)}"></a>`;
+    const dayLabel = (d) =>
+      d === 0 ? "เปิดเคส" : d === cfg.alert1Day ? "แจ้งรอบ 1" : d === cfg.alert2Day ? "แจ้งรอบ 2" : d === cfg.slaDays ? "ครบ Due" : "&nbsp;";
+    const runwayHtml = `<div class="runway-wrap"><div class="runway" role="img" aria-label="เคสที่ยังเปิดอยู่ แยกตามจำนวนวันนับจาก Start date">
+${cols
+  .map(
+    (c) => `<div class="rw-col"><div class="rw-count">${c.items.length || ""}</div><div class="rw-dots">${c.items.map(dotHtml).join("")}</div>
+<div class="rw-band z-${c.zone}"></div><div class="rw-day"><strong>วันที่ ${c.day}</strong>${dayLabel(c.day)}</div></div>`
+  )
+  .join("")}
+<div class="rw-col due"><div class="rw-count">${over.length || ""}</div><div class="rw-dots">${over.map(dotHtml).join("")}</div>
+<div class="rw-band z-overdue"></div><div class="rw-day"><strong>เกิน Due</strong>แจ้งทุกวัน</div></div>
+</div></div>`;
 
     $app.innerHTML = `
 <div class="head"><div><h1>ภาพรวมสถานะเคส</h1>
-<p>Sync ล่าสุด ${fdt(data.syncedAt)} · SLA ปิดเคสภายใน ${cfg.slaDays} วันนับจาก Start date · แจ้งเตือนวันที่ ${cfg.alert1Day}, ${cfg.alert2Day} และทุกวันหลังเกิน Due</p></div>
+<p>ทุกเคสต้องปิดภายใน ${cfg.slaDays} วันนับจาก Start date ระบบส่ง email ถึง Owner ในวันที่ ${cfg.alert1Day} วันที่ ${cfg.alert2Day} และทุกวันหลังเกิน Due</p></div>
 <div class="actions"><button class="btn" id="btn-sync" type="button">Sync ตอนนี้</button>
 <a class="btn" href="api/export?${qs({ from: daysAgo(29), to: daysAgo(0) })}">Export Excel (30 วัน)</a>
 <a class="btn primary" href="#/reports">ส่ง Report ให้ Manager</a></div></div>
@@ -183,9 +237,9 @@ ${kpi("r2", `แจ้งรอบ 2 (วันที่ ${cfg.alert2Day}–${cf
 ${kpi("overdue", "เกิน Due", k.overdue || 0, "แจ้งทุกวันจนกว่าจะปิด")}
 ${kpi("closed", "ปิดแล้ว (30 วัน)", k.sla.closed, k.sla.pct === null ? "-" : `ทัน SLA ${k.sla.pct}%`)}
 </div>
-<section class="card"><div class="title"><h2>อายุเคสที่ยังไม่ปิด</h2><span>${openTotal} เคส${k.no_start ? ` · ไม่มี Start date ${k.no_start}` : ""}</span></div>
-${openTotal ? `<div class="bar">${segs.map((s) => `<div class="b-${s}" style="width:${(k[s] / openTotal) * 100}%" title="${STAGE[s]} ${k[s]}">${k[s]}</div>`).join("")}</div>
-<div class="legend">${segs.map((s) => `<span><span class="dot d-${s}" aria-hidden="true"></span>${STAGE[s]}${RANGE[s] ? " · " + RANGE[s] : ""} · ${k[s]}</span>`).join("")}</div>` : `<div class="empty">ไม่มีเคสที่เปิดอยู่</div>`}
+<section class="card"><div class="title"><h2>SLA runway: เคสที่ยังเปิดอยู่ทั้งหมด</h2><span>1 จุด = 1 เคส · ชี้เพื่อดูรายละเอียด คลิกเพื่อไปหน้า Owner</span></div>
+${data.runway.length ? runwayHtml : `<div class="empty">ไม่มีเคสที่เปิดอยู่ เคสใหม่จะขึ้นที่นี่หลัง Sync</div>`}
+<div class="rw-zones">${segs.map((s) => `<span><span class="dot d-${s}" aria-hidden="true"></span>${STAGE[s]}${RANGE[s] ? ` (${RANGE[s]})` : ""}: ${k[s]}</span>`).join("")}</div>
 </section>
 <section class="card"><div class="title"><h2>สถานะแยกตาม Owner</h2><span>คลิกแถวเพื่อดูรายเคส</span></div>
 ${data.owners.length ? `<div class="tablewrap"><table style="min-width:820px"><thead><tr><th>Owner</th><th class="n">เปิดอยู่</th><th class="n">ปกติ</th><th class="n">แจ้งรอบ 1</th><th class="n">แจ้งรอบ 2</th><th class="n">เกิน Due</th><th class="n">ปิดทัน SLA (30 วัน)</th></tr></thead><tbody>
@@ -238,6 +292,7 @@ ${data.alertsToday
         const r = await api("/sync", { method: "POST" });
         toast(`Sync แล้ว ${r.cases} เคส${r.changes ? ` · พบการแก้ไขวันที่ ${r.changes} รายการ` : ""}`);
         await reload();
+        refreshStatus();
       } catch (e) {
         toast("Sync ไม่สำเร็จ: " + e.message, 6000);
         b.disabled = false;
@@ -314,12 +369,12 @@ ${data.alertsToday
 <a class="btn" href="api/export?${qs({ from: daysAgo(29), to: daysAgo(0), owner: o.id })}">Export เคสของ Owner นี้</a></div>
 </section>
 <div class="kpis">
-<div class="kpi"><div class="l"><span class="dot d-all" aria-hidden="true"></span>ยังไม่ปิด</div><div class="v">${k.open}</div></div>
-<div class="kpi"><div class="l"><span class="dot d-normal" aria-hidden="true"></span>ปกติ</div><div class="v">${k.normal}</div></div>
-<div class="kpi"><div class="l"><span class="dot d-r1" aria-hidden="true"></span>แจ้งรอบ 1</div><div class="v">${k.r1}</div></div>
-<div class="kpi"><div class="l"><span class="dot d-r2" aria-hidden="true"></span>แจ้งรอบ 2</div><div class="v">${k.r2}</div></div>
-<div class="kpi"><div class="l"><span class="dot d-overdue" aria-hidden="true"></span>เกิน Due</div><div class="v">${k.overdue}</div></div>
-<div class="kpi"><div class="l"><span class="dot d-closed" aria-hidden="true"></span>ปิดทัน SLA (30 วัน)</div><div class="v">${k.sla.pct === null ? "-" : k.sla.pct + "%"}</div><div class="s">${k.sla.onTime}/${k.sla.closed} เคส</div></div>
+<div class="kpi k-all"><div class="l">ยังไม่ปิด</div><div class="v">${k.open}</div></div>
+<div class="kpi k-normal"><div class="l">ปกติ</div><div class="v">${k.normal}</div></div>
+<div class="kpi k-r1"><div class="l">แจ้งรอบ 1</div><div class="v">${k.r1}</div></div>
+<div class="kpi k-r2"><div class="l">แจ้งรอบ 2</div><div class="v">${k.r2}</div></div>
+<div class="kpi k-overdue"><div class="l">เกิน Due</div><div class="v">${k.overdue}</div></div>
+<div class="kpi k-closed"><div class="l">ปิดทัน SLA (30 วัน)</div><div class="v">${k.sla.pct === null ? "-" : k.sla.pct + "%"}</div><div class="s">${k.sla.onTime} จาก ${k.sla.closed} เคส</div></div>
 </div>
 <section class="card"><div class="title"><h2>เคสที่ยังไม่ปิด</h2><span>เรียงจากเปิดนานสุด · Due = Start date + ${cfg.slaDays} วัน</span></div>${caseTable(open, { showOwner: false })}</section>
 <div class="grid2">
@@ -372,7 +427,7 @@ ${schedules
 <div class="actions"><button class="btn" type="button" data-edit="${s.id}">แก้ไข</button><button class="btn" type="button" data-test="${s.id}">ส่งทดสอบ</button><button class="btn danger" type="button" data-del="${s.id}">ลบ</button></div></div>`
   )
   .join("")}
-<button class="btn" type="button" id="add-sched" style="min-height:180px;border-style:dashed;justify-content:center">+ เพิ่มรอบส่ง Report</button>
+<button class="add" type="button" id="add-sched">เพิ่มรอบส่ง Report</button>
 </section>
 
 <section class="card"><h2>ส่ง Report / Export แบบ Manual</h2>
@@ -418,8 +473,8 @@ ${reports
       const b = ev.currentTarget;
       b.disabled = true;
       try {
-        await api("/reports/send", { method: "POST", body: JSON.stringify({ ...params(), recipients: m.recipients.value, title: "รายงานสถานะเคส" }) });
-        toast("ส่ง report แล้ว");
+        const r = await api("/reports/send", { method: "POST", body: JSON.stringify({ ...params(), recipients: m.recipients.value, title: "รายงานสถานะเคส" }) });
+        toast(r.dryRun ? "โหมดทดสอบ: บันทึกแล้วแต่ยังไม่ได้ส่ง email จริง" : `ส่ง report ถึง ${r.recipients.join(", ")} แล้ว`, 5000);
         viewReports();
       } catch (e) {
         toast("ส่งไม่สำเร็จ: " + e.message, 6000);
@@ -443,8 +498,8 @@ ${reports
           if (to === null) return;
           b.disabled = true;
           try {
-            await api(`/schedules/${b.dataset.test}/test`, { method: "POST", body: JSON.stringify(to ? { to } : {}) });
-            toast("ส่งทดสอบแล้ว");
+            const r = await api(`/schedules/${b.dataset.test}/test`, { method: "POST", body: JSON.stringify(to ? { to } : {}) });
+            toast(r.dryRun ? "โหมดทดสอบ: ยังไม่ได้ส่ง email จริง" : `ส่งทดสอบถึง ${r.recipients.join(", ")} แล้ว`, 5000);
             viewReports();
           } catch (e) {
             toast("ส่งไม่สำเร็จ: " + e.message, 6000);
@@ -533,6 +588,7 @@ ${reports
   async function route() {
     const { parts, params } = parseHash();
     window.scrollTo(0, 0);
+    refreshStatus();
     try {
       if (parts[0] === "owner") await viewOwner(parts[1] ? decodeURIComponent(parts[1]) : null);
       else if (parts[0] === "reports") await viewReports();

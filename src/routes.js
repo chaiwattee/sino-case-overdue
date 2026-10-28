@@ -182,7 +182,24 @@ api.get("/overview", wrap(async (req, res) => {
     syncedAt: st.syncedAt,
     syncError: st.error,
     sources: st.sources,
-    config: { slaDays: config.slaDays, alert1Day: config.alert1Day, alert2Day: config.alert2Day, alertCc: config.alertCc },
+    config: {
+      slaDays: config.slaDays,
+      alert1Day: config.alert1Day,
+      alert2Day: config.alert2Day,
+      alertCc: config.alertCc,
+      dryRunEmail: config.dryRunEmail,
+    },
+    runway: open
+      .filter((c) => c.age != null)
+      .map((c) => ({
+        csNumber: c.csNumber,
+        site: c.site,
+        owner: c.owner,
+        ownerId: ownerId(c),
+        age: c.age,
+        stage: c.stage,
+        daysOverdue: c.daysOverdue || 0,
+      })),
     kpis: { ...stageCounts(cases), sla: slaStats(cases) },
     owners: ownerRows,
     alertsToday: alerts,

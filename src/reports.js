@@ -239,8 +239,10 @@ async function sendReport({ title, recipients, cc, from, to, owner, attachExcel 
     : [];
   let ok = true;
   let error = null;
+  let dryRun = false;
   try {
-    await graph.sendMail({ to: toList, cc: ccList, subject, html, attachments });
+    const r = await graph.sendMail({ to: toList, cc: ccList, subject, html, attachments });
+    dryRun = !!r.dryRun;
   } catch (e) {
     ok = false;
     error = String(e.response?.data?.error?.message || e.message).slice(0, 500);
@@ -255,11 +257,11 @@ async function sendReport({ title, recipients, cc, from, to, owner, attachExcel 
       cc: ccList.join(","),
       file_name: attachExcel ? fileName : null,
       ok,
-      error,
+      error: dryRun ? "DRY_RUN_EMAIL=1 (ไม่ได้ส่งจริง)" : error,
     })
     .catch((e) => console.error("[report] log failed:", e.message));
   if (!ok) throw new Error(error);
-  return { ok, subject, recipients: toList };
+  return { ok, dryRun, subject, recipients: toList };
 }
 
 // ------------------------------------------------------------ Schedules
