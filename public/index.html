@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sino Case Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+  <nav class="side" aria-label="เมนูหลัก">
+    <div class="brand">Sino Case Tracker</div>
+    <a href="#/" data-nav="overview">ภาพรวม</a>
+    <a href="#/owner" data-nav="owner">ราย Owner</a>
+    <a href="#/reports" data-nav="reports">Report &amp; Export</a>
+    <a href="#/audit" data-nav="audit">ประวัติแก้ไขวันที่</a>
+    <div class="src" id="nav-sources">แหล่งข้อมูล<br>กำลังโหลด…</div>
+  </nav>
+  <main id="app"><div class="loading">กำลังโหลดข้อมูล…</div></main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

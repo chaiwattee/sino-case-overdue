@@ -1,14 +1,21 @@
 {
   "name": "sino-case-overdue",
-  "version": "1.0.0",
+  "version": "2.0.0",
+  "description": "Sino Case Tracker: Case List SLA alerts by email, dashboard, manager reports",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "mock": "MOCK_DATA=1 DASHBOARD_USER= PORT=3001 node server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=20"
   },
   "dependencies": {
-    "express": "^4.19.2",
     "axios": "^1.7.2",
     "exceljs": "^4.4.0",
-    "form-data": "^4.0.6"
+    "express": "^4.19.2",
+    "form-data": "^4.0.6",
+    "node-cron": "^3.0.3"
   }
 }
