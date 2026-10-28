@@ -102,6 +102,24 @@ async function sendDailySummary() {
 
   const messages = [msg];
 
+  // Cancel / Resolved per owner (closed, not counted as overdue) — carried over from v1.
+  const cr = {};
+  cases.forEach((c) => {
+    const s = c.status.toLowerCase();
+    if (s !== "cancel" && s !== "resolved") return;
+    const name = c.owner || "(ไม่ระบุ)";
+    cr[name] = cr[name] || { cancel: 0, resolved: 0 };
+    cr[name][s]++;
+  });
+  const crRows = Object.entries(cr).sort(
+    (a, b) => b[1].cancel + b[1].resolved - (a[1].cancel + a[1].resolved)
+  );
+  if (crRows.length) {
+    let t = `📌 สรุปเคส Cancel / Resolved แยกตาม Owner (ไม่นับเป็น Overdue)\n\n`;
+    crRows.forEach(([name, c]) => (t += `👤 ${name}: Resolved ${c.resolved} | Cancel ${c.cancel}\n`));
+    messages.push(t);
+  }
+
   const overdue = open.filter((c) => c.stage === "overdue").sort((a, b) => b.daysOverdue - a.daysOverdue);
   if (overdue.length) {
     const items = overdue.map(

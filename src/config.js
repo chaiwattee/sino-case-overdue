@@ -1,4 +1,14 @@
 // All configuration comes from environment variables (.env on the server).
+// Load .env next to server.js automatically (Node 22+), so starting with or
+// without --env-file both work. Variables already set are not overwritten.
+try {
+  const envPath = require("path").join(__dirname, "..", ".env");
+  if (!process.env.MOCK_DATA && require("fs").existsSync(envPath) && process.loadEnvFile) {
+    process.loadEnvFile(envPath);
+  }
+} catch (e) {
+  console.error("Could not load .env:", e.message);
+}
 process.env.TZ = process.env.TZ || "Asia/Bangkok";
 
 const env = process.env;
