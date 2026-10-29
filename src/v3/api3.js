@@ -286,17 +286,21 @@ function rangeFrom(src) {
 
 api.get("/reports/preview", wrap(async (req, res) => {
   const { from, to } = rangeFrom(req.query);
-  const cases = await visibleCases(req.user);
+  const sites = jobs.siteList(req.query.site);
+  let cases = jobs.filterSites(await visibleCases(req.user), sites);
+  if ((await perms.level(req.user, "export")) === "own" && (await perms.level(req.user, "reports_manage")) === "none") cases = cases.filter((c) => c.owner_id === req.user.id);
   const changes = await jobs.listChanges({ from: from.toISOString(), limit: 5000, caseIds: cases.map((c) => c.id) });
   const rep = await reports.buildReport({ from, to, owner: req.query.owner || undefined, cases, changes });
-  res.json({ rangeLabel: rep.rangeLabel, kpis: rep.kpis, owners: rep.owners, changes: rep.changes.length });
+  const customers = new Set([...rep.openedCases, ...rep.closedCases, ...rep.openCases].map((c) => c.site)).size;
+  res.json({ rangeLabel: rep.rangeLabel, kpis: rep.kpis, owners: rep.owners, changes: rep.changes.length, customers, sites });
 }));
 
 api.get("/export", wrap(async (req, res) => {
   const lvl = await perms.level(req.user, "export");
   if (lvl === "none") throw bad("ไม่มีสิทธิ์ Export", 403);
   const { from, to } = rangeFrom(req.query);
-  let cases = await visibleCases(req.user);
+  const sites = jobs.siteList(req.query.site);
+  let cases = jobs.filterSites(await visibleCases(req.user), sites);
   let owner = req.query.owner || undefined;
   if (lvl === "own") {
     cases = cases.filter((c) => c.owner_id === req.user.id);
@@ -304,23 +308,25 @@ api.get("/export", wrap(async (req, res) => {
   }
   const changes = await jobs.listChanges({ from: from.toISOString(), limit: 5000, caseIds: cases.map((c) => c.id) });
   const rep = await reports.buildReport({ from, to, owner, cases, changes });
-  const tag = `${d.toISODate(from)}_${d.toISODate(to)}`;
+  const safe = (x) => String(x).replace(/[^\p{L}\p{N}._-]+/gu, "-").slice(0, 40);
+  const tag = `${sites.length === 1 ? safe(sites[0]) + "_" : sites.length ? `${sites.length}-customers_` : ""}${d.toISODate(from)}_${d.toISODate(to)}`;
+  const disp = (name) => `attachment; filename="${name.replace(/[^\x20-\x7e]/g, "_")}"; filename*=UTF-8''${encodeURIComponent(name)}`;
   if (req.query.format === "csv") {
     const scope = new Map();
     [...rep.openedCases, ...rep.closedCases, ...rep.openCases].forEach((c) => scope.set(c.key, c));
     res.set("Content-Type", "text/csv; charset=utf-8");
-    res.set("Content-Disposition", `attachment; filename="case-export-${tag}.csv"`);
+    res.set("Content-Disposition", disp(`case-export-${tag}.csv`));
     return res.send(reports.casesCsv([...scope.values()]));
   }
-  const buf = await reports.reportWorkbook(rep);
+  const buf = await jobs.addCustomerSheet(await reports.reportWorkbook(rep), rep);
   res.set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-  res.set("Content-Disposition", `attachment; filename="case-export-${tag}.xlsx"`);
-  res.send(Buffer.from(buf));
+  res.set("Content-Disposition", disp(`case-export-${tag}.xlsx`));
+  res.send(buf);
 }));
 
 api.post("/reports/send", need("reports_manage"), wrap(async (req, res) => {
   const { from, to } = rangeFrom(req.body);
-  res.json(await jobs.sendReport({ title: req.body.title, recipients: req.body.recipients, cc: req.body.cc, from, to, owner: req.body.owner || undefined, attachExcel: req.body.attachExcel !== false, user: req.user }));
+  res.json(await jobs.sendReport({ title: req.body.title, recipients: req.body.recipients, cc: req.body.cc, from, to, owner: req.body.owner || undefined, sites: jobs.siteList(req.body.sites), attachExcel: req.body.attachExcel !== false, user: req.user }));
 }));
 api.get("/reports/history", need("reports_manage"), wrap(async (req, res) => {
   res.json({ reports: await all("SELECT * FROM report_log ORDER BY sent_at DESC LIMIT 50") });

@@ -470,6 +470,7 @@ ${allowNew ? `<span class="hint">พิมพ์ชื่อใหม่ได�
 <div class="head"><div><h1>${isNew ? "เปิดเคสใหม่" : `เคส <span class="mono" style="font-size:26px">${esc(c.csNumber || "#" + c.id)}</span>`}</h1>
 <p>${isNew ? "Start date จะบันทึกเป็นวันนี้อัตโนมัติ และ Due = Start date + " + cfg.slaDays + " วัน" : `${esc(c.sourceLabel)} · Owner ${esc(c.owner || "-")} · ${chip(c.stage)}`}</p></div>
 <div class="actions">
+${!isNew && c.site && lvl("export") === "all" ? `<a class="btn" href="#/reports?site=${encodeURIComponent(c.site)}">Export เคสของ ${esc(c.site)}</a>` : ""}
 ${!isNew && permsC.delete ? `<button class="btn danger" type="button" id="btn-del">ลบเคส</button>` : ""}
 ${!isNew && !closed && permsC.close ? `<button class="btn" type="button" id="btn-close" style="color:var(--normal-fg)">ปิดเคส</button>` : ""}
 ${!ro ? `<button class="btn primary" type="submit" form="cf">${isNew ? "เปิดเคส" : "บันทึก"}</button>` : ""}</div></div>
@@ -673,15 +674,17 @@ ${closed.length ? `<section class="card"><div class="title"><h2>ปิดแล�
   const DOW = ["", "จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์", "อาทิตย์"];
   const RANGE_TYPES = { prev_week: "สัปดาห์ก่อนหน้า (จ.–อา.)", last_7: "7 วันล่าสุด", prev_month: "เดือนก่อนหน้า", month_to_date: "ต้นเดือนถึงวันนี้", last_30: "30 วันล่าสุด", yesterday: "เมื่อวาน" };
 
-  async function viewReports() {
+  async function viewReports(params = {}) {
     setNav("reports");
     const manage = lvl("reports_manage") !== "none";
     const exp = lvl("export");
-    const [sch, hist, ov] = await Promise.all([
+    const [sch, hist, ov, lk] = await Promise.all([
       manage ? api("/schedules") : { schedules: [] },
       manage ? api("/reports/history") : { reports: [] },
       api("/overview"),
+      lookups(),
     ]);
+    const picked = (params && params.site ? String(params.site).split("|") : []).filter(Boolean);
     const schedules = sch.schedules;
     const ownerOpts = ov.owners.map((o) => `<option value="${esc(o.id)}">${esc(o.owner)}</option>`).join("");
     $app.innerHTML = `
@@ -698,6 +701,11 @@ ${exp !== "none" || manage ? `<section class="card"><h2>${manage ? "ส่ง Re
 <label class="f">ตั้งแต่วันที่<input type="date" name="from" value="${daysAgo(29)}" required></label>
 <label class="f">ถึงวันที่<input type="date" name="to" value="${daysAgo(0)}" required></label>
 ${exp === "own" ? "" : `<label class="f">Owner<select name="owner"><option value="">ทุกคน</option>${ownerOpts}</select></label>`}
+<div class="f" style="grid-column:1/-1"><label for="site-in">ลูกค้า / Site <span class="hint">(เว้นว่าง = ทุกลูกค้า เลือกได้หลายราย)</span></label>
+<div style="display:flex;gap:8px;flex-wrap:wrap"><input id="site-in" list="site-dl" placeholder="พิมพ์ชื่อลูกค้าแล้วกด Enter" style="flex:1 1 240px" autocomplete="off">
+<button class="btn" type="button" id="site-add">เพิ่ม</button></div>
+<datalist id="site-dl">${lk.site.map((x) => `<option value="${esc(x)}">`).join("")}</datalist>
+<div class="chips" id="site-chips" style="margin-top:4px"></div></div>
 <label class="f">รูปแบบไฟล์<select name="format"><option value="xlsx">Excel (.xlsx)</option><option value="csv">CSV</option></select></label>
 ${manage ? `<label class="f" style="grid-column:1/-1">ส่งถึง (คั่นด้วย , ถ้ามีหลายคน)<input type="text" name="recipients" placeholder="manager@sinostech.co.th"></label>` : ""}
 </form>
@@ -712,14 +720,40 @@ ${hist.reports.map((r) => `<tr><td>${fdt(r.sent_at)}</td><td>${esc(r.title)}</td
 
     const m = document.getElementById("manual");
     if (m) {
+      const sites = [...picked];
+      const chips = document.getElementById("site-chips");
+      const sin = document.getElementById("site-in");
+      const drawChips = () => {
+        chips.innerHTML = sites.length
+          ? sites.map((x, i) => `<span class="lk">${esc(x)} <button type="button" data-rm="${i}" aria-label="เอา ${esc(x)} ออก">×</button></span>`).join("") + `<button class="btn" type="button" id="site-clear" style="min-height:30px;padding:0 10px">ล้าง</button>`
+          : `<span class="hint">ทุกลูกค้า</span>`;
+        chips.querySelectorAll("[data-rm]").forEach((b) => (b.onclick = () => { sites.splice(Number(b.dataset.rm), 1); drawChips(); }));
+        const cl = document.getElementById("site-clear");
+        if (cl) cl.onclick = () => { sites.length = 0; drawChips(); };
+        document.getElementById("preview").innerHTML = "";
+      };
+      const addSite = () => {
+        const v = sin.value.trim();
+        if (!v) return;
+        const match = lk.site.find((x) => x.toLowerCase() === v.toLowerCase());
+        if (!match) return toast(`ไม่พบลูกค้า “${v}” ในรายการ เลือกจากรายการที่ขึ้นมา`);
+        if (!sites.includes(match)) sites.push(match);
+        sin.value = "";
+        drawChips();
+      };
+      sin.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); addSite(); } });
+      sin.addEventListener("change", () => { if (lk.site.some((x) => x.toLowerCase() === sin.value.trim().toLowerCase())) addSite(); });
+      document.getElementById("site-add").onclick = addSite;
+      drawChips();
       const params = () => ({ from: m.from.value, to: m.to.value, owner: m.owner ? m.owner.value : "" });
+      const siteQs = () => sites.map((x) => "&site=" + encodeURIComponent(x)).join("");
       const dl = document.getElementById("btn-dl");
-      if (dl) dl.onclick = () => (location.href = "api/export?" + qs({ ...params(), format: m.format.value }));
+      if (dl) dl.onclick = () => (location.href = "api/export?" + qs({ ...params(), format: m.format.value }) + siteQs());
       document.getElementById("btn-preview").onclick = async () => {
         try {
-          const p = await api("/reports/preview?" + qs(params()));
+          const p = await api("/reports/preview?" + qs(params()) + siteQs());
           const k = p.kpis;
-          document.getElementById("preview").innerHTML = `ช่วง ${esc(p.rangeLabel)}: เปิดใหม่ <strong>${k.opened}</strong> · ปิด <strong>${k.closed}</strong> (ทัน SLA ${k.slaPct === null ? "-" : k.slaPct + "%"}) · ยังเปิดอยู่ ${k.openNow} · เกิน Due ขณะนี้ <strong>${k.overdueNow}</strong>`;
+          document.getElementById("preview").innerHTML = `${sites.length ? `ลูกค้า ${esc(sites.join(", "))} · ` : `ทุกลูกค้า (${p.customers} ราย) · `}ช่วง ${esc(p.rangeLabel)}: เปิดใหม่ <strong>${k.opened}</strong> · ปิด <strong>${k.closed}</strong> (ทัน SLA ${k.slaPct === null ? "-" : k.slaPct + "%"}) · ยังเปิดอยู่ ${k.openNow} · เกิน Due ขณะนี้ <strong>${k.overdueNow}</strong>`;
         } catch (e) {
           toast(e.message, 6000);
         }
@@ -730,7 +764,7 @@ ${hist.reports.map((r) => `<tr><td>${fdt(r.sent_at)}</td><td>${esc(r.title)}</td
           if (!m.recipients.value.trim()) return toast("กรุณาใส่อีเมลผู้รับ");
           bs.disabled = true;
           try {
-            const r = await post("/reports/send", { ...params(), recipients: m.recipients.value, title: "รายงานสถานะเคส" });
+            const r = await post("/reports/send", { ...params(), sites, recipients: m.recipients.value, title: "รายงานสถานะเคส" });
             toast(r.dryRun ? "โหมดทดสอบ: บันทึกแล้วแต่ยังไม่ได้ส่ง email จริง" : `ส่ง report ถึง ${r.recipients.join(", ")} แล้ว`, 5000);
             viewReports();
           } catch (e) {
@@ -1306,7 +1340,7 @@ ${forced ? "" : `<label class="f">รหัสผ่านปัจจุบั�
         case "mine": return await viewMine(params);
         case "case": return await viewCase(parts[1] || "new");
         case "owner": return await viewOwner(parts[1] ? decodeURIComponent(parts[1]) : null);
-        case "reports": return await viewReports();
+        case "reports": return await viewReports(params);
         case "audit": return await viewAudit(params);
         case "cases": return await viewCases(params);
         case "users": return await viewUsers(params);

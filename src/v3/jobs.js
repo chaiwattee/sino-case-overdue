@@ -118,17 +118,72 @@ function splitList(s) {
     .filter((x) => /@/.test(x));
 }
 
-async function sendReport({ title, recipients, cc, from, to, owner, attachExcel = true, scheduleId = null, user = null }) {
-  const cases = await repo.loadCases(user);
-  const changes = await listChanges({ from: from.toISOString(), limit: 5000 });
+// ------------------------------------------------------------ customer (site) filter + summary sheet
+function siteList(v) {
+  const arr = Array.isArray(v) ? v : v == null || v === "" ? [] : [v];
+  return [...new Set(arr.map((x) => String(x).trim()).filter(Boolean))].slice(0, 100);
+}
+function filterSites(cases, sites) {
+  if (!sites.length) return cases;
+  const want = new Set(sites.map((x) => x.toLowerCase()));
+  return cases.filter((c) => want.has(String(c.site || "").toLowerCase()));
+}
+function sitesLabel(sites) {
+  if (!sites.length) return "";
+  return sites.length <= 3 ? sites.join(", ") : `${sites.slice(0, 3).join(", ")} และอีก ${sites.length - 3} ราย`;
+}
+/** Adds a per-customer summary sheet to a report workbook buffer. */
+async function addCustomerSheet(buf, rep) {
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(buf);
+  const by = new Map();
+  const row = (c) => {
+    const k = c.site || "(ไม่ระบุ)";
+    if (!by.has(k)) by.set(k, { site: k, opened: 0, closed: 0, onTime: 0, open: 0, overdue: 0 });
+    return by.get(k);
+  };
+  rep.openedCases.forEach((c) => row(c).opened++);
+  rep.closedCases.forEach((c) => {
+    const r = row(c);
+    r.closed++;
+    if (c.closedOnTime === true) r.onTime++;
+  });
+  rep.openCases.forEach((c) => {
+    const r = row(c);
+    r.open++;
+    if (c.stage === "overdue") r.overdue++;
+  });
+  const ws = wb.addWorksheet("สรุปรายลูกค้า", { views: [{ state: "frozen", ySplit: 1 }] });
+  ws.columns = [
+    { header: "ลูกค้า / Site", key: "site", width: 30 },
+    { header: "เปิดใหม่ในช่วง", key: "opened", width: 14 },
+    { header: "ปิดในช่วง", key: "closed", width: 12 },
+    { header: "ปิดทัน SLA", key: "onTime", width: 12 },
+    { header: "% ทัน SLA", key: "pct", width: 11 },
+    { header: "ยังเปิดอยู่", key: "open", width: 12 },
+    { header: "เกิน Due ขณะนี้", key: "overdue", width: 15 },
+  ];
+  ws.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
+  ws.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F3A5F" } };
+  [...by.values()]
+    .sort((a, b) => b.open + b.opened - (a.open + a.opened) || a.site.localeCompare(b.site))
+    .forEach((r) => ws.addRow({ ...r, pct: r.closed ? Math.round((r.onTime / r.closed) * 100) / 100 : null }));
+  ws.getColumn("pct").numFmt = "0%";
+  return Buffer.from(await wb.xlsx.writeBuffer());
+}
+
+async function sendReport({ title, recipients, cc, from, to, owner, sites = [], attachExcel = true, scheduleId = null, user = null }) {
+  const cases = filterSites(await repo.loadCases(user), sites);
+  const changes = await listChanges({ from: from.toISOString(), limit: 5000, caseIds: sites.length ? cases.map((c) => c.id) : undefined });
   const rep = await reports.buildReport({ from, to, owner, cases, changes });
-  const { subject, html } = reportEmail(rep, title || "รายงานสถานะเคส");
+  title = (title || "รายงานสถานะเคส") + (sites.length ? ` · ลูกค้า ${sitesLabel(sites)}` : "");
+  const { subject, html } = reportEmail(rep, title);
   const toList = splitList(recipients);
   const ccList = splitList(cc);
   if (!toList.length) throw Object.assign(new Error("ไม่มีอีเมลผู้รับ"), { status: 400 });
   const fileName = `case-report-${d.toISODate(from)}_${d.toISODate(to)}.xlsx`;
   const attachments = attachExcel
-    ? [{ name: fileName, contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer: await reports.reportWorkbook(rep) }]
+    ? [{ name: fileName, contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer: await addCustomerSheet(await reports.reportWorkbook(rep), rep) }]
     : [];
   let ok = true;
   let error = null;
@@ -142,7 +197,7 @@ async function sendReport({ title, recipients, cc, from, to, owner, attachExcel 
   await q(
     `INSERT INTO report_log (schedule_id, title, range_from, range_to, recipients, cc, file_name, ok, error)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-    [scheduleId, title || "รายงานสถานะเคส", d.toISODate(from), d.toISODate(to), toList.join(","), ccList.join(","),
+    [scheduleId, title, d.toISODate(from), d.toISODate(to), toList.join(","), ccList.join(","),
       attachExcel ? fileName : null, ok, dryRun ? "DRY_RUN_EMAIL=1 (ไม่ได้ส่งจริง)" : error]
   ).catch((e) => console.error("[v3 report] log:", e.message));
   if (!ok) throw new Error(error);
@@ -296,5 +351,5 @@ function startJobs() {
 
 module.exports = {
   startJobs, lastRuns, runAlerts, sendTelegram, sendReport, runDueSchedules, runRetention, runAnnual,
-  buildAnnualWorkbook, listChanges, teams, splitList, alertRules,
+  buildAnnualWorkbook, listChanges, teams, splitList, alertRules, siteList, filterSites, sitesLabel, addCustomerSheet,
 };
