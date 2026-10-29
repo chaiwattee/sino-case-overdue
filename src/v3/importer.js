@@ -64,7 +64,7 @@ async function importFromExcel(actor, { mode = "new" } = {}) {
           if (mode === "refresh" && untouched) {
             await c.query(
               `UPDATE cases SET status=$1, task=COALESCE(NULLIF($2,''), task), note=$3, end_date=$4,
-                 closed_at = CASE WHEN $4::date IS NULL THEN NULL ELSE COALESCE(closed_at, now()) END
+                 closed_at = CASE WHEN $4::date IS NULL THEN NULL ELSE COALESCE(closed_at, ($4::date + time '18:00') AT TIME ZONE 'Asia/Bangkok') END
                WHERE id=$5`,
               [row.status || "In Progress", row.task, row.note || null, endIso, existing.id]
             );
@@ -84,7 +84,7 @@ async function importFromExcel(actor, { mode = "new" } = {}) {
            ON CONFLICT DO NOTHING RETURNING id`,
           [row.source, row.csNumber || null, row.status || "In Progress", site, row.product || null, ownerId,
             row.task || row.detail || "(ไม่มีชื่องาน)", row.note || null, startIso,
-            d.toISODate(d.addDays(row.startDate, config.slaDays)), endIso, closed ? new Date() : null, legacy, actor?.id || null]
+            d.toISODate(d.addDays(row.startDate, config.slaDays)), endIso, closed ? (endIso ? new Date(endIso + "T18:00:00+07:00") : new Date()) : null, legacy, actor?.id || null]
         );
         if (!ins.rows[0]) {
           stat.skippedExisting++; // same CS number already exists in this team
