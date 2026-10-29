@@ -12,6 +12,8 @@ const perms = require("./perms");
 const repo = require("./caserepo");
 const jobs = require("./jobs");
 const { importFromExcel } = require("./importer");
+const { caseAlertEmail } = require("../emails");
+const { recipientsFor, splitList: splitEmails } = require("../alertRecipients");
 const userImport = require("./userimport");
 const { requireUser, tempPassword, createResetLink, ssoReady } = require("./auth");
 
@@ -99,7 +101,7 @@ api.get("/overview", wrap(async (req, res) => {
     syncedAt: new Date().toISOString(),
     syncError: null,
     sources: teams,
-    config: { slaDays: config.slaDays, alert1Day: config.alert1Day, alert2Day: config.alert2Day, alertCc: config.alertCc, dryRunEmail: config.dryRunEmail },
+    config: { slaDays: config.slaDays, alert1Day: config.alert1Day, alert2Day: config.alert2Day, alertCc: config.alertCc, alertRules: await jobs.alertRules(), dryRunEmail: config.dryRunEmail },
     kpis: { ...stageCounts(cases), sla: slaStats(cases) },
     owners: ownerRows,
     alertsToday: alerts.map((a) => ({ ...a, case_key: `v3:${a.case_id}` })),
@@ -527,6 +529,40 @@ api.put("/permissions", need("users_manage"), wrap(async (req, res) => {
   res.json({ ok: true, matrix: await perms.matrix() });
 }));
 
+
+// ------------------------------------------------------------ owner alert email: preview + test send
+async function sampleCase(type) {
+  const cases = await repo.loadCases(null, { where: "c.closed_at IS NULL" });
+  const real = cases.find((c) => c.stage === type);
+  if (real) return { c: real, sample: false };
+  const age = type === "r1" ? config.alert1Day : type === "r2" ? config.alert2Day : config.slaDays + 2;
+  const start = d.addDays(d.today(), -age);
+  return {
+    sample: true,
+    c: {
+      key: "sample", id: 0, csNumber: "CS0000000", site: "ลูกค้าตัวอย่าง", task: "ตัวอย่างงาน", status: "In Progress",
+      owner: "Owner ตัวอย่าง", ownerEmail: "owner@sinostech.co.th", source: "ENGAGE", sourceLabel: "Engage / NRX / CXone",
+      startDate: d.toISODate(start), dueDate: d.toISODate(d.addDays(start, config.slaDays)), age, stage: type,
+      daysLeft: Math.max(0, config.slaDays - age), daysOverdue: Math.max(0, age - config.slaDays),
+      caseUrl: `${config3.baseUrl}/#/mine`,
+    },
+  };
+}
+api.get("/alert-email/preview", need("settings_manage"), wrap(async (req, res) => {
+  const type = ["r1", "r2", "overdue"].includes(req.query.type) ? req.query.type : "r1";
+  const { c, sample } = await sampleCase(type);
+  const { subject, html } = caseAlertEmail(c, type);
+  const r = recipientsFor(c, type, await jobs.alertRules());
+  res.json({ type, sample, subject, html, to: r.to, cc: r.cc, case: c.csNumber });
+}));
+api.post("/alert-email/test", need("settings_manage"), wrap(async (req, res) => {
+  const type = ["r1", "r2", "overdue"].includes(req.body?.type) ? req.body.type : "r1";
+  const { c } = await sampleCase(type);
+  const { subject, html } = caseAlertEmail(c, type);
+  const r = await graph.sendMail({ to: [req.user.email], cc: [], subject: `[ทดสอบ] ${subject}`, html });
+  res.json({ ok: true, to: req.user.email, dryRun: !!r.dryRun });
+}));
+
 // ------------------------------------------------------------ settings (admin)
 api.get("/settings", need("settings_manage"), wrap(async (req, res) => {
   const years = Number(await getSetting("retention_years", 2));
@@ -541,6 +577,7 @@ api.get("/settings", need("settings_manage"), wrap(async (req, res) => {
   res.json({
     retentionYears: years,
     annual: await getSetting("annual_report", { recipients: "", cc: "" }),
+    alertEmail: await jobs.alertRules(),
     lookups, stats: { ...stats, dbSize: size.size }, annualReports: annual, jobs: config3.jobs,
   });
 }));
@@ -550,6 +587,14 @@ api.put("/settings", need("settings_manage"), wrap(async (req, res) => {
     const y = Number(b.retentionYears);
     if (![1, 2, 3, 5].includes(y)) throw bad("ระยะเวลาเก็บข้อมูลต้องเป็น 1, 2, 3 หรือ 5 ปี");
     await setSetting("retention_years", y);
+  }
+  if (b.alertEmail) {
+    const a = b.alertEmail;
+    const bads = String(a.cc || "").concat(",", a.fallback || "").split(/[,;\s]+/).filter((x) => x && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x));
+    if (bads.length) throw bad(`อีเมลไม่ถูกต้อง: ${bads.join(", ")}`);
+    const ccTypes = (Array.isArray(a.ccTypes) ? a.ccTypes : []).filter((t) => ["r1", "r2", "overdue"].includes(t));
+    if (!splitEmails(a.fallback).length && !splitEmails(a.cc).length) throw bad("ต้องมีอีเมลอย่างน้อย 1 อีเมล สำหรับเคสที่ไม่มีอีเมล Owner");
+    await setSetting("alert_email", { cc: splitEmails(a.cc).join(", "), ccTypes, fallback: splitEmails(a.fallback).join(", ") });
   }
   if (b.annual) await setSetting("annual_report", { recipients: String(b.annual.recipients || ""), cc: String(b.annual.cc || "") });
   await audit(req.user, "settings_update", null, b);

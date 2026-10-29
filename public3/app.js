@@ -253,7 +253,7 @@ ${data.owners.map((o) => `<tr class="click" data-href="#/owner/${encodeURICompon
 <td class="n">${o.sla.pct === null ? "-" : `${o.sla.pct}% <span class="muted">(${o.sla.onTime}/${o.sla.closed})</span>`}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">ยังไม่มีเคส</div>`}
 </section>
 ${data.topCases.length ? `<section class="card"><div class="title"><h2>เคสที่ต้องตามด่วน</h2><span>แจ้งรอบ 2 และเกิน Due · 10 อันดับแรก</span></div>${caseTable(data.topCases)}</section>` : ""}
-<section class="card"><div class="title"><h2>Email แจ้งเตือนที่ส่งวันนี้</h2><span>ถึง Owner · CC ${esc((cfg.alertCc || []).join(", "))}</span></div>
+<section class="card"><div class="title"><h2>Email แจ้งเตือนที่ส่งวันนี้</h2><span>${(() => { const r = cfg.alertRules || {}; const t = (r.ccTypes || []).map((x) => ALERT[x]); return r.cc && t.length ? `ถึง Owner · CC ${esc(r.cc)} เฉพาะ${esc(t.join(", "))}` : "ถึง Owner เท่านั้น"; })()}</span></div>
 ${data.alertsToday.length ? `<div class="tablewrap"><table style="min-width:720px"><thead><tr><th>เวลา</th><th>เลขเคส</th><th>ลูกค้า</th><th>Owner</th><th>ประเภท</th><th>ผล</th></tr></thead><tbody>
 ${data.alertsToday.map((a) => `<tr><td>${fdt(a.sent_at)}</td><td><a class="mono" href="#/case/${a.case_id}">${esc(a.cs_number || "#" + a.case_id)}</a></td><td>${esc(a.site || "-")}</td><td>${esc(a.owner || "-")}</td>
 <td>${chip(a.alert_type, ALERT[a.alert_type])}</td><td>${a.ok ? chip("ok", "ส่งแล้ว") : `<span class="chip c-fail" title="${esc(a.error)}">ส่งไม่สำเร็จ</span>`}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">วันนี้ยังไม่มีการส่ง email แจ้งเตือน</div>`}
@@ -1104,6 +1104,18 @@ ${data.perms.map((p) => `<tr><td><div style="font-weight:500">${esc(p.label)}</d
     $app.innerHTML = `
 <div class="head"><div><h1>ตั้งค่าระบบ</h1><p>แทน tab Settings ในไฟล์ Excel เดิม แก้ได้เฉพาะ Admin</p></div></div>
 ${newSites.length ? `<div class="banner warn">มีรายการที่ผู้ใช้เพิ่มใหม่ ${newSites.length} รายการ รอตรวจ (มีป้าย “ใหม่”) กด “แก้” เพื่อยืนยัน แก้ชื่อ หรือรวมกับรายการเดิม</div>` : ""}
+<section class="card" id="ae"><div class="title"><h2>Email แจ้งเตือน Owner</h2><span>ผู้รับ email แจ้งเตือนแต่ละรอบ</span></div>
+<div class="tablewrap"><table style="min-width:720px"><thead><tr><th>รอบ</th><th>ส่งเมื่อ</th><th>ถึง</th><th style="text-align:center">CC รายชื่อด้านล่าง</th><th></th></tr></thead><tbody>
+${[["r1", `วันที่ ${cfg.alert1Day} (ครั้งเดียว)`], ["r2", `วันที่ ${cfg.alert2Day} (ครั้งเดียว)`], ["overdue", `ทุกวันหลังเกิน Due (วันที่ ${cfg.slaDays + 1} ขึ้นไป)`]].map(([t, when]) => `<tr>
+<td>${chip(t, ALERT[t])}</td><td>${when}</td><td>Owner ของเคส</td>
+<td style="text-align:center"><label class="chk" style="justify-content:center"><input type="checkbox" name="cct" value="${t}" ${(s.alertEmail.ccTypes || []).includes(t) ? "checked" : ""}><span class="sr">CC ใน${ALERT[t]}</span></label></td>
+<td style="text-align:right;white-space:nowrap"><button class="btn" type="button" data-prev="${t}" style="min-height:34px">ดูตัวอย่าง</button> <button class="btn" type="button" data-testmail="${t}" style="min-height:34px">ส่งทดสอบถึงฉัน</button></td></tr>`).join("")}
+</tbody></table></div>
+<div class="formgrid">
+<label class="f">CC (คั่นด้วย , ถ้ามีหลายคน)<input id="ae-cc" value="${esc(s.alertEmail.cc || "")}" placeholder="engineer@sinostech.co.th"></label>
+<label class="f">ส่งถึงใครเมื่อเคสไม่มีอีเมล Owner<input id="ae-fb" value="${esc(s.alertEmail.fallback || "")}" placeholder="engineer@sinostech.co.th"></label></div>
+<p class="hint" style="margin:0">ติ๊กช่อง CC เฉพาะรอบที่ต้องการให้หัวหน้าหรือทีมเห็นด้วย ไม่ติ๊ก = ส่งถึง Owner คนเดียว Owner ไม่ถูก CC ซ้ำถ้าอีเมลอยู่ในรายชื่อ CC มีผลตั้งแต่รอบส่งถัดไป</p>
+<div class="actions"><button class="btn primary" type="button" id="ae-save">บันทึกผู้รับ email</button></div></section>
 <section class="card"><div class="title"><h2>นำเข้าเคสจาก Excel</h2><span>ใช้ช่วงเปลี่ยนจาก Excel มาเป็นหน้าเว็บ</span></div>
 <p class="muted" style="margin:0;font-size:14px">อ่าน tab Case List ทั้ง 3 เอกสาร แล้วเพิ่มเคสที่ยังไม่มีในระบบ เคสที่มีอยู่แล้วจะไม่ถูกนำเข้าซ้ำ Owner ที่ยังไม่มีบัญชีจะถูกสร้างเป็น Engineer (บัญชี Microsoft) ให้อัตโนมัติ</p>
 <div class="actions"><button class="btn" type="button" id="imp-new">นำเข้าเคสใหม่จาก Excel</button><button class="btn" type="button" id="imp-refresh">นำเข้า + อัปเดตเคสที่ยังไม่ถูกแก้บนเว็บ</button></div>
@@ -1131,6 +1143,43 @@ ${s.annualReports.map((a) => `<tr><td style="font-weight:600">${a.year + 543} ($
 </section>
 <dialog id="dlg"></dialog>`;
 
+    document.getElementById("ae-save").onclick = async () => {
+      const ccTypes = [...document.querySelectorAll("input[name=cct]:checked")].map((x) => x.value);
+      try {
+        await post("/settings", { alertEmail: { cc: document.getElementById("ae-cc").value, fallback: document.getElementById("ae-fb").value, ccTypes } }, "PUT");
+        toast(ccTypes.length ? `บันทึกแล้ว · CC เฉพาะ${ccTypes.map((t) => ALERT[t]).join(", ")}` : "บันทึกแล้ว · ทุกรอบส่งถึง Owner คนเดียว", 5000);
+      } catch (e) {
+        toast(e.message, 6000);
+      }
+    };
+    $app.querySelectorAll("[data-prev]").forEach((b) => (b.onclick = async () => {
+      try {
+        const p = await api("/alert-email/preview?type=" + b.dataset.prev);
+        const dlg = document.getElementById("dlg");
+        dlg.classList.add("wide");
+        dlg.innerHTML = `<form class="card" method="dialog"><h2>ตัวอย่าง email ${ALERT[p.type]}</h2>
+<div class="stat2" style="grid-template-columns:1fr"><div><div class="k">หัวเรื่อง</div><div style="font-weight:600">${esc(p.subject)}</div></div>
+<div><div class="k">ถึง</div><div>${esc(p.to.join(", ") || "-")}</div></div><div><div class="k">CC</div><div>${esc(p.cc.join(", ") || "ไม่มี")}</div></div></div>
+<p class="hint" style="margin:0">${p.sample ? "ใช้ข้อมูลตัวอย่าง เพราะตอนนี้ไม่มีเคสที่อยู่ในรอบนี้" : `ใช้ข้อมูลจริงของเคส ${esc(p.case || "")}`} · ผู้รับแสดงตามค่าที่บันทึกไว้แล้ว</p>
+<iframe title="ตัวอย่าง email" sandbox="" style="width:100%;height:56vh;border:1px solid var(--line);border-radius:10px;background:#fff"></iframe>
+<div class="right"><button class="btn primary" value="ok">ปิด</button></div></form>`;
+        dlg.querySelector("iframe").srcdoc = p.html;
+        dlg.onclose = () => dlg.classList.remove("wide");
+        dlg.showModal();
+      } catch (e) {
+        toast(e.message, 6000);
+      }
+    }));
+    $app.querySelectorAll("[data-testmail]").forEach((b) => (b.onclick = async () => {
+      b.disabled = true;
+      try {
+        const r = await post("/alert-email/test", { type: b.dataset.testmail });
+        toast(r.dryRun ? "โหมดทดสอบ: ยังไม่ได้ส่ง email จริง" : `ส่งตัวอย่างถึง ${r.to} แล้ว`, 5000);
+      } catch (e) {
+        toast("ส่งไม่สำเร็จ: " + e.message, 6000);
+      }
+      b.disabled = false;
+    }));
     document.getElementById("save-set").onclick = async () => {
       try {
         await post("/settings", { retentionYears: Number(document.getElementById("ret").value), annual: { recipients: document.getElementById("an-to").value, cc: document.getElementById("an-cc").value } }, "PUT");

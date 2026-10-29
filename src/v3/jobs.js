@@ -6,6 +6,7 @@ const { config3 } = require("./config3");
 const graph = require("../graph");
 const { caseAlertEmail, reportEmail } = require("../emails");
 const { alertFor } = require("../alerts");
+const { recipientsFor, defaultRules, splitList: splitEmails } = require("../alertRecipients");
 const reports = require("../reports");
 const telegram = require("../telegram");
 const d = require("../dates");
@@ -47,6 +48,11 @@ async function listChanges({ from, limit = 500, caseIds } = {}) {
 }
 
 // ------------------------------------------------------------ owner alerts
+async function alertRules() {
+  const def = defaultRules();
+  const s = await getSetting("alert_email", null);
+  return s ? { cc: s.cc, ccTypes: s.ccTypes || [], fallback: s.fallback } : { cc: def.cc.join(", "), ccTypes: def.ccTypes, fallback: def.fallback.join(", ") };
+}
 async function runAlerts({ dryRun = false } = {}) {
   const cases = await repo.loadCases(null, { where: "c.closed_at IS NULL" });
   const todayIso = d.toISODate(d.today());
@@ -61,12 +67,12 @@ async function runAlerts({ dryRun = false } = {}) {
     result.items = todo.map((x) => ({ case: x.c.csNumber || x.c.id, owner: x.c.owner, type: x.type }));
     return result;
   }
+  const rules = await alertRules();
   for (const x of todo) {
     const c = x.c;
     const { subject, html } = caseAlertEmail(c, x.type);
-    const to = c.ownerEmail ? [c.ownerEmail] : config.alertCc;
-    const cc = c.ownerEmail ? config.alertCc : [];
-    const finalSubject = c.ownerEmail ? subject : `[ไม่พบอีเมล Owner] ${subject}`;
+    const { to, cc, noOwner } = recipientsFor(c, x.type, rules);
+    const finalSubject = noOwner ? `[ไม่พบอีเมล Owner] ${subject}` : subject;
     let ok = true;
     let error = null;
     let dry = false;
@@ -290,5 +296,5 @@ function startJobs() {
 
 module.exports = {
   startJobs, lastRuns, runAlerts, sendTelegram, sendReport, runDueSchedules, runRetention, runAnnual,
-  buildAnnualWorkbook, listChanges, teams, splitList,
+  buildAnnualWorkbook, listChanges, teams, splitList, alertRules,
 };

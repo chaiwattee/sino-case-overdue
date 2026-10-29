@@ -75,3 +75,12 @@ test("start date edit is detected and logged", async () => {
   // Target date follows the formula, so it must not be reported separately.
   assert.ok(!r.changes.find((x) => x.case_key === c.key && x.field === "target_date"));
 });
+
+test("alert recipients: round 1 goes to owner only by default", () => {
+  const { recipientsFor } = require("../src/alertRecipients");
+  const rules = { cc: "engineer@sinostech.co.th, lead@sinostech.co.th", ccTypes: ["r2", "overdue"], fallback: "" };
+  const c = { ownerEmail: "Lead@sinostech.co.th" };
+  assert.deepEqual(recipientsFor(c, "r1", rules), { to: ["Lead@sinostech.co.th"], cc: [], noOwner: false });
+  assert.deepEqual(recipientsFor(c, "r2", rules).cc, ["engineer@sinostech.co.th"]);
+  assert.deepEqual(recipientsFor({}, "r1", rules), { to: ["engineer@sinostech.co.th", "lead@sinostech.co.th"], cc: [], noOwner: true });
+});
