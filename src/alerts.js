@@ -5,6 +5,7 @@ const { store } = require("./store");
 const { sync } = require("./sync");
 const { caseAlertEmail, auditEmail } = require("./emails");
 const { toISODate, today: todayFn } = require("./dates");
+const { recipientsFor } = require("./alertRecipients");
 
 const SEND_GAP_MS = 2500; // keep well under Outlook's ~30 messages/minute limit
 const sleep = (ms) => new Promise((r) => setTimeout(r, config.mock ? 0 : ms));
@@ -43,9 +44,8 @@ async function runAlerts({ dryRun = false } = {}) {
   for (const d of todo) {
     const c = d.c;
     const { subject, html } = caseAlertEmail(c, d.type);
-    const to = c.ownerEmail ? [c.ownerEmail] : config.alertCc;
-    const cc = c.ownerEmail ? config.alertCc : [];
-    const finalSubject = c.ownerEmail ? subject : `[ไม่พบอีเมล Owner] ${subject}`;
+    const { to, cc, noOwner } = recipientsFor(c, d.type);
+    const finalSubject = noOwner ? `[ไม่พบอีเมล Owner] ${subject}` : subject;
     const row = {
       dedupe_key: d.dedupe,
       case_key: c.key,

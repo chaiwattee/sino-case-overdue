@@ -63,6 +63,8 @@ const config = {
 
   // Email (sent from an Outlook mailbox through Graph /users/{sender}/sendMail)
   mailSender: env.MAIL_SENDER, // e.g. case-alert@sinostech.co.th
+  // Rounds that CC the list above. Round 1 (day 3) goes to the owner only by default.
+  alertCcTypes: (env.ALERT_CC_TYPES || "r2,overdue").split(",").map((x) => x.trim()).filter(Boolean),
   alertCc: (env.ALERT_CC || "engineer@sinostech.co.th")
     .split(",")
     .map((s) => s.trim())
