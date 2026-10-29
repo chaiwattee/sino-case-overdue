@@ -6,16 +6,19 @@
   "scripts": {
     "start": "node server.js",
     "mock": "MOCK_DATA=1 DASHBOARD_USER= PORT=3001 node server.js",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "start:v3": "node server-v3.js"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
     "axios": "^1.7.2",
+    "bcryptjs": "^2.4.3",
     "exceljs": "^4.4.0",
     "express": "^4.19.2",
     "form-data": "^4.0.6",
-    "node-cron": "^3.0.3"
+    "node-cron": "^3.0.3",
+    "pg": "^8.23.1"
   }
 }

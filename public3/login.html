@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="th" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>เข้าสู่ระบบ · Sino Case SLA</title>
+<script>
+  try { var t = localStorage.getItem("theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anuphan:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="style.css?v=3.0.1">
+</head>
+<body>
+<div class="login-wrap">
+  <section class="login-side">
+    <div class="brand" style="font-size:17px">
+      <svg class="mark" width="24" height="24" viewBox="0 0 28 28" aria-hidden="true"><rect x="1" y="1" width="26" height="26" rx="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M6 18h4l3-8 3 12 3-8h3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>Sino Case <b>SLA</b></span>
+    </div>
+    <div>
+      <h1 style="font-size:34px;max-width:16ch">บันทึกและติดตามเคสของทีม Engineer ในที่เดียว</h1>
+      <p class="muted" style="font-size:16px;max-width:46ch">เปิดเคสใหม่ อัปเดตความคืบหน้า และปิดเคสได้จากหน้าเว็บ ระบบนับวัน SLA และส่ง email แจ้งเตือนให้อัตโนมัติ</p>
+    </div>
+    <ul class="login-points">
+      <li><span class="dot d-normal" aria-hidden="true"></span>Start date บันทึกอัตโนมัติตอนเปิดเคส</li>
+      <li><span class="dot d-r1" aria-hidden="true"></span>แจ้งเตือนวันที่ 3, วันที่ 6 และทุกวันหลังเกิน Due</li>
+      <li><span class="dot d-overdue" aria-hidden="true"></span>ผู้ใช้แต่ละคนมีบัญชีและสิทธิ์ของตัวเอง</li>
+    </ul>
+  </section>
+  <section class="login-main">
+    <div class="login-box" id="box"></div>
+  </section>
+</div>
+<script src="login.js?v=3.0"></script>
+</body>
+</html>

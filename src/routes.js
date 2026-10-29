@@ -406,4 +406,4 @@ api.get("/status", wrap(async (req, res) => {
   });
 }));
 
-module.exports = { router, api, basicAuth };
+module.exports = { router, api, basicAuth, ser, stageCounts, slaStats };

@@ -76,22 +76,26 @@ function caseAlertEmail(c, type) {
   const html = shell(
     COLORS[type].bar,
     `<p style="margin:0 0 12px">เรียน ${esc(c.owner || "Owner")}</p>
-<p style="margin:0 0 18px">${lead} กรุณาอัปเดตสถานะหรือปิดเคสใน Case List</p>
+<p style="margin:0 0 18px">${lead} กรุณาอัปเดตสถานะหรือปิดเคส${c.caseUrl ? "บนหน้าเว็บ" : "ใน Case List"}</p>
 ${fieldTable([
   ["เลขเคส (CS)", c.csNumber || "-"],
   ["ลูกค้า / Site", c.site || "-"],
   ["Product", c.product || "-"],
   ["Task / Case", c.task || "-"],
   ["รายละเอียด", c.detail || "-"],
-  ["เอกสาร", `${c.sourceLabel} · tab ${config.sheetName} แถว ${c.rowNumber}`],
+  c.caseUrl ? ["ทีม", c.sourceLabel] : ["เอกสาร", `${c.sourceLabel} · tab ${config.sheetName} แถว ${c.rowNumber}`],
   ["วันเปิดเคส", thaiDate(c.startDate)],
   ["กำหนดปิด (Due)", thaiDate(c.dueDate)],
   ["สถานะปัจจุบัน", c.status || "-"],
 ])}
-<p style="margin:18px 0 0">${button(
-      config.dashboardUrl && `${config.dashboardUrl}/#/owner/${encodeURIComponent(c.ownerEmail || c.owner)}`,
-      "ดูเคสบน Dashboard"
-    )}${button(c.fileUrl, "เปิดเอกสาร Case List", false)}</p>`
+<p style="margin:18px 0 0">${
+      c.caseUrl
+        ? button(c.caseUrl, "เปิดเคสเพื่ออัปเดต")
+        : button(
+            config.dashboardUrl && `${config.dashboardUrl}/#/owner/${encodeURIComponent(c.ownerEmail || c.owner)}`,
+            "ดูเคสบน Dashboard"
+          ) + button(c.fileUrl, "เปิดเอกสาร Case List", false)
+    }</p>`
   );
   return { subject, html };
 }

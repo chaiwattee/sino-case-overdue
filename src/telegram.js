@@ -72,8 +72,9 @@ function splitMessages(header, items, footer) {
 }
 
 /** Daily overall summary for the Telegram group. */
-async function sendDailySummary() {
-  const { cases } = await sync();
+async function sendDailySummary(opts = {}) {
+  const cases = opts.cases || (await sync()).cases;
+  const sources = opts.sources || config.sources;
   const today = d.today();
   const open = cases.filter((c) => c.stage !== "closed");
   const count = (s) => open.filter((c) => c.stage === s).length;
@@ -84,7 +85,7 @@ async function sendDailySummary() {
   if (count("no_start")) msg += `⚪ ไม่มี Start date: ${count("no_start")}\n`;
 
   msg += `\n📁 แยกตามเอกสาร\n`;
-  for (const s of config.sources) {
+  for (const s of sources) {
     const o = open.filter((c) => c.source === s.key);
     msg += `• ${s.label}: ${o.length} (เกิน Due ${o.filter((c) => c.stage === "overdue").length})\n`;
   }
@@ -133,10 +134,17 @@ async function sendDailySummary() {
 
   try {
     const since = d.addDays(today, -1).toISOString();
-    const changes = (await store.listChanges({ from: since, limit: 100 })).filter((c) => c.field === "start_date");
+    const changes = (await (opts.listChanges || store.listChanges)({ from: since, limit: 100 })).filter(
+      (c) => c.field === "start_date"
+    );
     if (changes.length) {
       let t = `⚠️ มีการแก้ Start date ใน 24 ชม. (${changes.length})\n\n`;
-      changes.forEach((c) => (t += `• ${c.cs_number || c.case_key} · ${c.owner || "-"}: ${c.old_value} → ${c.new_value}\n`));
+      changes.forEach(
+        (c) =>
+          (t += `• ${c.cs_number || c.case_key || c.case_id} · ${c.owner || c.owner_name || "-"}: ${c.old_value} → ${c.new_value}${
+            c.reason ? ` (เหตุผล: ${c.reason})` : ""
+          }\n`)
+      );
       messages.push(t);
     }
   } catch (e) {

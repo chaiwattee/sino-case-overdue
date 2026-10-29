@@ -40,9 +40,8 @@ function rangeLabel(from, to) {
  * Report numbers for [from, to] (inclusive local days).
  * owner: optional owner email/name to restrict to one person.
  */
-async function buildReport({ from, to, owner } = {}) {
-  const state = getState();
-  let cases = state.cases;
+async function buildReport({ from, to, owner, cases: given, changes: givenChanges } = {}) {
+  let cases = given || getState().cases;
   if (owner) {
     const o = owner.toLowerCase();
     cases = cases.filter((c) => ownerId(c) === o || c.owner.toLowerCase() === o);
@@ -83,9 +82,9 @@ async function buildReport({ from, to, owner } = {}) {
 
   let changes = [];
   try {
-    const all = await store.listChanges({ from: from.toISOString(), limit: 1000 });
+    const all = givenChanges || (await store.listChanges({ from: from.toISOString(), limit: 1000 }));
     const end = d.addDays(to, 1);
-    changes = all.filter((ch) => new Date(ch.detected_at) < end);
+    changes = all.filter((ch) => new Date(ch.detected_at) >= from && new Date(ch.detected_at) < end);
     if (owner) {
       const o = owner.toLowerCase();
       changes = changes.filter(

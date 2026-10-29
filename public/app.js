@@ -72,7 +72,7 @@
   }
 
   function setNav(name) {
-    document.querySelectorAll("nav.side a[data-nav]").forEach((a) => a.classList.toggle("active", a.dataset.nav === name));
+    document.querySelectorAll("nav a[data-nav]").forEach((a) => a.classList.toggle("active", a.dataset.nav === name));
   }
 
   function renderSources(sources) {
