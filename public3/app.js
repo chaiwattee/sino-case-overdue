@@ -466,7 +466,7 @@ ${allowNew ? `<span class="hint">พิมพ์ชื่อใหม่ได�
       : "";
 
     $app.innerHTML = `
-<div class="crumb"><a href="#/mine">เคสของฉัน</a> / ${isNew ? "เปิดเคสใหม่" : esc(c.csNumber || "#" + c.id)}</div>
+<div class="crumb">${lvl("case_edit") === "none" && lvl("case_create") === "none" ? `<a href="#/">ภาพรวม</a>` : `<a href="#/mine">เคสของฉัน</a>`} / ${isNew ? "เปิดเคสใหม่" : esc(c.csNumber || "#" + c.id)}</div>
 <div class="head"><div><h1>${isNew ? "เปิดเคสใหม่" : `เคส <span class="mono" style="font-size:26px">${esc(c.csNumber || "#" + c.id)}</span>`}</h1>
 <p>${isNew ? "Start date จะบันทึกเป็นวันนี้อัตโนมัติ และ Due = Start date + " + cfg.slaDays + " วัน" : `${esc(c.sourceLabel)} · Owner ${esc(c.owner || "-")} · ${chip(c.stage)}`}</p></div>
 <div class="actions">
@@ -479,7 +479,7 @@ ${ro ? `<div class="banner warn">คุณดูเคสนี้ได้อ�
 <fieldset class="card" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px" ${ro ? "disabled" : ""}>
 <legend style="font-size:15px;font-weight:600">ข้อมูลเคส</legend>
 <label class="f">CS Number<input type="text" name="cs_number" value="${esc(c.csNumber || "")}" class="mono" placeholder="เช่น CS5056186"></label>
-${comboBox("site", c.site, lk.site, { label: "Site / ลูกค้า" })}
+${comboBox("site", c.site, lk.site, { label: "Site / ลูกค้า", allowNew: !ro })}
 <label class="f">Product<select name="product">${productOpts}</select></label>
 <label class="f"><span class="req">Status</span><select name="status">${statusOpts}</select></label>
 <label class="f"><span class="req">ทีม</span><select name="team" ${!isNew && !permsC.reassign ? "disabled" : ""}>${teamOpts}</select></label>

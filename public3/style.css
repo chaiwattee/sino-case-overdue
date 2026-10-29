@@ -286,3 +286,4 @@ td select.inline { min-height: 36px; font-size: 13px; padding: 0 8px; }
 .card > .f, .stack > .f, .card > fieldset, .card > .stat2 { flex: 0 0 auto; }
 fieldset .chk { flex: 0 1 auto; }
 dialog.wide { width: min(980px, calc(100vw - 32px)); }
+.sr { position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
