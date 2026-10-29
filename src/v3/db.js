@@ -55,14 +55,21 @@ async function setSetting(key, value) {
   );
 }
 
+// Request context (IP, browser) for audit entries, set by a middleware in server-v3.js.
+const { AsyncLocalStorage } = require("async_hooks");
+const requestContext = new AsyncLocalStorage();
+
 async function audit(actor, action, target, detail) {
-  await q("INSERT INTO audit_log (actor_id, actor, action, target, detail) VALUES ($1,$2,$3,$4,$5)", [
+  const ctx = requestContext.getStore() || {};
+  await q("INSERT INTO audit_log (actor_id, actor, action, target, detail, ip, user_agent) VALUES ($1,$2,$3,$4,$5,$6,$7)", [
     actor?.id || null,
-    actor?.display_name || actor?.email || "system",
+    actor?.display_name || actor?.email || (actor?.id ? `user #${actor.id}` : "system"),
     action,
     target || null,
     detail ? JSON.stringify(detail) : null,
+    ctx.ip || null,
+    ctx.ua ? String(ctx.ua).slice(0, 300) : null,
   ]).catch((e) => console.error("[audit]", e.message));
 }
 
-module.exports = { pool, q, one, all, tx, migrate, getSetting, setSetting, audit };
+module.exports = { pool, q, one, all, tx, migrate, getSetting, setSetting, audit, requestContext };

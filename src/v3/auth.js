@@ -191,12 +191,16 @@ router.get("/auth/callback", async (req, res) => {
         return back("notuser");
       }
     }
-    if (!user.active) return back("disabled");
+    if (!user.active) {
+      await audit(user, "login_failed", email, { method: "sso", reason: "disabled" });
+      return back("disabled");
+    }
     if (user.auth_type !== "sso") return back("uselocal");
     if (claims.name && claims.name !== user.display_name && user.display_name === user.email) {
       await q("UPDATE users SET display_name = $1 WHERE id = $2", [claims.name, user.id]);
     }
     await startSession(res, user, saved.remember);
+    await audit(user, "login", email, { method: "sso" });
     res.redirect("/");
   } catch (e) {
     console.error("[sso] callback failed:", e.response?.data?.error_description || e.message);
@@ -208,20 +212,30 @@ router.post("/auth/local", async (req, res) => {
   const email = String(req.body.email || "").trim().toLowerCase();
   const password = String(req.body.password || "");
   const key = `${req.ip}|${email}`;
-  if (tooMany(key)) return res.status(429).json({ error: "ลองผิดหลายครั้งเกินไป รอ 15 นาทีแล้วลองใหม่" });
+  if (tooMany(key)) {
+    await audit(null, "login_locked", email, { method: "password" });
+    return res.status(429).json({ error: "ลองผิดหลายครั้งเกินไป รอ 15 นาทีแล้วลองใหม่" });
+  }
   const user = await one(`SELECT ${USER_COLS}, password_hash FROM users WHERE lower(email) = $1`, [email]);
   const ok = user && user.auth_type === "local" && user.password_hash && (await bcrypt.compare(password, user.password_hash));
   if (!ok || !user.active) {
     noteFail(key);
+    await audit(user || null, "login_failed", email, { method: "password", reason: !user ? "unknown_email" : !user.active ? "disabled" : user.auth_type === "sso" ? "sso_account" : "wrong_password" });
     if (user && user.auth_type === "sso") return res.status(400).json({ error: "บัญชีนี้ใช้ปุ่มเข้าด้วยบัญชี Microsoft" });
     return res.status(401).json({ error: "อีเมลหรือรหัสผ่านไม่ถูกต้อง" });
   }
   attempts.delete(key);
   await startSession(res, user, req.body.remember !== false);
+  await audit(user, "login", email, { method: "password" });
   res.json({ ok: true, mustChange: user.must_change_password });
 });
 
-router.post("/auth/logout", (req, res) => {
+router.post("/auth/logout", async (req, res) => {
+  const s = verify(cookies(req)[SID]);
+  if (s && s.uid) {
+    const u = await one("SELECT id, email, display_name FROM users WHERE id=$1", [s.uid]).catch(() => null);
+    if (u) await audit(u, "logout", u.email);
+  }
   setCookie(res, SID, "", 0);
   res.json({ ok: true });
 });

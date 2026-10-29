@@ -4,7 +4,7 @@ const crypto = require("crypto");
 const express = require("express");
 const { config } = require("./src/config");
 const { config3, missing3 } = require("./src/v3/config3");
-const { migrate } = require("./src/v3/db");
+const { migrate, requestContext } = require("./src/v3/db");
 const auth = require("./src/v3/auth");
 const { api } = require("./src/v3/api3");
 const jobs = require("./src/v3/jobs");
@@ -23,6 +23,15 @@ app.use((req, res, next) => {
   res.set("X-Content-Type-Options", "nosniff");
   res.set("Referrer-Policy", "same-origin");
   next();
+});
+
+app.use((req, res, next) => {
+  // Forwarded headers are only trusted from the local Cloudflare tunnel; direct LAN requests use the socket address.
+  const peer = String(req.socket.remoteAddress || "").replace(/^::ffff:/, "");
+  const local = peer === "127.0.0.1" || peer === "::1";
+  const fwd = String(req.headers["cf-connecting-ip"] || String(req.headers["x-forwarded-for"] || "").split(",")[0] || "").trim();
+  const ip = local && fwd ? fwd : peer;
+  requestContext.run({ ip, ua: req.headers["user-agent"] || "" }, next);
 });
 
 app.get("/health", (req, res) => res.json({ ok: true }));

@@ -885,7 +885,7 @@ ${sel.id !== ME.user.id ? `<button class="btn danger" type="button" id="u-del">�
       : `<aside class="side"><section class="card"><h2>เลือกผู้ใช้จากตาราง</h2><p class="muted" style="margin:0;font-size:14px">คลิกชื่อเพื่อแก้บทบาท ทีม เปิด/ปิดใช้งาน หรือรีเซ็ตรหัสผ่าน</p></section></aside>`;
 
     $app.innerHTML = `
-<div class="tabs2" role="tablist"><a role="tab" class="on" aria-selected="true" href="#/users">ผู้ใช้</a><a role="tab" aria-selected="false" href="#/roles">สิทธิ์ตามบทบาท</a></div>
+<div class="tabs2" role="tablist"><a role="tab" class="on" aria-selected="true" href="#/users">ผู้ใช้</a><a role="tab" aria-selected="false" href="#/roles">สิทธิ์ตามบทบาท</a><a role="tab" aria-selected="false" href="#/audit-log">Audit log</a></div>
 <div class="head"><div><h1>จัดการผู้ใช้</h1><p>เพิ่มหรือปิดการใช้งานบัญชี กำหนดบทบาทและทีม รีเซ็ตรหัสผ่าน ทุกการเปลี่ยนแปลงถูกบันทึก</p></div>
 <div class="actions"><a class="btn" href="api/users/template">ดาวน์โหลดแม่แบบ Excel</a><button class="btn" type="button" id="u-import">นำเข้าจาก Excel</button><button class="btn primary" type="button" id="u-add">เพิ่มผู้ใช้</button></div></div>
 <div class="cols"><section class="card main">
@@ -1107,7 +1107,7 @@ ${data.perms.map((p) => `<tr><td><div style="font-weight:500">${esc(p.label)}</d
       }));
     };
     $app.innerHTML = `
-<div class="tabs2" role="tablist"><a role="tab" aria-selected="false" href="#/users">ผู้ใช้</a><a role="tab" class="on" aria-selected="true" href="#/roles">สิทธิ์ตามบทบาท</a></div>
+<div class="tabs2" role="tablist"><a role="tab" aria-selected="false" href="#/users">ผู้ใช้</a><a role="tab" class="on" aria-selected="true" href="#/roles">สิทธิ์ตามบทบาท</a><a role="tab" aria-selected="false" href="#/audit-log">Audit log</a></div>
 <div class="head"><div><h1>สิทธิ์ตามบทบาท</h1><p>ผู้ใช้แต่ละคนมี 1 บทบาท กดที่ช่องเพื่อสลับ ไม่มีสิทธิ์ → เฉพาะของตัวเอง → ทั้งหมด แล้วกดบันทึก</p></div>
 <div class="actions">${editable ? `<button class="btn primary" id="save" type="button" disabled>บันทึกสิทธิ์</button>` : ""}</div></div>
 <section class="card"><div class="tablewrap" id="pm"></div></section>
@@ -1125,6 +1125,86 @@ ${data.perms.map((p) => `<tr><td><div style="font-weight:500">${esc(p.label)}</d
           toast(e.message, 6000);
         }
       };
+  }
+
+
+  // ------------------------------------------------------------ audit log (admin)
+  const ACTION = {
+    login: ["ok", "เข้าสู่ระบบ"], logout: ["closed", "ออกจากระบบ"], login_failed: ["overdue", "เข้าสู่ระบบไม่สำเร็จ"], login_locked: ["overdue", "ถูกล็อกชั่วคราว"], login_denied: ["overdue", "ไม่มีสิทธิ์ใช้งาน"],
+    bootstrap_admin: ["r2", "สร้าง Admin คนแรก"], user_create: ["r1", "เพิ่มผู้ใช้"], user_update: ["r1", "แก้ไขผู้ใช้"], user_delete: ["overdue", "ลบผู้ใช้"], user_import: ["r1", "นำเข้าผู้ใช้จาก Excel"], user_signout: ["r1", "บังคับออกจากระบบ"],
+    password_temp: ["r2", "สร้างรหัสชั่วคราว"], password_link: ["r2", "ส่งลิงก์ตั้งรหัสใหม่"], password_changed: ["closed", "เปลี่ยนรหัสผ่าน"], password_reset_done: ["closed", "ตั้งรหัสใหม่จากลิงก์"], permissions_update: ["r2", "แก้สิทธิ์ตามบทบาท"],
+    case_create: ["all", "เปิดเคส"], case_update: ["all", "แก้ข้อมูลเคส"], case_status: ["all", "เปลี่ยน Status"], case_owner: ["r1", "โอนเคส"], case_start_date: ["r2", "แก้ Start date"], case_delete: ["overdue", "ลบเคส"], case_deleted: ["overdue", "ลบเคส"], case_target_date: ["r2", "แก้ Target date"], import_excel: ["r1", "นำเข้าเคสจาก Excel"],
+    export: ["all", "Export"], report_send: ["all", "ส่ง Report"], schedule_create: ["all", "เพิ่มรอบส่ง Report"], schedule_update: ["all", "แก้รอบส่ง Report"], schedule_delete: ["r1", "ลบรอบส่ง Report"], schedule_test: ["closed", "ส่ง Report ทดสอบ"], annual_download: ["all", "ดาวน์โหลดรายงานรายปี"],
+    settings_update: ["r2", "แก้ตั้งค่าระบบ"], lookup_add: ["closed", "เพิ่มรายการ dropdown"], lookup_update: ["closed", "แก้รายการ dropdown"], lookup_merge: ["r1", "รวมรายการ dropdown"], annual_test: ["closed", "ส่งรายงานรายปีทดสอบ"], alert_email_test: ["closed", "ส่ง email แจ้งเตือนทดสอบ"],
+  };
+  const GROUP = { login: "เข้าสู่ระบบ", users: "ผู้ใช้และสิทธิ์", cases: "เคส", data: "Export และ Report", settings: "ตั้งค่าระบบ" };
+  const REASON = { wrong_password: "รหัสผ่านผิด", unknown_email: "ไม่พบอีเมลนี้", disabled: "บัญชีถูกปิดใช้งาน", sso_account: "บัญชีนี้ต้องใช้ปุ่ม Microsoft", not_registered: "ยังไม่ได้เพิ่มเป็นผู้ใช้" };
+  function auditDetail(r) {
+    const x = r.detail || {};
+    const parts = [];
+    if (x.method) parts.push(x.method === "sso" ? "บัญชี Microsoft" : "รหัสผ่าน");
+    if (x.reason && REASON[x.reason]) parts.push(REASON[x.reason]);
+    else if (x.reason) parts.push("เหตุผล: " + x.reason);
+    if (x.old !== undefined || x.new !== undefined) parts.push(`${x.old ?? "-"} → ${x.new ?? "-"}`);
+    if (x.fields) parts.push("แก้: " + x.fields.join(", "));
+    if (x.format) parts.push(String(x.format).toUpperCase());
+    if (x.sites && x.sites.length) parts.push("ลูกค้า " + x.sites.join(", "));
+    if (x.cases !== undefined && r.action === "export") parts.push(`${x.cases} เคส`);
+    if (x.rows !== undefined) parts.push(`${x.rows} แถว`);
+    if (x.role) parts.push("บทบาท " + (ROLE[x.role] || x.role));
+    if (x.teams && x.teams.length) parts.push("ทีม " + x.teams.join(", "));
+    if (x.active === false) parts.push("ปิดใช้งาน");
+    if (x.created !== undefined) parts.push(`เพิ่ม ${x.created} · อัปเดต ${x.updated}`);
+    if (x.added !== undefined) parts.push(`เพิ่ม ${x.added} เคส · สร้างผู้ใช้ ${x.usersCreated || 0}`);
+    if (x.from && x.to) parts.push(`${x.from} – ${x.to}`);
+    if (x.to && !x.from) parts.push("ถึง " + x.to);
+    return parts.join(" · ");
+  }
+  const browser = (ua) => {
+    if (!ua) return "";
+    const b = /Edg\//.test(ua) ? "Edge" : /Chrome\//.test(ua) ? "Chrome" : /Firefox\//.test(ua) ? "Firefox" : /Safari\//.test(ua) ? "Safari" : "อื่นๆ";
+    const os = /Windows/.test(ua) ? "Windows" : /iPhone|iPad/.test(ua) ? "iOS" : /Android/.test(ua) ? "Android" : /Mac OS/.test(ua) ? "macOS" : /Linux/.test(ua) ? "Linux" : "";
+    return b + (os ? " · " + os : "");
+  };
+  async function viewAuditLog(params) {
+    setNav("users");
+    const days = Number(params.days || 30);
+    const query = { days, group: params.group, q: params.q };
+    const { audit } = await api("/audit?" + qs(query));
+    const fails = audit.filter((r) => r.action === "login_failed" || r.action === "login_locked").length;
+    const logins = audit.filter((r) => r.action === "login").length;
+    const users = new Set(audit.filter((r) => r.action === "login").map((r) => r.actor_id)).size;
+    const exports = audit.filter((r) => r.action === "export" || r.action === "report_send").length;
+    $app.innerHTML = `
+<div class="tabs2" role="tablist"><a role="tab" aria-selected="false" href="#/users">ผู้ใช้</a><a role="tab" aria-selected="false" href="#/roles">สิทธิ์ตามบทบาท</a><a role="tab" class="on" aria-selected="true" href="#/audit-log">Audit log</a></div>
+<div class="head"><div><h1>Audit log</h1><p>บันทึกการเข้าสู่ระบบ การจัดการผู้ใช้และสิทธิ์ การแก้ไขเคส Export และการตั้งค่าทั้งหมด พร้อม IP และเบราว์เซอร์ แก้หรือลบไม่ได้</p></div>
+<div class="actions"><a class="btn" href="api/audit?${qs({ ...query, format: "csv" })}">Export CSV</a></div></div>
+<form class="filters" id="af2" onsubmit="return false">
+<label class="f">ช่วงเวลา<select name="days">${[1, 7, 30, 90, 365, 730].map((x) => `<option value="${x}" ${x === days ? "selected" : ""}>${x === 1 ? "24 ชั่วโมง" : x + " วันล่าสุด"}</option>`).join("")}</select></label>
+<label class="f">ประเภท<select name="group"><option value="">ทั้งหมด</option>${Object.entries(GROUP).map(([k, l]) => `<option value="${k}" ${params.group === k ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+<label class="f" style="flex:2 1 260px">ค้นหา<input type="search" name="q" value="${esc(params.q || "")}" placeholder="ชื่อผู้ใช้, อีเมล, เลขเคส, IP"></label>
+</form>
+<div class="kpis">
+<div class="kpi k-normal"><div class="l">เข้าสู่ระบบสำเร็จ</div><div class="v">${logins}</div><div class="s">${users} คน</div></div>
+<div class="kpi k-overdue"><div class="l">เข้าสู่ระบบไม่สำเร็จ</div><div class="v">${fails}</div><div class="s">รวมการถูกล็อกชั่วคราว</div></div>
+<div class="kpi k-all"><div class="l">Export / ส่ง Report</div><div class="v">${exports}</div></div>
+<div class="kpi k-closed"><div class="l">รายการทั้งหมด</div><div class="v">${audit.length}</div><div class="s">${audit.length >= 2000 ? "แสดง 2,000 รายการล่าสุด" : "ในช่วงที่เลือก"}</div></div>
+</div>
+<section class="card">${audit.length ? `<div class="tablewrap"><table style="min-width:960px"><thead><tr><th style="width:120px">เวลา</th><th>ผู้ทำ</th><th>การกระทำ</th><th>เป้าหมาย</th><th>รายละเอียด</th><th>IP / เบราว์เซอร์</th></tr></thead><tbody>
+${audit.map((r) => { const a = ACTION[r.action] || ["closed", r.action]; return `<tr>
+<td style="white-space:nowrap">${fdt(r.at)}</td>
+<td>${r.actor_id ? `<a href="#/users?id=${r.actor_id}">${esc(r.actor || "-")}</a>` : esc(r.actor || "-")}</td>
+<td>${chip(a[0], a[1])}</td>
+<td style="font-size:13px">${r.detail && r.detail.case_id ? `<a href="#/case/${r.detail.case_id}">${esc(r.target || "-")}</a>` : esc(r.target || "-")}</td>
+<td style="font-size:13px">${esc(auditDetail(r))}</td>
+<td style="font-size:12px" class="muted">${esc(r.ip || "-")}${r.user_agent ? `<div>${esc(browser(r.user_agent))}</div>` : ""}</td></tr>`; }).join("")}
+</tbody></table></div>` : `<div class="empty">ไม่มีรายการในช่วงนี้</div>`}</section>
+<p class="hint">ระบบเก็บ Audit log ตามระยะเวลาเก็บข้อมูลในหน้าตั้งค่า (ปัจจุบัน 2 ปี) การเปลี่ยน Status โอนเคส และแก้ Start date ดูรายละเอียดเพิ่มได้ที่เมนูประวัติแก้ไข</p>`;
+    const f = document.getElementById("af2");
+    const go = () => (location.hash = "#/audit-log?" + qs({ days: f.days.value, group: f.group.value, q: f.q.value }));
+    f.days.onchange = go;
+    f.group.onchange = go;
+    f.q.onkeydown = (e) => e.key === "Enter" && go();
   }
 
   // ------------------------------------------------------------ settings (admin)
@@ -1345,6 +1425,7 @@ ${forced ? "" : `<label class="f">รหัสผ่านปัจจุบั�
         case "cases": return await viewCases(params);
         case "users": return await viewUsers(params);
         case "roles": return await viewRoles();
+        case "audit-log": return await viewAuditLog(params);
         case "settings": return await viewSettings();
         case "password": return viewPassword();
         default:

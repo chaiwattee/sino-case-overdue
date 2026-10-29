@@ -243,6 +243,9 @@ api.put("/case/:id", wrap(async (req, res) => {
     if (!allowReassign) throw bad("ไม่มีสิทธิ์เปลี่ยน Owner หรือทีม", 403);
   }
   const r = await repo.updateCase(u, c, b, { allowReassign });
+  // Status and owner changes are already in case_changes; record the other edited fields here.
+  const other = (r.changed || []).filter((f) => !["status", "owner", "owner_id", "end_date", "closed_at"].includes(f));
+  if (other.length) await audit(u, "case_update", `${c.csNumber || "#" + c.id} · ${c.site || ""}`, { case_id: c.id, fields: other });
   res.json({ ok: true, ...r });
 }));
 
@@ -308,6 +311,7 @@ api.get("/export", wrap(async (req, res) => {
   }
   const changes = await jobs.listChanges({ from: from.toISOString(), limit: 5000, caseIds: cases.map((c) => c.id) });
   const rep = await reports.buildReport({ from, to, owner, cases, changes });
+  await audit(req.user, "export", `${d.toISODate(from)} – ${d.toISODate(to)}`, { format: req.query.format === "csv" ? "csv" : "xlsx", owner: owner || null, sites, cases: rep.openedCases.length + rep.closedCases.length + rep.openCases.length });
   const safe = (x) => String(x).replace(/[^\p{L}\p{N}._-]+/gu, "-").slice(0, 40);
   const tag = `${sites.length === 1 ? safe(sites[0]) + "_" : sites.length ? `${sites.length}-customers_` : ""}${d.toISODate(from)}_${d.toISODate(to)}`;
   const disp = (name) => `attachment; filename="${name.replace(/[^\x20-\x7e]/g, "_")}"; filename*=UTF-8''${encodeURIComponent(name)}`;
@@ -326,6 +330,7 @@ api.get("/export", wrap(async (req, res) => {
 
 api.post("/reports/send", need("reports_manage"), wrap(async (req, res) => {
   const { from, to } = rangeFrom(req.body);
+  await audit(req.user, "report_send", String(req.body.recipients || ""), { from: d.toISODate(from), to: d.toISODate(to), sites: jobs.siteList(req.body.sites), owner: req.body.owner || null });
   res.json(await jobs.sendReport({ title: req.body.title, recipients: req.body.recipients, cc: req.body.cc, from, to, owner: req.body.owner || undefined, sites: jobs.siteList(req.body.sites), attachExcel: req.body.attachExcel !== false, user: req.user }));
 }));
 api.get("/reports/history", need("reports_manage"), wrap(async (req, res) => {
@@ -355,6 +360,7 @@ api.post("/schedules", need("reports_manage"), wrap(async (req, res) => {
   const s = cleanSchedule(req.body);
   const cols = Object.keys(s);
   const row = await one(`INSERT INTO report_schedules (${cols.join(",")}) VALUES (${cols.map((_, i) => "$" + (i + 1)).join(",")}) RETURNING *`, Object.values(s));
+  await audit(req.user, "schedule_create", row.name, s);
   res.json({ schedule: row });
 }));
 api.put("/schedules/:id", need("reports_manage"), wrap(async (req, res) => {
@@ -362,16 +368,19 @@ api.put("/schedules/:id", need("reports_manage"), wrap(async (req, res) => {
   const cols = Object.keys(s);
   if (!cols.length) throw bad("ไม่มีข้อมูลที่จะแก้");
   const row = await one(`UPDATE report_schedules SET ${cols.map((c, i) => `${c}=$${i + 1}`).join(",")} WHERE id=$${cols.length + 1} RETURNING *`, [...Object.values(s), Number(req.params.id)]);
+  await audit(req.user, "schedule_update", row?.name, s);
   res.json({ schedule: row });
 }));
 api.delete("/schedules/:id", need("reports_manage"), wrap(async (req, res) => {
-  await q("DELETE FROM report_schedules WHERE id=$1", [Number(req.params.id)]);
+  const old = await one("DELETE FROM report_schedules WHERE id=$1 RETURNING name", [Number(req.params.id)]);
+  await audit(req.user, "schedule_delete", old?.name);
   res.json({ ok: true });
 }));
 api.post("/schedules/:id/test", need("reports_manage"), wrap(async (req, res) => {
   const s = await one("SELECT * FROM report_schedules WHERE id=$1", [Number(req.params.id)]);
   if (!s) throw bad("ไม่พบรอบส่งนี้", 404);
   const { from, to } = reports.resolveRange(s.range_type);
+  await audit(req.user, "schedule_test", s.name, { to: req.body?.to || s.recipients });
   res.json(await jobs.sendReport({ title: `[ทดสอบ] ${s.name}`, recipients: req.body?.to || s.recipients, cc: req.body?.to ? "" : s.cc, from, to, attachExcel: s.attach_excel, scheduleId: s.id }));
 }));
 
@@ -512,7 +521,8 @@ api.post("/users/:id/reset", need("users_manage"), wrap(async (req, res) => {
 }));
 
 api.post("/users/:id/signout", need("users_manage"), wrap(async (req, res) => {
-  await q("UPDATE users SET session_version = session_version + 1 WHERE id=$1", [Number(req.params.id)]);
+  const u = await one("UPDATE users SET session_version = session_version + 1 WHERE id=$1 RETURNING email", [Number(req.params.id)]);
+  await audit(req.user, "user_signout", u?.email);
   res.json({ ok: true });
 }));
 
@@ -566,6 +576,7 @@ api.post("/alert-email/test", need("settings_manage"), wrap(async (req, res) => 
   const { c } = await sampleCase(type);
   const { subject, html } = caseAlertEmail(c, type);
   const r = await graph.sendMail({ to: [req.user.email], cc: [], subject: `[ทดสอบ] ${subject}`, html });
+  await audit(req.user, "alert_email_test", type);
   res.json({ ok: true, to: req.user.email, dryRun: !!r.dryRun });
 }));
 
@@ -611,6 +622,7 @@ api.post("/lookups", need("settings_manage"), wrap(async (req, res) => {
   const value = String(req.body?.value || "").trim();
   if (!["site", "product", "status"].includes(kind) || !value) throw bad("ข้อมูลไม่ครบ");
   await q("INSERT INTO lookups (kind, value, created_by, sort) VALUES ($1,$2,$3,500)", [kind, value, req.user.id]);
+  await audit(req.user, "lookup_add", value, { kind });
   res.json({ ok: true });
 }));
 api.put("/lookups/:id", need("settings_manage"), wrap(async (req, res) => {
@@ -623,6 +635,7 @@ api.put("/lookups/:id", need("settings_manage"), wrap(async (req, res) => {
     // Renaming a customer (e.g. fixing a typo) updates the cases that use it.
     await q("UPDATE cases SET site=$1 WHERE site=$2", [value, cur.value]);
   }
+  await audit(req.user, "lookup_update", value !== cur.value ? `${cur.value} -> ${value}` : value, { kind: cur.kind, active: b.active ?? cur.active });
   res.json({ ok: true });
 }));
 api.post("/lookups/:id/merge", need("settings_manage"), wrap(async (req, res) => {
@@ -640,17 +653,64 @@ api.post("/import", need("settings_manage"), wrap(async (req, res) => {
   res.json({ ok: true, ...(await importFromExcel(req.user, { mode: req.body?.mode === "refresh" ? "refresh" : "new" })) });
 }));
 api.post("/annual/test", need("settings_manage"), wrap(async (req, res) => {
+  await audit(req.user, "annual_test", String(new Date().getFullYear()));
   res.json(await jobs.runAnnual(new Date().getFullYear(), { test: true }));
 }));
 api.get("/annual/:year/file", need("settings_manage"), wrap(async (req, res) => {
   const r = await one("SELECT file_name, file FROM annual_reports WHERE year=$1", [Number(req.params.year)]);
   if (!r) throw bad("ไม่พบไฟล์", 404);
+  await audit(req.user, "annual_download", r.file_name);
   res.set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   res.set("Content-Disposition", `attachment; filename="${r.file_name}"`);
   res.send(r.file);
 }));
+// ------------------------------------------------------------ audit log (admin)
+const AUDIT_GROUPS = {
+  login: ["login", "login_failed", "login_locked", "login_denied", "logout"],
+  users: ["user_create", "user_update", "user_delete", "user_import", "user_signout", "password_temp", "password_link", "password_changed", "password_reset_done", "permissions_update", "bootstrap_admin"],
+  cases: ["case_create", "case_update", "case_delete", "case_status", "case_owner", "case_start_date", "case_deleted", "import_excel"],
+  data: ["export", "report_send", "schedule_create", "schedule_update", "schedule_delete", "schedule_test", "annual_download"],
+  settings: ["settings_update", "lookup_add", "lookup_update", "lookup_merge", "annual_test", "alert_email_test"],
+};
+async function auditRows(qry) {
+  const days = Math.min(3650, Math.max(1, Number(qry.days) || 30));
+  const params = [days];
+  let where = "at >= now() - make_interval(days => $1)";
+  if (qry.group && AUDIT_GROUPS[qry.group]) {
+    params.push(AUDIT_GROUPS[qry.group]);
+    where += ` AND action = ANY($${params.length})`;
+  }
+  if (qry.q) {
+    params.push(`%${String(qry.q).toLowerCase()}%`);
+    where += ` AND (lower(coalesce(actor,'')) LIKE $${params.length} OR lower(coalesce(target,'')) LIKE $${params.length} OR lower(coalesce(ip,'')) LIKE $${params.length} OR lower(coalesce(detail::text,'')) LIKE $${params.length})`;
+  }
+  return all(
+    `SELECT * FROM (
+       SELECT 'a' || id AS id, at, actor_id, actor, action, target, detail, ip, user_agent FROM audit_log
+       UNION ALL
+       SELECT 'c' || id, detected_at, changed_by, changed_by_name,
+              CASE field WHEN 'status' THEN 'case_status' WHEN 'owner' THEN 'case_owner' WHEN 'start_date' THEN 'case_start_date'
+                         WHEN 'deleted' THEN 'case_deleted' ELSE 'case_' || field END,
+              coalesce(cs_number, '#' || case_id) || coalesce(' · ' || site, ''),
+              jsonb_strip_nulls(jsonb_build_object('old', old_value, 'new', new_value, 'reason', reason, 'case_id', case_id)),
+              NULL, NULL
+       FROM case_changes
+     ) x WHERE ${where} ORDER BY at DESC LIMIT 2000`,
+    params
+  );
+}
 api.get("/audit", need("users_manage"), wrap(async (req, res) => {
-  res.json({ audit: await all("SELECT * FROM audit_log ORDER BY at DESC LIMIT 300") });
+  const rows = await auditRows(req.query);
+  if (req.query.format === "csv") {
+    const cell = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const lines = [["เวลา", "ผู้ทำ", "การกระทำ", "เป้าหมาย", "รายละเอียด", "IP", "เบราว์เซอร์"].map(cell).join(",")];
+    rows.forEach((r) => lines.push([new Date(r.at).toLocaleString("sv-SE", { timeZone: config.tz }), r.actor, r.action, r.target, r.detail ? JSON.stringify(r.detail) : "", r.ip, r.user_agent].map(cell).join(",")));
+    await audit(req.user, "export", "audit log", { format: "csv", rows: rows.length });
+    res.set("Content-Type", "text/csv; charset=utf-8");
+    res.set("Content-Disposition", `attachment; filename="audit-log-${d.toISODate(d.today())}.csv"`);
+    return res.send("\ufeff" + lines.join("\r\n"));
+  }
+  res.json({ audit: rows, groups: Object.keys(AUDIT_GROUPS) });
 }));
 
 module.exports = { api, pool };
