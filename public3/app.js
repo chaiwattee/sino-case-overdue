@@ -853,7 +853,7 @@ ${sel.id !== ME.user.id ? `<button class="btn danger" type="button" id="u-del">�
     $app.innerHTML = `
 <div class="tabs2" role="tablist"><a role="tab" class="on" aria-selected="true" href="#/users">ผู้ใช้</a><a role="tab" aria-selected="false" href="#/roles">สิทธิ์ตามบทบาท</a></div>
 <div class="head"><div><h1>จัดการผู้ใช้</h1><p>เพิ่มหรือปิดการใช้งานบัญชี กำหนดบทบาทและทีม รีเซ็ตรหัสผ่าน ทุกการเปลี่ยนแปลงถูกบันทึก</p></div>
-<div class="actions"><button class="btn primary" type="button" id="u-add">เพิ่มผู้ใช้</button></div></div>
+<div class="actions"><a class="btn" href="api/users/template">ดาวน์โหลดแม่แบบ Excel</a><button class="btn" type="button" id="u-import">นำเข้าจาก Excel</button><button class="btn primary" type="button" id="u-add">เพิ่มผู้ใช้</button></div></div>
 <div class="cols"><section class="card main">
 <div class="filters" style="padding:0">
 <label class="f" style="flex:2 1 220px"><span class="sr">ค้นหาผู้ใช้</span><input type="search" id="uq" value="${esc(params.q || "")}" placeholder="ค้นหาชื่อหรืออีเมล"></label>
@@ -873,6 +873,7 @@ ${list.map((u) => `<tr class="click" data-href="#/users?id=${u.id}" style="${sel
     uq.onkeydown = (e) => e.key === "Enter" && (location.hash = "#/users?" + qs({ q: uq.value, role: params.role }));
     document.getElementById("ur").onchange = (e) => (location.hash = "#/users?" + qs({ q: params.q, role: e.target.value }));
     document.getElementById("u-add").onclick = () => openAddUser();
+    document.getElementById("u-import").onclick = () => openImportUsers();
     if (!sel) return;
     const f = document.getElementById("uf");
     f.onsubmit = async (e) => {
@@ -930,6 +931,90 @@ ${list.map((u) => `<tr class="click" data-href="#/users?id=${u.id}" style="${sel
           toast(e.message, 6000);
         }
       };
+  }
+
+
+  const AUTH_LABEL = { sso: "Microsoft", local: "รหัสผ่าน" };
+  const IMPORT_ACT = { create: ["ok", "เพิ่มใหม่"], update: ["r1", "อัปเดต"], same: ["closed", "ไม่เปลี่ยน"], error: ["overdue", "ผิดพลาด"] };
+  function openImportUsers() {
+    const dlg = document.getElementById("dlg");
+    let fileB64 = null;
+    const step1 = () => {
+      dlg.innerHTML = `<form class="card" method="dialog" id="imf">
+<h2>นำเข้าผู้ใช้จาก Excel</h2>
+<p class="muted" style="margin:0;font-size:14px">ใช้ไฟล์ตามแม่แบบ (Email, ชื่อที่แสดง, บทบาท, ทีม, วิธีเข้าระบบ) ระบบจะแสดงตัวอย่างก่อน ยังไม่บันทึกจนกว่าจะกดยืนยัน ผู้ใช้ที่มีอยู่แล้วจะถูกอัปเดต ไม่มีการลบหรือปิดใช้งานจากไฟล์นี้</p>
+<label class="f">ไฟล์ .xlsx<input type="file" name="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required></label>
+<div id="im-out"></div>
+<div class="right"><a class="btn" href="api/users/template">ดาวน์โหลดแม่แบบ</a><button class="btn" value="cancel" formnovalidate>ปิด</button><button class="btn primary" type="button" id="im-go" disabled>ยืนยันนำเข้า</button></div></form>`;
+      const f = dlg.querySelector("#imf");
+      const out = dlg.querySelector("#im-out");
+      const go = dlg.querySelector("#im-go");
+      f.file.onchange = async () => {
+        go.disabled = true;
+        const file = f.file.files[0];
+        if (!file) return;
+        if (file.size > 2.5 * 1024 * 1024) return (out.innerHTML = `<div class="banner err">ไฟล์ใหญ่เกิน 2.5 MB</div>`);
+        out.innerHTML = `<div class="hint">กำลังอ่านไฟล์…</div>`;
+        fileB64 = await new Promise((ok, no) => {
+          const r = new FileReader();
+          r.onload = () => ok(String(r.result).split(",")[1]);
+          r.onerror = no;
+          r.readAsDataURL(file);
+        });
+        try {
+          const p = await post("/users/import", { file: fileB64 });
+          const sm = p.summary;
+          out.innerHTML = `<div class="kpis" style="grid-template-columns:repeat(4,minmax(0,1fr))">
+<div class="kpi k-normal"><div class="l">เพิ่มใหม่</div><div class="v">${sm.create}</div></div>
+<div class="kpi k-r1"><div class="l">อัปเดต</div><div class="v">${sm.update}</div></div>
+<div class="kpi k-closed"><div class="l">ไม่เปลี่ยน</div><div class="v">${sm.same}</div></div>
+<div class="kpi k-overdue"><div class="l">ผิดพลาด</div><div class="v">${sm.error}</div></div></div>
+${sm.error ? `<div class="banner err">มีแถวที่ผิด ${sm.error} แถว แก้ในไฟล์แล้วเลือกไฟล์ใหม่ (ยังไม่มีอะไรถูกบันทึก)</div>` : ""}
+<div class="tablewrap" style="max-height:46vh;overflow:auto"><table style="min-width:820px"><thead><tr><th class="n">แถว</th><th>ผู้ใช้</th><th>บทบาท</th><th>ทีม</th><th>เข้าระบบ</th><th>ผล</th></tr></thead><tbody>
+${p.rows.map((r) => `<tr><td class="n">${r.row}</td><td><div style="font-weight:600">${esc(r.final ? r.final.display_name : r.name || "-")}</div><div class="hint">${esc(r.email || "-")}</div></td>
+<td>${r.final ? esc(ROLE[r.final.role]) : esc(r.role || "-")}</td>
+<td style="font-size:13px">${r.final ? esc(r.final.teams.map(teamLabel).join(", ") || "-") : esc(r.teams || "-")}</td>
+<td>${r.final ? AUTH_LABEL[r.final.auth_type] : esc(r.auth || "-")}</td>
+<td>${chip(IMPORT_ACT[r.action][0], IMPORT_ACT[r.action][1])}${r.changes && r.changes.length ? `<div class="hint">เปลี่ยน: ${esc(r.changes.join(", "))}</div>` : ""}${r.errors.map((e) => `<div class="hint t-over">${esc(e)}</div>`).join("")}${r.notes.map((e) => `<div class="hint">${esc(e)}</div>`).join("")}</td></tr>`).join("")}
+</tbody></table></div>`;
+          go.disabled = !!sm.error || !(sm.create + sm.update);
+          go.textContent = sm.create + sm.update ? `ยืนยันนำเข้า (เพิ่ม ${sm.create} · อัปเดต ${sm.update})` : "ไม่มีอะไรต้องนำเข้า";
+        } catch (e) {
+          out.innerHTML = `<div class="banner err">${esc(e.message)}</div>`;
+        }
+      };
+      go.onclick = async () => {
+        go.disabled = true;
+        try {
+          const r = await post("/users/import", { file: fileB64, apply: true });
+          const temps = r.created.filter((c) => c.tempPassword);
+          dlg.innerHTML = `<form class="card" method="dialog"><h2>นำเข้าผู้ใช้แล้ว</h2>
+<p style="margin:0">เพิ่มใหม่ ${r.created.length} คน · อัปเดต ${r.updated} คน</p>
+<p class="muted" style="margin:0;font-size:14px">ผู้ใช้บัญชี Microsoft เข้าระบบด้วยปุ่ม "เข้าด้วยบัญชี Microsoft ของบริษัท" ได้ทันที</p>
+${temps.length ? `<div class="banner warn">รหัสผ่านชั่วคราวของบัญชีรหัสผ่าน ${temps.length} คน แสดงครั้งเดียว คัดลอกเก็บไว้แล้วแจ้งแต่ละคนผ่านช่องทางที่ปลอดภัย ระบบบังคับให้เปลี่ยนรหัสตอนเข้าครั้งแรก</div>
+<div class="tablewrap"><table><thead><tr><th>ผู้ใช้</th><th>รหัสชั่วคราว</th></tr></thead><tbody>${temps.map((t) => `<tr><td>${esc(t.display_name)}<div class="hint">${esc(t.email)}</div></td><td class="mono">${esc(t.tempPassword)}</td></tr>`).join("")}</tbody></table></div>
+<div class="right"><button class="btn" type="button" id="im-copy">คัดลอกทั้งหมด</button></div>` : ""}
+<div class="right"><button class="btn primary" value="ok">ปิด</button></div></form>`;
+          const cp = dlg.querySelector("#im-copy");
+          if (cp) cp.onclick = async () => {
+            try {
+              await navigator.clipboard.writeText(temps.map((t) => `${t.email}\t${t.tempPassword}`).join("\n"));
+              toast("คัดลอกแล้ว");
+            } catch (e) {
+              toast("คัดลอกไม่ได้ ให้เลือกข้อความในตารางแทน");
+            }
+          };
+          dlg.onclose = () => { dlg.classList.remove("wide"); viewUsers({}); };
+        } catch (e) {
+          toast("นำเข้าไม่สำเร็จ: " + e.message, 6000);
+          go.disabled = false;
+        }
+      };
+    };
+    dlg.onclose = () => dlg.classList.remove("wide");
+    dlg.classList.add("wide");
+    step1();
+    dlg.showModal();
   }
 
   function openAddUser() {

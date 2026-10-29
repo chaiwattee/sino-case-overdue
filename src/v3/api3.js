@@ -12,10 +12,13 @@ const perms = require("./perms");
 const repo = require("./caserepo");
 const jobs = require("./jobs");
 const { importFromExcel } = require("./importer");
+const userImport = require("./userimport");
 const { requireUser, tempPassword, createResetLink, ssoReady } = require("./auth");
 
 const api = express.Router();
-api.use(express.json({ limit: "200kb" }));
+const jsonSmall = express.json({ limit: "200kb" });
+const jsonFile = express.json({ limit: "4mb" });
+api.use((req, res, next) => (req.path === "/users/import" ? jsonFile : jsonSmall)(req, res, next));
 api.use(requireUser());
 
 const wrap = (fn) => (req, res) =>
@@ -383,6 +386,28 @@ api.get("/users", need("users_manage"), wrap(async (req, res) => {
      FROM users u LEFT JOIN user_teams t ON t.user_id = u.id GROUP BY u.id ORDER BY u.active DESC, u.role, u.display_name`
   );
   res.json({ users: rows });
+}));
+
+api.get("/users/template", need("users_manage"), wrap(async (req, res) => {
+  const buf = await userImport.template();
+  res.set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.set("Content-Disposition", 'attachment; filename="users-template.xlsx"');
+  res.send(Buffer.from(buf));
+}));
+
+// Body: { file: base64 xlsx, apply: boolean }. Without apply it only returns the plan.
+api.post("/users/import", need("users_manage"), wrap(async (req, res) => {
+  const b64 = String(req.body?.file || "").replace(/^data:[^,]*,/, "");
+  if (!b64) throw bad("ไม่ได้แนบไฟล์");
+  const rows = await userImport.parse(Buffer.from(b64, "base64"));
+  if (!rows.length) throw bad("ไม่พบข้อมูลผู้ใช้ในไฟล์");
+  const planned = await userImport.plan(rows, req.user);
+  const count = (a) => planned.filter((p) => p.action === a).length;
+  const summary = { create: count("create"), update: count("update"), same: count("same"), error: count("error") };
+  if (!req.body.apply) return res.json({ ok: true, summary, rows: planned });
+  if (summary.error) throw bad(`มี ${summary.error} แถวที่ผิด แก้ไฟล์แล้วนำเข้าใหม่`);
+  const result = await userImport.apply(planned, req.user);
+  res.json({ ok: true, summary, ...result });
 }));
 
 async function saveTeams(client, userId, teams) {

@@ -285,3 +285,4 @@ td select.inline { min-height: 36px; font-size: 13px; padding: 0 8px; }
 /* labels inside column layouts must not use the filter-row flex-basis as height */
 .card > .f, .stack > .f, .card > fieldset, .card > .stat2 { flex: 0 0 auto; }
 fieldset .chk { flex: 0 1 auto; }
+dialog.wide { width: min(980px, calc(100vw - 32px)); }
