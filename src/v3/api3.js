@@ -561,7 +561,7 @@ async function sampleCase(type) {
     c: {
       key: "sample", id: 0, csNumber: "CS0000000", site: "ลูกค้าตัวอย่าง", task: "ตัวอย่างงาน", status: "In Progress",
       owner: "Owner ตัวอย่าง", ownerEmail: "owner@sinostech.co.th", source: "ENGAGE", sourceLabel: "Engage / NRX / CXone",
-      startDate: d.toISODate(start), dueDate: d.toISODate(d.addDays(start, config.slaDays)), age, stage: type,
+      startDate: start, targetDate: d.addDays(start, config.slaDays), dueDate: d.addDays(start, config.slaDays), age, stage: type,
       daysLeft: Math.max(0, config.slaDays - age), daysOverdue: Math.max(0, age - config.slaDays),
       caseUrl: `${config3.baseUrl}/#/mine`,
     },
