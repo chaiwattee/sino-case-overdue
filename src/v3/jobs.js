@@ -338,6 +338,28 @@ function job(name, expr, enabled, fn) {
   );
 }
 
+// ------------------------------------------------------------ HTTPS certificate expiry
+function certInfo() {
+  const file = config3.https.cert;
+  if (!config3.https.port || !file) return null;
+  try {
+    const x = new (require("crypto").X509Certificate)(require("fs").readFileSync(file));
+    const validTo = new Date(x.validTo);
+    return { subject: x.subject.replace(/\n/g, ", "), issuer: x.issuer.split("\n").find((l) => l.startsWith("O=")) || x.issuer, validTo: validTo.toISOString(), daysLeft: Math.floor((validTo - Date.now()) / 86400000) };
+  } catch (e) {
+    return { error: e.message };
+  }
+}
+async function checkCert() {
+  const c = certInfo();
+  if (!c || c.error || c.daysLeft > 21) return { ok: true, cert: c };
+  const msg = `ใบรับรอง HTTPS ของ ${config3.baseUrl} จะหมดอายุในอีก ${c.daysLeft} วัน (${c.validTo.slice(0, 10)}) ต่ออายุด้วยคำสั่ง acme.sh --renew ตามขั้นตอนในคู่มือติดตั้ง`;
+  await telegram.sendText("⚠️ " + msg).catch((e) => console.error("[cert] telegram:", e.message));
+  const to = splitList(config3.bootstrapAdmin);
+  if (to.length) await graph.sendMail({ to, cc: [], subject: `[Sino Case SLA] ใบรับรอง HTTPS เหลือ ${c.daysLeft} วัน`, html: `<p>${msg}</p>` }).catch((e) => console.error("[cert] mail:", e.message));
+  return { ok: true, warned: true, cert: c };
+}
+
 function startJobs() {
   if (config3.disableScheduler) return console.log("[v3 jobs] scheduler disabled");
   const j = config3.jobs;
@@ -346,10 +368,11 @@ function startJobs() {
   job("reports", "*/5 * * * *", j.reports, () => runDueSchedules());
   job("retention", "0 2 * * *", j.retention, () => runRetention());
   job("annual", "0 6 1 1 *", j.annual, () => runAnnual());
+  job("cert", "15 9 * * *", true, () => checkCert());
   console.log("[v3 jobs]", Object.entries(j).map(([k, v]) => `${k}=${v ? "on" : "off"}`).join(" "));
 }
 
 module.exports = {
   startJobs, lastRuns, runAlerts, sendTelegram, sendReport, runDueSchedules, runRetention, runAnnual,
-  buildAnnualWorkbook, listChanges, teams, splitList, alertRules, siteList, filterSites, sitesLabel, addCustomerSheet,
+  buildAnnualWorkbook, listChanges, teams, splitList, alertRules, certInfo, checkCert, siteList, filterSites, sitesLabel, addCustomerSheet,
 };

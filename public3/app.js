@@ -1225,6 +1225,7 @@ ${audit.map((r) => { const a = ACTION[r.action] || ["closed", r.action]; return 
 <button type="button" data-lk="${l.id}" aria-label="แก้ ${esc(l.value)}">แก้</button></span>`).join("");
     $app.innerHTML = `
 <div class="head"><div><h1>ตั้งค่าระบบ</h1><p>แทน tab Settings ในไฟล์ Excel เดิม แก้ได้เฉพาะ Admin</p></div></div>
+${s.cert && !s.cert.error ? `<div class="banner ${s.cert.daysLeft <= 21 ? "warn" : "ok"}">ใบรับรอง HTTPS ${esc(s.cert.issuer)} ใช้ได้ถึง ${fd(s.cert.validTo, true)} (อีก ${s.cert.daysLeft} วัน)${s.cert.daysLeft <= 21 ? " ต้องต่ออายุ ระบบแจ้งทาง Telegram และ email ทุกวันจนกว่าจะต่ออายุ" : ""}</div>` : ""}
 ${newSites.length ? `<div class="banner warn">มีรายการที่ผู้ใช้เพิ่มใหม่ ${newSites.length} รายการ รอตรวจ (มีป้าย “ใหม่”) กด “แก้” เพื่อยืนยัน แก้ชื่อ หรือรวมกับรายการเดิม</div>` : ""}
 <section class="card" id="ae"><div class="title"><h2>Email แจ้งเตือน Owner</h2><span>ผู้รับ email แจ้งเตือนแต่ละรอบ</span></div>
 <div class="tablewrap"><table style="min-width:720px"><thead><tr><th>รอบ</th><th>ส่งเมื่อ</th><th>ถึง</th><th style="text-align:center">CC รายชื่อด้านล่าง</th><th></th></tr></thead><tbody>

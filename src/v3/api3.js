@@ -598,6 +598,7 @@ api.get("/settings", need("settings_manage"), wrap(async (req, res) => {
     retentionYears: years,
     annual: await getSetting("annual_report", { recipients: "", cc: "" }),
     alertEmail: await jobs.alertRules(),
+    cert: jobs.certInfo(),
     lookups, stats: { ...stats, dbSize: size.size }, annualReports: annual, jobs: config3.jobs,
   });
 }));
