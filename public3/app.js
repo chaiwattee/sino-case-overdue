@@ -29,6 +29,9 @@
   const ROLE = { admin: "Admin", manager: "Manager", engineer: "Engineer", viewer: "Viewer" };
   const ROLE_CHIP = { admin: "overdue", manager: "r1", engineer: "ok", viewer: "closed" };
   const KINDS = ["ดำเนินการ", "ติดต่อลูกค้า", "เปิดเคส Vendor", "Remote / Onsite", "รอข้อมูล"];
+  const SEV_CHIP = { Critical: "overdue", High: "r2", Medium: "r1", Low: "normal", "Request information": "closed" };
+  const SEV_SHORT = { "Request information": "Request info" };
+  const sevChip = (v) => (v ? `<span class="chip c-${SEV_CHIP[v] || "closed"} sev" title="Severity: ${esc(v)}">${esc(SEV_SHORT[v] || v)}</span>` : "");
   const chip = (stage, text) => `<span class="chip c-${stage}">${esc(text || STAGE[stage] || stage)}</span>`;
   const qs = (o) =>
     Object.entries(o)
@@ -153,12 +156,13 @@
 
   function caseTable(cases, { showOwner = true } = {}) {
     if (!cases.length) return `<div class="empty">ไม่มีเคส</div>`;
-    return `<div class="tablewrap"><table style="min-width:${showOwner ? 980 : 880}px">
-<thead><tr><th>เลขเคส</th><th>ลูกค้า / งาน</th>${showOwner ? "<th>Owner</th>" : ""}<th>ทีม</th><th>เปิดเคส</th><th>Due</th><th>อายุเคส</th><th>สถานะ</th></tr></thead>
+    return `<div class="tablewrap"><table style="min-width:${showOwner ? 1080 : 980}px">
+<thead><tr><th>เลขเคส</th><th>Severity</th><th>ลูกค้า / งาน</th>${showOwner ? "<th>Owner</th>" : ""}<th>ทีม</th><th>เปิดเคส</th><th>Due</th><th>อายุเคส</th><th>สถานะ</th></tr></thead>
 <tbody>${cases
       .map(
         (c) => `<tr class="click" data-href="#/case/${c.id}">
 <td><a class="mono" href="#/case/${c.id}">${esc(c.csNumber || "#" + c.id)}</a></td>
+<td>${sevChip(c.severity)}</td>
 <td><div style="font-weight:600">${esc(c.site || "-")}</div><div class="muted" style="font-size:12px">${esc(c.task || "")}</div></td>
 ${showOwner ? `<td><a href="#/owner/${encodeURIComponent(c.ownerId)}">${esc(c.owner || "-")}</a></td>` : ""}
 <td>${esc(c.sourceLabel)}</td>
@@ -171,7 +175,7 @@ ${showOwner ? `<td><a href="#/owner/${encodeURIComponent(c.ownerId)}">${esc(c.ow
       .join("")}</tbody></table></div>`;
   }
 
-  const FIELD = { start_date: "Start date", target_date: "Target date", status: "Status", owner: "Owner", deleted: "ลบเคส" };
+  const FIELD = { severity: "Severity", start_date: "Start date", target_date: "Target date", status: "Status", owner: "Owner", deleted: "ลบเคส" };
   const DIR = { later: "เลื่อนออกไป", earlier: "เลื่อนเข้ามา", set: "ใส่ค่าใหม่", cleared: "ลบค่าออก" };
   function changeRows(changes, { empty = "ยังไม่มีประวัติการแก้ไข" } = {}) {
     if (!changes.length) return `<div class="empty">${empty}</div>`;
@@ -291,7 +295,7 @@ ${lvl("audit_view") !== "none" ? `<section class="card"><div class="title"><h2>�
     let list = tab === "open" ? open : tab === "closed" ? closed30 : cases;
     if (params.q) {
       const s = params.q.toLowerCase();
-      list = list.filter((c) => [c.csNumber, c.site, c.task, c.product].some((v) => String(v || "").toLowerCase().includes(s)));
+      list = list.filter((c) => [c.csNumber, c.site, c.task, c.product, c.severity].some((v) => String(v || "").toLowerCase().includes(s)));
     }
     list.sort((a, b) => (a.stage === "closed") - (b.stage === "closed") || (b.age || 0) - (a.age || 0));
     const cnt = (s) => open.filter((c) => c.stage === s).length;
@@ -326,9 +330,10 @@ ${soon.length ? `<div class="banner warn" role="status">${soon.map((c) => `<a hr
 <a role="tab" href="#/mine?tab=closed" class="${tab === "closed" ? "on" : ""}" aria-selected="${tab === "closed"}">ปิดแล้ว 30 วัน (${closed30.length})</a>
 <a role="tab" href="#/mine?tab=all" class="${tab === "all" ? "on" : ""}" aria-selected="${tab === "all"}">ทั้งหมด (${cases.length})</a></div>
 <label style="flex:0 1 280px"><span class="sr">ค้นหาเคส</span><input type="search" id="q" value="${esc(params.q || "")}" placeholder="ค้นหา CS, ลูกค้า, งาน"></label></div>
-${list.length ? `<div class="tablewrap"><table style="min-width:980px"><thead><tr><th>เลขเคส</th><th>ลูกค้า / งาน</th><th>Product</th><th>เปิดเคส</th><th style="width:150px">อายุเคส</th><th style="width:170px">Status</th><th>อัปเดตล่าสุด</th><th></th></tr></thead><tbody>
+${list.length ? `<div class="tablewrap"><table style="min-width:1080px"><thead><tr><th>เลขเคส</th><th>Severity</th><th>ลูกค้า / งาน</th><th>Product</th><th>เปิดเคส</th><th style="width:150px">อายุเคส</th><th style="width:170px">Status</th><th>อัปเดตล่าสุด</th><th></th></tr></thead><tbody>
 ${list.map((c) => `<tr class="click" data-href="#/case/${c.id}">
 <td><a class="mono" href="#/case/${c.id}">${esc(c.csNumber || "#" + c.id)}</a><div class="hint">${esc(c.sourceLabel)}</div></td>
+<td>${sevChip(c.severity)}</td>
 <td><div style="font-weight:600">${esc(c.site)}</div><div class="muted" style="font-size:12px">${esc(c.task)}</div></td>
 <td>${esc(c.product || "-")}</td>
 <td>${fd(c.startDate)}<div class="hint">Due ${fd(c.dueDate)}</div></td>
@@ -468,7 +473,7 @@ ${allowNew ? `<span class="hint">พิมพ์ชื่อใหม่ได�
     $app.innerHTML = `
 <div class="crumb">${lvl("case_edit") === "none" && lvl("case_create") === "none" ? `<a href="#/">ภาพรวม</a>` : `<a href="#/mine">เคสของฉัน</a>`} / ${isNew ? "เปิดเคสใหม่" : esc(c.csNumber || "#" + c.id)}</div>
 <div class="head"><div><h1>${isNew ? "เปิดเคสใหม่" : `เคส <span class="mono" style="font-size:26px">${esc(c.csNumber || "#" + c.id)}</span>`}</h1>
-<p>${isNew ? "Start date จะบันทึกเป็นวันนี้อัตโนมัติ และ Due = Start date + " + cfg.slaDays + " วัน" : `${esc(c.sourceLabel)} · Owner ${esc(c.owner || "-")} · ${chip(c.stage)}`}</p></div>
+<p>${isNew ? "Start date จะบันทึกเป็นวันนี้อัตโนมัติ และ Due = Start date + " + cfg.slaDays + " วัน" : `${esc(c.sourceLabel)} · Owner ${esc(c.owner || "-")} · ${chip(c.stage)} ${sevChip(c.severity)}`}</p></div>
 <div class="actions">
 ${!isNew && c.site && lvl("export") === "all" ? `<a class="btn" href="#/reports?site=${encodeURIComponent(c.site)}">Export เคสของ ${esc(c.site)}</a>` : ""}
 ${!isNew && permsC.delete ? `<button class="btn danger" type="button" id="btn-del">ลบเคส</button>` : ""}
@@ -481,6 +486,7 @@ ${ro ? `<div class="banner warn">คุณดูเคสนี้ได้อ�
 <legend style="font-size:15px;font-weight:600">ข้อมูลเคส</legend>
 <label class="f">CS Number<input type="text" name="cs_number" value="${esc(c.csNumber || "")}" class="mono" placeholder="เช่น CS5056186"></label>
 ${comboBox("site", c.site, lk.site, { label: "Site / ลูกค้า", allowNew: !ro })}
+<label class="f"><span class="req">Severity</span><select name="severity" required>${isNew ? `<option value="">เลือก Severity</option>` : ""}${(lk.severity || []).map((x) => `<option ${x === c.severity ? "selected" : ""}>${esc(x)}</option>`).join("")}</select></label>
 <label class="f">Product<select name="product">${productOpts}</select></label>
 <label class="f"><span class="req">Status</span><select name="status">${statusOpts}</select></label>
 <label class="f"><span class="req">ทีม</span><select name="team" ${!isNew && !permsC.reassign ? "disabled" : ""}>${teamOpts}</select></label>
@@ -521,6 +527,7 @@ ${actsHtml(data.activities)}</section>`}
         cs_number: f.cs_number.value.trim(),
         site: f.site.value.trim(),
         product: f.product.value,
+        severity: f.severity.value,
         status: f.status.value,
         team: f.team.value,
         task: f.task.value.trim(),
@@ -529,6 +536,7 @@ ${actsHtml(data.activities)}</section>`}
       if (f.owner_id) body.owner_id = Number(f.owner_id.value);
       if (!body.site) return toast("กรุณาระบุ Site / ลูกค้า");
       if (!body.task) return toast("กรุณาระบุ Task / Case");
+      if (!body.severity) return toast("กรุณาเลือก Severity");
       try {
         if (isNew) {
           body.detail = f.detail.value.trim();
@@ -1133,7 +1141,7 @@ ${data.perms.map((p) => `<tr><td><div style="font-weight:500">${esc(p.label)}</d
     login: ["ok", "เข้าสู่ระบบ"], logout: ["closed", "ออกจากระบบ"], login_failed: ["overdue", "เข้าสู่ระบบไม่สำเร็จ"], login_locked: ["overdue", "ถูกล็อกชั่วคราว"], login_denied: ["overdue", "ไม่มีสิทธิ์ใช้งาน"],
     bootstrap_admin: ["r2", "สร้าง Admin คนแรก"], user_create: ["r1", "เพิ่มผู้ใช้"], user_update: ["r1", "แก้ไขผู้ใช้"], user_delete: ["overdue", "ลบผู้ใช้"], user_import: ["r1", "นำเข้าผู้ใช้จาก Excel"], user_signout: ["r1", "บังคับออกจากระบบ"],
     password_temp: ["r2", "สร้างรหัสชั่วคราว"], password_link: ["r2", "ส่งลิงก์ตั้งรหัสใหม่"], password_changed: ["closed", "เปลี่ยนรหัสผ่าน"], password_reset_done: ["closed", "ตั้งรหัสใหม่จากลิงก์"], permissions_update: ["r2", "แก้สิทธิ์ตามบทบาท"],
-    case_create: ["all", "เปิดเคส"], case_update: ["all", "แก้ข้อมูลเคส"], case_status: ["all", "เปลี่ยน Status"], case_owner: ["r1", "โอนเคส"], case_start_date: ["r2", "แก้ Start date"], case_delete: ["overdue", "ลบเคส"], case_deleted: ["overdue", "ลบเคส"], case_target_date: ["r2", "แก้ Target date"], import_excel: ["r1", "นำเข้าเคสจาก Excel"],
+    case_create: ["all", "เปิดเคส"], case_update: ["all", "แก้ข้อมูลเคส"], case_status: ["all", "เปลี่ยน Status"], case_owner: ["r1", "โอนเคส"], case_start_date: ["r2", "แก้ Start date"], case_delete: ["overdue", "ลบเคส"], case_deleted: ["overdue", "ลบเคส"], case_target_date: ["r2", "แก้ Target date"], case_severity: ["r1", "เปลี่ยน Severity"], import_excel: ["r1", "นำเข้าเคสจาก Excel"],
     export: ["all", "Export"], report_send: ["all", "ส่ง Report"], schedule_create: ["all", "เพิ่มรอบส่ง Report"], schedule_update: ["all", "แก้รอบส่ง Report"], schedule_delete: ["r1", "ลบรอบส่ง Report"], schedule_test: ["closed", "ส่ง Report ทดสอบ"], annual_download: ["all", "ดาวน์โหลดรายงานรายปี"],
     settings_update: ["r2", "แก้ตั้งค่าระบบ"], lookup_add: ["closed", "เพิ่มรายการ dropdown"], lookup_update: ["closed", "แก้รายการ dropdown"], lookup_merge: ["r1", "รวมรายการ dropdown"], annual_test: ["closed", "ส่งรายงานรายปีทดสอบ"], alert_email_test: ["closed", "ส่ง email แจ้งเตือนทดสอบ"],
   };

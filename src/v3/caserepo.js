@@ -15,6 +15,9 @@ const CASE_SELECT = `
   JOIN teams t ON t.code = c.team
   LEFT JOIN users u ON u.id = c.owner_id`;
 
+const SEVERITIES = ["Critical", "High", "Medium", "Low", "Request information"];
+const severityOf = (v) => SEVERITIES.find((x) => x.toLowerCase() === String(v || "").trim().toLowerCase()) || null;
+
 function toCase(r) {
   const base = {
     key: `v3:${r.id}`,
@@ -30,6 +33,7 @@ function toCase(r) {
     owner: r.owner_name || "",
     ownerEmail: (r.owner_email || "").toLowerCase(),
     product: r.product || "",
+    severity: r.severity || "",
     csNumber: r.cs_number || "",
     task: r.task || "",
     detail: r.last_activity || "",
@@ -125,12 +129,12 @@ async function createCase(user, body, { ownerId, startDate } = {}) {
     const closed = config.closedStatuses.includes(status.toLowerCase());
     const r = await c.query(
       `INSERT INTO cases (team, cs_number, status, site, product, owner_id, task, note, start_date, due_date, end_date,
-         closed_at, created_by, legacy_key, start_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, COALESCE($15, now())) RETURNING id`,
+         closed_at, created_by, legacy_key, start_at, severity)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, COALESCE($15, now()), COALESCE($16, 'High')) RETURNING id`,
       [body.team, clean(body.cs_number, 60), status, site.value, clean(body.product, 60), ownerId || user?.id,
         clean(body.task, 300), clean(body.note), d.toISODate(start), d.toISODate(due),
         closed ? d.toISODate(body.end_date ? d.fromISODate(body.end_date) : today) : null, closed ? new Date() : null,
-        user?.id || null, body.legacy_key || null, body.start_at || null]
+        user?.id || null, body.legacy_key || null, body.start_at || null, severityOf(body.severity)]
     );
     const id = r.rows[0].id;
     await addActivity(c, id, user, { date: d.toISODate(start), kind: "เปิดเคส", detail: clean(body.detail) || "เปิดเคส", system: !body.detail });
@@ -158,6 +162,14 @@ async function updateCase(user, kase, body, { allowReassign }) {
     if (body.product !== undefined && clean(body.product) !== (kase.product || null)) {
       if (body.product) await ensureLookup(c, "product", body.product, user);
       set("product", clean(body.product, 60));
+    }
+    if (body.severity !== undefined) {
+      const sev = severityOf(body.severity);
+      if (!sev) throw Object.assign(new Error("Severity ไม่ถูกต้อง"), { status: 400 });
+      if (sev !== kase.severity) {
+        set("severity", sev);
+        await logChange(c, kase, user, "severity", kase.severity || null, sev);
+      }
     }
     if (body.cs_number !== undefined && clean(body.cs_number, 60) !== (kase.csNumber || null)) set("cs_number", clean(body.cs_number, 60));
     if (body.task !== undefined && clean(body.task, 300) && clean(body.task, 300) !== kase.task) set("task", clean(body.task, 300));
@@ -227,5 +239,5 @@ async function deleteCase(user, kase, reason) {
 
 module.exports = {
   loadCases, getCase, canSee, activities, addActivity, createCase, updateCase, editStartDate, deleteCase,
-  ensureLookup, logChange, toCase, CASE_SELECT,
+  ensureLookup, logChange, toCase, CASE_SELECT, SEVERITIES, severityOf,
 };

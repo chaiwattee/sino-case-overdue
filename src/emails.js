@@ -81,6 +81,7 @@ ${fieldTable([
   ["เลขเคส (CS)", c.csNumber || "-"],
   ["ลูกค้า / Site", c.site || "-"],
   ["Product", c.product || "-"],
+  ...(c.severity ? [["Severity", c.severity]] : []),
   ["Task / Case", c.task || "-"],
   ["รายละเอียด", c.detail || "-"],
   c.caseUrl ? ["ทีม", c.sourceLabel] : ["เอกสาร", `${c.sourceLabel} · tab ${config.sheetName} แถว ${c.rowNumber}`],

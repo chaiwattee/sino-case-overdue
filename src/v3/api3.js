@@ -58,6 +58,7 @@ api.get("/lookups", wrap(async (req, res) => {
   const rows = await all("SELECT kind, value, is_new FROM lookups WHERE active ORDER BY kind, sort, lower(value)");
   const out = { site: [], product: [], status: [] };
   rows.forEach((r) => out[r.kind].push(r.value));
+  out.severity = repo.SEVERITIES;
   res.json(out);
 }));
 
@@ -114,13 +115,14 @@ api.get("/overview", wrap(async (req, res) => {
 }));
 
 function ser3(c) {
-  return { ...ser(c), id: c.id, team: c.team, ownerUserId: c.owner_id, updatedAt: c.updatedAt, startAt: c.startAt };
+  return { ...ser(c), severity: c.severity, id: c.id, team: c.team, ownerUserId: c.owner_id, updatedAt: c.updatedAt, startAt: c.startAt };
 }
 
 api.get("/cases", wrap(async (req, res) => {
   let cases = await visibleCases(req.user);
   const qy = req.query;
   if (qy.mine === "1") cases = cases.filter((c) => c.owner_id === req.user.id);
+  if (qy.severity) cases = cases.filter((c) => c.severity === qy.severity);
   if (qy.source) cases = cases.filter((c) => c.team === qy.source);
   if (qy.owner) cases = cases.filter((c) => ownerId(c) === String(qy.owner).toLowerCase());
   if (qy.stage) cases = cases.filter((c) => c.stage === qy.stage);
@@ -218,6 +220,7 @@ api.post("/case", wrap(async (req, res) => {
   if (u.role !== "admin" && !u.teams.includes(team)) throw bad("คุณไม่ได้อยู่ในทีมนี้", 403);
   if (!String(b.site || "").trim()) throw bad("กรุณาระบุ Site / ลูกค้า");
   if (!String(b.task || "").trim()) throw bad("กรุณาระบุ Task / Case");
+  if (!repo.severityOf(b.severity)) throw bad("กรุณาเลือก Severity");
   let ownerIdNum = u.id;
   if (b.owner_id && Number(b.owner_id) !== u.id) {
     if (!(await perms.can(u, "case_reassign"))) throw bad("ไม่มีสิทธิ์เปิดเคสในชื่อคนอื่น", 403);
@@ -668,7 +671,7 @@ api.get("/annual/:year/file", need("settings_manage"), wrap(async (req, res) => 
 const AUDIT_GROUPS = {
   login: ["login", "login_failed", "login_locked", "login_denied", "logout"],
   users: ["user_create", "user_update", "user_delete", "user_import", "user_signout", "password_temp", "password_link", "password_changed", "password_reset_done", "permissions_update", "bootstrap_admin"],
-  cases: ["case_create", "case_update", "case_delete", "case_status", "case_owner", "case_start_date", "case_deleted", "import_excel"],
+  cases: ["case_create", "case_update", "case_delete", "case_status", "case_owner", "case_start_date", "case_severity", "case_deleted", "import_excel"],
   data: ["export", "report_send", "schedule_create", "schedule_update", "schedule_delete", "schedule_test", "annual_download"],
   settings: ["settings_update", "lookup_add", "lookup_update", "lookup_merge", "annual_test", "alert_email_test"],
 };
@@ -690,7 +693,7 @@ async function auditRows(qry) {
        UNION ALL
        SELECT 'c' || id, detected_at, changed_by, changed_by_name,
               CASE field WHEN 'status' THEN 'case_status' WHEN 'owner' THEN 'case_owner' WHEN 'start_date' THEN 'case_start_date'
-                         WHEN 'deleted' THEN 'case_deleted' ELSE 'case_' || field END,
+                         WHEN 'deleted' THEN 'case_deleted' WHEN 'severity' THEN 'case_severity' ELSE 'case_' || field END,
               coalesce(cs_number, '#' || case_id) || coalesce(' · ' || site, ''),
               jsonb_strip_nulls(jsonb_build_object('old', old_value, 'new', new_value, 'reason', reason, 'case_id', case_id)),
               NULL, NULL

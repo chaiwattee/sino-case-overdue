@@ -126,6 +126,7 @@ const CASE_COLUMNS = [
   { header: "Owner", key: "owner", width: 22 },
   { header: "Owner Email", key: "ownerEmail", width: 26 },
   { header: "Product", key: "product", width: 12 },
+  { header: "Severity", key: "severity", width: 14 },
   { header: "Task/Case", key: "task", width: 40 },
   { header: "Start date", key: "startDate", width: 12 },
   { header: "Due (Start+7)", key: "dueDate", width: 13 },
