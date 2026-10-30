@@ -10,6 +10,12 @@ function flag(name, def = false) {
 const config3 = {
   port: Number(env.V3_PORT || env.PORT || 3011),
   baseUrl: (env.BASE_URL || "http://localhost:3011").replace(/\/$/, ""),
+  // Plain HTTP listener (for the Cloudflare tunnel); localhost only unless overridden.
+  httpHost: env.V3_HTTP_HOST || "127.0.0.1",
+  // Optional direct HTTPS listener, e.g. case.sinostech.co.th:9443 behind a firewall port-forward.
+  https: { port: Number(env.HTTPS_PORT || 0), cert: env.TLS_CERT_FILE || "", key: env.TLS_KEY_FILE || "" },
+  // Send visitors on any other host name (old *.baanpin.com links) to BASE_URL.
+  canonicalRedirect: env.CANONICAL_REDIRECT === "1",
   databaseUrl: env.DATABASE_URL || "postgres://case_app@127.0.0.1:5433/case_tracker",
   sessionSecret: env.SESSION_SECRET,
   sessionDays: Number(env.SESSION_DAYS || 7),
