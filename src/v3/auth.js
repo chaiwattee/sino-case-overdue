@@ -49,10 +49,14 @@ function setCookie(res, name, value, maxAgeSec) {
   res.append("Set-Cookie", parts.join("; "));
 }
 
+const ssoMaxMs = () => config3.ssoSessionHours * 3600000;
+
 async function startSession(res, user, remember = true) {
-  const days = remember ? config3.sessionDays : 1;
-  const token = sign({ uid: user.id, v: user.session_version, exp: Date.now() + days * 86400000 });
-  setCookie(res, SID, token, days * 86400);
+  // Password accounts: 7 days (or 1 day). Microsoft accounts: short, so access ends soon after the M365 account is removed.
+  const ms = user.auth_type === "sso" ? ssoMaxMs() : (remember ? config3.sessionDays : 1) * 86400000;
+  const now = Date.now();
+  const token = sign({ uid: user.id, v: user.session_version, iat: now, exp: now + ms });
+  setCookie(res, SID, token, Math.floor(ms / 1000));
   await q("UPDATE users SET last_login_at = now() WHERE id = $1", [user.id]);
 }
 
@@ -73,6 +77,10 @@ function requireUser({ allowMustChange = false } = {}) {
       const user = s && (await loadUser(s.uid));
       if (!user || !user.active || user.session_version !== s.v) {
         return res.status(401).json({ error: "กรุณาเข้าสู่ระบบ", code: "LOGIN" });
+      }
+      // Also cuts off Microsoft sessions issued before this limit existed (no iat) or older than the limit.
+      if (user.auth_type === "sso" && (!s.iat || Date.now() - s.iat > ssoMaxMs())) {
+        return res.status(401).json({ error: "กรุณาเข้าสู่ระบบอีกครั้ง", code: "LOGIN" });
       }
       if (user.must_change_password && !allowMustChange) {
         return res.status(403).json({ error: "กรุณาตั้งรหัสผ่านใหม่ก่อนใช้งาน", code: "MUST_CHANGE" });

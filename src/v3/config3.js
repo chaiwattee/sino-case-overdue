@@ -19,6 +19,8 @@ const config3 = {
   databaseUrl: env.DATABASE_URL || "postgres://case_app@127.0.0.1:5433/case_tracker",
   sessionSecret: env.SESSION_SECRET,
   sessionDays: Number(env.SESSION_DAYS || 7),
+  // Microsoft (SSO) sign-ins are re-checked with Microsoft at least this often, so a removed M365 account loses access within this time.
+  ssoSessionHours: Number(env.SSO_SESSION_HOURS || 8),
   bootstrapAdmin: (env.BOOTSTRAP_ADMIN_EMAIL || "").toLowerCase(),
 
   sso: {
