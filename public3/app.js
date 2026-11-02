@@ -652,6 +652,7 @@ ${actsHtml(data.activities)}</section>`}
 <div><h1 style="font-size:24px">${esc(o.owner)}</h1><div class="muted" style="font-size:14px">${esc(o.email || "-")} · ${esc(o.sources.join(", "))}</div></div></div>
 <div class="actions"><label class="f" style="flex:0 1 240px;flex-direction:row;align-items:center;gap:8px">เปลี่ยน Owner
 <select id="pick">${o.owners.map((x) => `<option value="${esc(x.id)}" ${x.id === o.id ? "selected" : ""}>${esc(x.owner || x.id)}</option>`).join("")}</select></label>
+<a class="btn primary" href="#/owner/${encodeURIComponent(o.id)}/meeting">มุมมองประชุม</a>
 ${lvl("export") === "all" ? `<a class="btn" href="api/export?${qs({ from: daysAgo(29), to: daysAgo(0), owner: o.id })}">Export เคสของ Owner นี้</a>` : ""}</div>
 </section>
 <div class="kpis">
@@ -676,6 +677,103 @@ ${o.changes.length && lvl("audit_view") !== "none" ? `<section class="card"><h2>
 ${closed.length ? `<section class="card"><div class="title"><h2>ปิดแล้วใน 30 วัน</h2><span>${closed.length} เคส</span></div>${caseTable(closed, { showOwner: false })}</section>` : ""}`;
     document.getElementById("pick").onchange = (e) => (location.hash = "#/owner/" + encodeURIComponent(e.target.value));
     bindRowLinks();
+  }
+
+
+  // ------------------------------------------------------------ meeting view (one page per owner)
+  async function viewMeeting(id, params) {
+    setNav("owner");
+    const closed = params.closed ?? "7";
+    const showSys = params.sys === "1";
+    const limit = params.n === "all" ? Infinity : Number(params.n || 0) || Infinity;
+    const m = await api(`/owner/${encodeURIComponent(id)}/meeting?closed=${closed}`);
+    const k = m.kpis;
+    const gen = new Date(m.generatedAt);
+    const open = m.cases.filter((c) => c.stage !== "closed");
+    const done = m.cases.filter((c) => c.stage === "closed");
+    const ageText = (c) =>
+      c.stage === "closed"
+        ? `ปิดแล้ว ${fd(c.endDate)}${c.closedOnTime === true ? " · ทัน SLA" : c.closedOnTime === false ? " · เกิน Due" : ""}`
+        : c.age == null ? "ไม่มี Start date" : c.stage === "overdue" ? `วันที่ ${c.age} · เกิน Due ${c.daysOverdue} วัน` : `วันที่ ${c.age} · ${c.daysLeft === 0 ? "ครบกำหนดวันนี้" : `เหลือ ${c.daysLeft} วัน`}`;
+    const alertText = (c) => {
+      const t = Object.fromEntries((c.alerts || []).map((a) => [a.alert_type, a.n]));
+      const parts = [t.r1 && "รอบ 1", t.r2 && "รอบ 2", t.overdue && `เกิน Due ${t.overdue} ครั้ง`].filter(Boolean);
+      return parts.length ? parts.join(" · ") : "-";
+    };
+    const lastAct = (c) => (c.activities || []).find((a) => !a.is_system);
+    const actRows = (c) => {
+      let list = (c.activities || []).filter((a) => showSys || !a.is_system);
+      const total = list.length;
+      list = list.slice(0, limit);
+      if (!list.length) return `<div class="mt-empty">ยังไม่มี Activity</div>`;
+      return `<table class="mt-acts"><tbody>${list
+        .map((a) => `<tr class="${a.is_system ? "sys" : ""}"><td class="d">${fd(a.activity_date, true)}</td><td class="k">${esc(a.kind)}</td><td class="x">${esc(a.detail)}</td><td class="b">${esc(a.by || (a.is_system ? "ระบบ" : "-"))}</td></tr>`)
+        .join("")}</tbody></table>${total > list.length ? `<div class="mt-more">และอีก ${total - list.length} รายการก่อนหน้า</div>` : ""}`;
+    };
+    const card = (c, i) => `<article class="mt-case ${c.stage}" id="mc-${c.id}">
+<header><div class="mt-no">${i + 1}</div>
+<div class="mt-title"><div><span class="mono">${esc(c.csNumber || "#" + c.id)}</span> ${sevChip(c.severity)} ${chip(c.stage)}</div>
+<h3>${esc(c.site || "-")} — ${esc(c.task || "-")}</h3></div>
+<a class="mt-open noprint" href="#/case/${c.id}">เปิดเคส</a></header>
+<dl class="mt-meta">
+<div><dt>Product</dt><dd>${esc(c.product || "-")}</dd></div>
+<div><dt>Status</dt><dd>${esc(c.status || "-")}</dd></div>
+<div><dt>ทีม</dt><dd>${esc(c.sourceLabel)}</dd></div>
+<div><dt>Start date</dt><dd>${fd(c.startDate, true)}</dd></div>
+<div><dt>Due</dt><dd>${fd(c.dueDate, true)}</dd></div>
+<div><dt>อายุเคส</dt><dd class="${c.stage === "overdue" ? "t-over" : c.stage === "r2" ? "t-r2" : ""}">${ageText(c)}</dd></div>
+<div><dt>Email แจ้งเตือน</dt><dd>${alertText(c)}</dd></div>
+</dl>
+${c.note ? `<div class="mt-note"><strong>Note:</strong> ${esc(c.note)}</div>` : ""}
+<div class="mt-acth">Activity / Detail <span>${(c.activities || []).filter((a) => !a.is_system).length} รายการ</span></div>
+${actRows(c)}
+</article>`;
+    const sel = (name, cur, opts) => `<select data-p="${name}">${opts.map(([v, l]) => `<option value="${v}" ${String(cur) === v ? "selected" : ""}>${l}</option>`).join("")}</select>`;
+    $app.innerHTML = `
+<div class="crumb noprint"><a href="#/">ภาพรวม</a> / <a href="#/owner/${encodeURIComponent(m.id)}">${esc(m.owner)}</a> / มุมมองประชุม</div>
+<div class="mt-bar noprint">
+<label>เคสที่ปิดแล้ว ${sel("closed", closed, [["0", "ไม่แสดง"], ["7", "7 วันล่าสุด"], ["14", "14 วันล่าสุด"], ["30", "30 วันล่าสุด"]])}</label>
+<label>Activity ต่อเคส ${sel("n", params.n || "all", [["all", "ทั้งหมด"], ["3", "3 ล่าสุด"], ["5", "5 ล่าสุด"]])}</label>
+<label class="chk"><input type="checkbox" data-p="sys" ${showSys ? "checked" : ""}>แสดงรายการของระบบ</label>
+<span style="flex:1"></span>
+<button class="btn primary" type="button" id="mt-print">พิมพ์ / บันทึก PDF</button></div>
+<section class="mt-sheet">
+<div class="mt-head"><div><div class="mt-kicker">สรุปเคสสำหรับประชุม</div><h1>${esc(m.owner)}</h1>
+<div class="muted">${esc(m.email || "")} · ${esc(m.teams.join(", "))}</div></div>
+<div class="mt-when">ข้อมูล ณ ${gen.getDate()} ${TH_MONTHS[gen.getMonth()]} ${gen.getFullYear() + 543} เวลา ${String(gen.getHours()).padStart(2, "0")}:${String(gen.getMinutes()).padStart(2, "0")} น.</div></div>
+<div class="mt-kpis">
+<div><b>${k.open}</b>ยังไม่ปิด</div><div class="k-normal"><b>${k.normal}</b>ปกติ</div><div class="k-r1"><b>${k.r1}</b>แจ้งรอบ 1</div>
+<div class="k-r2"><b>${k.r2}</b>แจ้งรอบ 2</div><div class="k-overdue"><b>${k.overdue}</b>เกิน Due</div>
+<div><b>${k.sla.pct === null ? "-" : k.sla.pct + "%"}</b>ปิดทัน SLA (30 วัน)</div></div>
+${m.cases.length ? `<table class="mt-index"><thead><tr><th>#</th><th>เลขเคส</th><th>Severity</th><th>ลูกค้า / งาน</th><th>Status</th><th>อายุเคส</th><th>อัปเดตล่าสุด</th></tr></thead><tbody>
+${m.cases.map((c, i) => { const la = lastAct(c); return `<tr class="${c.stage === "closed" ? "done" : ""}"><td>${i + 1}</td><td class="mono"><a href="#mc-${c.id}" data-jump="${c.id}">${esc(c.csNumber || "#" + c.id)}</a></td><td>${sevChip(c.severity)}</td>
+<td><strong>${esc(c.site || "-")}</strong> <span class="muted">${esc(c.task || "")}</span></td><td>${esc(c.status || "-")}</td>
+<td>${chip(c.stage)} <span class="muted">${esc(ageText(c))}</span></td><td class="muted">${la ? `${fd(la.activity_date)} · ${esc(la.detail.length > 70 ? la.detail.slice(0, 70) + "…" : la.detail)}` : "-"}</td></tr>`; }).join("")}
+</tbody></table>` : `<div class="empty">ไม่มีเคสที่ต้องแสดง</div>`}
+${open.length ? `<h2 class="mt-sec">เคสที่ยังไม่ปิด (${open.length})</h2>${open.map((c, i) => card(c, i)).join("")}` : ""}
+${done.length ? `<h2 class="mt-sec">ปิดแล้วใน ${m.closedDays} วันล่าสุด (${done.length})</h2>${done.map((c, i) => card(c, open.length + i)).join("")}` : ""}
+</section>`;
+    const go = (patch) => {
+      const p = { closed, n: params.n, sys: showSys ? "1" : "", ...patch };
+      location.hash = `#/owner/${encodeURIComponent(id)}/meeting?` + qs(p);
+    };
+    $app.querySelectorAll("select[data-p]").forEach((el) => (el.onchange = () => go({ [el.dataset.p]: el.value })));
+    $app.querySelector("input[data-p=sys]").onchange = (e) => go({ sys: e.target.checked ? "1" : "" });
+    $app.querySelectorAll("[data-jump]").forEach((a) => (a.onclick = (e) => {
+      e.preventDefault();
+      document.getElementById("mc-" + a.dataset.jump).scrollIntoView({ behavior: "smooth", block: "start" });
+    }));
+    document.getElementById("mt-print").onclick = () => window.print();
+    // Print in the light theme even when the screen uses the dark one.
+    window.onbeforeprint = () => {
+      document.documentElement.dataset.printTheme = document.documentElement.dataset.theme || "";
+      document.documentElement.dataset.theme = "light";
+    };
+    window.onafterprint = () => {
+      const t = document.documentElement.dataset.printTheme;
+      if (t) document.documentElement.dataset.theme = t;
+      delete document.documentElement.dataset.printTheme;
+    };
   }
 
   // ------------------------------------------------------------ reports
@@ -1428,7 +1526,9 @@ ${forced ? "" : `<label class="f">รหัสผ่านปัจจุบั�
       switch (parts[0]) {
         case "mine": return await viewMine(params);
         case "case": return await viewCase(parts[1] || "new");
-        case "owner": return await viewOwner(parts[1] ? decodeURIComponent(parts[1]) : null);
+        case "owner":
+          if (parts[2] === "meeting") return await viewMeeting(decodeURIComponent(parts[1]), params);
+          return await viewOwner(parts[1] ? decodeURIComponent(parts[1]) : null);
         case "reports": return await viewReports(params);
         case "audit": return await viewAudit(params);
         case "cases": return await viewCases(params);

@@ -166,6 +166,39 @@ api.get("/owner/:id", wrap(async (req, res) => {
   });
 }));
 
+// One-page meeting view of an owner's cases with every activity (for presenting / printing).
+const SEV_RANK = { Critical: 0, High: 1, Medium: 2, Low: 3, "Request information": 4 };
+api.get("/owner/:id/meeting", wrap(async (req, res) => {
+  const cases = await visibleCases(req.user);
+  const id = String(req.params.id).toLowerCase();
+  const mine = cases.filter((c) => ownerId(c) === id);
+  if (!mine.length) return res.status(404).json({ error: "ไม่พบ Owner นี้" });
+  const closedDays = [0, 7, 14, 30].includes(Number(req.query.closed)) ? Number(req.query.closed) : 7;
+  const since = d.addDays(d.today(), -closedDays);
+  const pick = mine
+    .filter((c) => c.stage !== "closed" || (closedDays > 0 && c.endDate && c.endDate >= since))
+    .sort((a, b) => (a.stage === "closed") - (b.stage === "closed") || (SEV_RANK[a.severity] ?? 9) - (SEV_RANK[b.severity] ?? 9) || (b.age || 0) - (a.age || 0));
+  const ids = pick.map((c) => c.id);
+  const [acts, alerts] = ids.length
+    ? await Promise.all([
+        all(`SELECT a.case_id, a.activity_date, a.kind, a.detail, a.is_system, a.created_at, u.display_name AS by
+             FROM case_activities a LEFT JOIN users u ON u.id = a.created_by
+             WHERE a.case_id = ANY($1) ORDER BY a.activity_date DESC, a.id DESC`, [ids]),
+        all(`SELECT case_id, alert_type, count(*)::int AS n, max(sent_at) AS last FROM alert_log
+             WHERE ok AND case_id = ANY($1) GROUP BY case_id, alert_type`, [ids]),
+      ])
+    : [[], []];
+  const byCase = (rows) => rows.reduce((m, r) => ((m[r.case_id] = m[r.case_id] || []).push(r), m), {});
+  const A = byCase(acts);
+  const L = byCase(alerts);
+  res.json({
+    id, owner: mine[0].owner, email: mine[0].ownerEmail, teams: [...new Set(mine.map((c) => c.sourceLabel))],
+    generatedAt: new Date().toISOString(), closedDays,
+    kpis: { ...stageCounts(mine), sla: slaStats(mine) },
+    cases: pick.map((c) => ({ ...ser3(c), activities: A[c.id] || [], alerts: L[c.id] || [] })),
+  });
+}));
+
 api.get("/alerts", wrap(async (req, res) => {
   const ids = (await visibleCases(req.user)).map((c) => c.id);
   const days = Math.min(400, Number(req.query.days || 7));
