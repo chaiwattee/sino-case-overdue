@@ -1684,9 +1684,11 @@ ${i.site ? "" : `<label class="f">ลูกค้า (Site)<select name="site" r
     const dlg = document.getElementById("dlg");
     lookups().then((lk) => {
       dlg.innerHTML = `<form class="card" method="dialog" id="ml"><h2>สร้างลิงก์แจ้งเคสส่งให้ลูกค้าเอง</h2>
-<p class="muted" style="margin:0;font-size:14px">ใช้กับลูกค้าที่ไม่ได้ใช้ LINE หรือทดลองก่อน LINE OA พร้อม ลิงก์ใช้ได้ครั้งเดียว ส่งทาง email หรือแชทได้</p>
+<p class="muted" style="margin:0;font-size:14px">ใช้กับลูกค้าที่ไม่ได้ใช้ LINE หรือทดลองก่อน LINE OA พร้อม ลิงก์ใช้ได้ครั้งเดียว ระบบส่งอีเมลให้ลูกค้า (CC ถึงคุณ) หรือคัดลอกไปส่งทางแชทเองก็ได้</p>
 <div class="formgrid"><label class="f">ลูกค้า (Site)<select name="customer" required><option value="">เลือกลูกค้า</option>${lk.site.map((s) => `<option>${esc(s)}</option>`).join("")}</select></label>
-<label class="f">ชื่อผู้ติดต่อ (ไม่บังคับ)<input name="name"></label><label class="f">เบอร์โทร (ไม่บังคับ)<input name="phone"></label><label class="f">อีเมล (ไม่บังคับ)<input name="email" type="email"></label></div>
+<label class="f">ชื่อผู้ติดต่อ (ไม่บังคับ)<input name="name"></label><label class="f">เบอร์โทร (ไม่บังคับ)<input name="phone"></label><label class="f">อีเมลลูกค้า<input name="email" type="email" placeholder="เช่น somying@company.co.th"></label></div>
+<label class="chk"><input type="checkbox" name="send" checked> ส่งลิงก์ทางอีเมลถึงลูกค้า (CC ถึงคุณ)</label>
+<label class="f">ข้อความเพิ่มเติมในอีเมล (ไม่บังคับ)<textarea name="msg" rows="2" placeholder="เช่น ตามที่คุยทางโทรศัพท์ รบกวนแนบภาพหน้าจอ error มาด้วยครับ"></textarea></label>
 <label class="chk"><input type="checkbox" name="test"> ลิงก์ทดสอบ (แจ้งเตือนเฉพาะผู้รับทดสอบ ไม่ถึงทั้งทีม)</label>
 <div id="ml-out"></div>
 <div class="right"><button class="btn" value="cancel" formnovalidate>ปิด</button><button class="btn primary" value="ok">สร้างลิงก์</button></div></form>`;
@@ -1695,8 +1697,10 @@ ${i.site ? "" : `<label class="f">ลูกค้า (Site)<select name="site" r
         if (e.submitter && e.submitter.value === "cancel") return;
         e.preventDefault();
         try {
-          const r = await post("/intake/manual-link", { customer: f.customer.value, contactName: f.name.value, contactPhone: f.phone.value, contactEmail: f.email.value, test: f.test.checked });
-          document.getElementById("ml-out").innerHTML = `<div class="banner ok" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span class="mono" style="word-break:break-all;flex:1">${esc(r.url)}</span><button class="btn" type="button" id="ml-copy">คัดลอก</button></div><p class="hint">หมดอายุ ${fdt(r.expiresAt)}</p>`;
+          if (f.send.checked && !f.email.value.trim()) return toast("ใส่อีเมลลูกค้า หรือเอาติ๊ก “ส่งลิงก์ทางอีเมล” ออกเพื่อคัดลอกไปส่งเอง", 6000);
+          const r = await post("/intake/manual-link", { customer: f.customer.value, contactName: f.name.value, contactPhone: f.phone.value, contactEmail: f.email.value.trim(), test: f.test.checked, sendEmail: f.send.checked, message: f.msg.value });
+          if (r.emailed) toast(r.emailed.dryRun ? "โหมดทดสอบ: ยังไม่ได้ส่งอีเมลจริง" : `ส่งลิงก์ถึง ${r.emailed.to} แล้ว${r.emailed.cc ? " (CC ถึงคุณ)" : ""}`, 6000);
+          document.getElementById("ml-out").innerHTML = `${r.emailed ? `<div class="banner ok">ส่งอีเมลถึง ${esc(r.emailed.to)} แล้ว</div>` : ""}<div class="banner ok" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span class="mono" style="word-break:break-all;flex:1">${esc(r.url)}</span><button class="btn" type="button" id="ml-copy">คัดลอก</button></div><p class="hint">หมดอายุ ${fdt(r.expiresAt)}</p>`;
           document.getElementById("ml-copy").onclick = () => navigator.clipboard.writeText(r.url).then(() => toast("คัดลอกลิงก์แล้ว"));
         } catch (err) {
           toast(err.message, 6000);
@@ -1825,7 +1829,8 @@ ${d.lineUsers.map((u) => `<tr><td>${esc(u.display_name || "-")}<div class="muted
 <div class="formgrid">
 <label class="f">ส่ง email เคสใหม่ถึง (ว่าง = รายชื่อ CC ของ email แจ้งเตือน)<input id="st-to" value="${esc(s.notifyTo)}" placeholder="engineer@sinostech.co.th"></label>
 <label class="f">ผู้รับแจ้งเตือนของเคสทดสอบ (ว่าง = Admin หลัก)<input id="st-test" value="${esc(s.testNotifyTo)}"></label>
-<label class="f">ลิงก์หมดอายุใน (นาที)<input id="st-exp" type="number" min="10" max="1440" value="${s.linkMinutes}"></label>
+<label class="f">ลิงก์จาก LINE หมดอายุใน (นาที)<input id="st-exp" type="number" min="10" max="1440" value="${s.linkMinutes}"></label>
+<label class="f">ลิงก์ที่ทีมส่งทางอีเมล หมดอายุใน (ชั่วโมง)<input id="st-mexp" type="number" min="1" max="168" value="${s.manualLinkHours}"></label>
 <label class="f">ขอลิงก์ได้ต่อ LINE ต่อชั่วโมง<input id="st-rate" type="number" min="1" max="50" value="${s.linksPerLinePerHour}"></label>
 <label class="f">เตือนครั้งแรกเมื่อไม่มีคนรับเกิน (นาที)<input id="st-after" type="number" min="15" value="${s.reminder.afterMinutes}"></label>
 <label class="f">เตือนซ้ำทุก (นาที)<input id="st-every" type="number" min="15" value="${s.reminder.everyMinutes}"></label>
@@ -1925,7 +1930,7 @@ ${d.outbox.map((o) => `<tr><td>${fdt(o.created_at)}</td><td class="mono">${esc(o
     })));
     const saveSettings = async (rotate) => {
       await post("/intake-admin/settings", {
-        notifyTo: $("st-to").value, testNotifyTo: $("st-test").value, linkMinutes: $("st-exp").value, linksPerLinePerHour: $("st-rate").value,
+        notifyTo: $("st-to").value, testNotifyTo: $("st-test").value, linkMinutes: $("st-exp").value, manualLinkHours: $("st-mexp").value, linksPerLinePerHour: $("st-rate").value,
         reminder: { afterMinutes: $("st-after").value, everyMinutes: $("st-every").value, start: $("st-start").value, end: $("st-end").value },
         burst: { count: $("st-bc").value, minutes: $("st-bm").value }, attachMaxFiles: $("st-af").value, attachMaxMb: $("st-am").value,
         telegram: $("st-tg").checked, webhookUrl: $("st-wh").value.trim(), rotateSecret: rotate,

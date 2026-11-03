@@ -22,6 +22,7 @@ const repo = require("./caserepo");
 // ------------------------------------------------------------ settings
 const DEFAULTS = {
   linkMinutes: 60,
+  manualLinkHours: 24, // links an engineer creates and emails to a customer (people read email later than chat)
   notifyTo: "", // empty = the CC list of owner alert emails
   telegram: true,
   reminder: { afterMinutes: 60, everyMinutes: 60, start: "06:00", end: "22:00" },
@@ -96,7 +97,7 @@ const linkUrl = (token) => `${config3.baseUrl}/r/${token}`;
  * Create a one-time form link. Used by the API (chatbot), the admin simulator and manual links.
  * input: { customer, lineUserId, lineDisplayName, contactName, contactPhone, contactEmail, externalRef }
  */
-async function createLink(input, { apiKey = null, user = null, source = "api", isTest = false } = {}) {
+async function createLink(input, { apiKey = null, user = null, source = "api", isTest = false, minutes = null } = {}) {
   const s = await settings();
   const lineUserId = clean(input.lineUserId, 100) || null;
   let lineUser = null;
@@ -118,7 +119,7 @@ async function createLink(input, { apiKey = null, user = null, source = "api", i
   const contactPhone = clean(input.contactPhone, 60) || (lineUser && lineUser.contact_phone) || "";
 
   const token = newToken();
-  const expires = new Date(Date.now() + Number(s.linkMinutes || 60) * 60000);
+  const expires = new Date(Date.now() + Number(minutes || s.linkMinutes || 60) * 60000);
   const row = await one(
     `INSERT INTO intake_links (token_hash, api_key_id, created_by, source, is_test, site, customer_text, line_user_id,
        contact_name, contact_phone, contact_email, external_ref, expires_at)
@@ -155,8 +156,8 @@ async function linkByToken(token) {
 }
 function linkState(l) {
   if (!l) return { error: "ไม่พบลิงก์นี้ กรุณาขอลิงก์ใหม่จาก LINE OA", status: 404, code: "NOT_FOUND" };
-  if (l.used_at) return { error: "ลิงก์นี้ใช้แจ้งเคสไปแล้ว ถ้าต้องการแจ้งเรื่องใหม่ กด “แจ้งเคส” ใน LINE อีกครั้ง", status: 410, code: "USED" };
-  if (new Date(l.expires_at) < new Date()) return { error: "ลิงก์หมดอายุแล้ว กด “แจ้งเคส” ใน LINE อีกครั้งเพื่อรับลิงก์ใหม่", status: 410, code: "EXPIRED" };
+  if (l.used_at) return { error: "ลิงก์นี้ใช้แจ้งเคสไปแล้ว ถ้าต้องการแจ้งเรื่องใหม่ กด “แจ้งเคส” ใน LINE หรือขอลิงก์ใหม่จากทีมงาน", status: 410, code: "USED" };
+  if (new Date(l.expires_at) < new Date()) return { error: "ลิงก์หมดอายุแล้ว กด “แจ้งเคส” ใน LINE อีกครั้ง หรือขอลิงก์ใหม่จากทีมงาน", status: 410, code: "EXPIRED" };
   return null;
 }
 
@@ -177,6 +178,25 @@ async function recentOwner(site) {
      WHERE c.site = $1 ORDER BY c.start_at DESC NULLS LAST, c.id DESC LIMIT 1`,
     [site]
   );
+}
+
+/** Email to a customer with a one-time form link (sent by an engineer). Customer-facing: no internal links. */
+function customerLinkEmail({ name, customer, url, expiresAt, sender, note }) {
+  const t = new Date(expiresAt);
+  const fmt = new Intl.DateTimeFormat("th-TH", { timeZone: config.tz, day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(t);
+  return `<!doctype html><html><body style="margin:0;padding:24px;background:#F3F5F9;font-family:'Segoe UI',Tahoma,sans-serif;color:#18212F">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;background:#FFFFFF;border:1px solid #D9DFE8;border-radius:12px;overflow:hidden">
+<tr><td style="height:6px;background:#1F5FBF;font-size:0;line-height:0">&nbsp;</td></tr>
+<tr><td style="padding:28px 30px;font-size:15px;line-height:1.7">
+<p style="margin:0 0 6px;font-size:13px;color:#5B6675">Sinostech Support</p>
+<p style="margin:0 0 14px">เรียน ${esc(name || "ลูกค้า")}${customer ? ` (${esc(customer)})` : ""}</p>
+<p style="margin:0 0 14px">กรุณาแจ้งรายละเอียดปัญหาผ่านแบบฟอร์มด้านล่าง ทุกช่องมีตัวอย่างและคำอธิบาย เมื่อส่งแล้วคุณจะได้เลขรับแจ้งทันที และทีมงานจะติดต่อกลับ</p>
+${note ? `<p style="margin:0 0 14px;padding:12px 14px;background:#F6F7F9;border-radius:8px;white-space:pre-wrap">${esc(note)}</p>` : ""}
+<p style="margin:18px 0"><a href="${esc(url)}" style="display:inline-block;padding:12px 22px;border-radius:8px;background:#1F5FBF;color:#FFFFFF;text-decoration:none;font-weight:700">กรอกแบบฟอร์มแจ้งเคส</a></p>
+<p style="margin:0 0 6px;font-size:13px;color:#5B6675">ลิงก์ใช้ได้ 1 ครั้ง ภายใน ${esc(fmt)} น. ถ้าลิงก์หมดอายุ กรุณาติดต่อทีมงานเพื่อขอลิงก์ใหม่</p>
+<p style="margin:0;font-size:13px;color:#5B6675;word-break:break-all">ถ้ากดปุ่มไม่ได้ คัดลอกลิงก์นี้ไปเปิด: ${esc(url)}</p>
+<p style="margin:22px 0 0;padding-top:14px;border-top:1px solid #E2E5EA;font-size:13px;color:#5B6675">ส่งโดย ${esc(sender || "ทีม Support")} · Sinostech Support</p>
+</td></tr></table></body></html>`;
 }
 
 // ------------------------------------------------------------ request numbers
@@ -291,7 +311,7 @@ async function submit(token, b) {
 
   await audit(null, "intake_submit", created.req_no, { site: created.site, customer: created.customer_text, line: !!created.line_user_id, test: created.is_test, held: created.held });
   notifyNew(created).catch((e) => console.error("[intake] notify:", e.message));
-  return { ok: true, reqNo: created.req_no, createdAt: created.created_at, site: created.site, customerText: created.customer_text, subject: created.subject, severity: created.severity, product: created.product, contactName: created.contact_name, contactPhone: created.contact_phone };
+  return { ok: true, channel: created.line_user_id ? "line" : "link", contactEmail: created.contact_email, reqNo: created.req_no, createdAt: created.created_at, site: created.site, customerText: created.customer_text, subject: created.subject, severity: created.severity, product: created.product, contactName: created.contact_name, contactPhone: created.contact_phone };
 }
 
 // ------------------------------------------------------------ notifications
@@ -486,6 +506,23 @@ async function notifyClaimed(i, kase, by, owner) {
       .sendText(`✅ รับเคสแล้ว ${i.req_no}${kase.csNumber ? ` → ${kase.csNumber}` : ""}\n${i.site} · ${i.severity} · Owner: ${owner.display_name}\nโดย ${by.display_name} · รอรับ ${mins < 60 ? mins + " นาที" : Math.floor(mins / 60) + " ชม. " + (mins % 60) + " นาที"}`)
       .catch(() => {});
   }
+  // Customers who came through an emailed link (not LINE) get the "case accepted" message by email instead.
+  if (!i.line_user_id && i.contact_email) {
+    await graph
+      .sendMail({
+        to: [i.contact_email],
+        cc: owner.email ? [owner.email] : [],
+        subject: `${i.is_test ? "[ทดสอบ] " : ""}[${i.req_no}] มี Engineer รับเคสของคุณแล้ว: ${i.subject}`,
+        html: `<!doctype html><html><body style="margin:0;padding:24px;background:#F3F5F9;font-family:'Segoe UI',Tahoma,sans-serif;color:#18212F">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;background:#FFFFFF;border:1px solid #D9DFE8;border-radius:12px;overflow:hidden">
+<tr><td style="height:6px;background:#1C6B45;font-size:0;line-height:0">&nbsp;</td></tr><tr><td style="padding:28px 30px;font-size:15px;line-height:1.7">
+<p style="margin:0 0 6px;font-size:13px;color:#5B6675">Sinostech Support</p><p style="margin:0 0 14px">เรียน ${esc(i.contact_name)}</p>
+<p style="margin:0 0 14px">มี Engineer รับเคสของคุณแล้ว</p>
+${fieldTable([["เลขรับแจ้ง", `${i.req_no}${kase.csNumber ? ` → ${kase.csNumber}` : ""}`], ["หัวข้อ", i.subject], ["ผู้รับผิดชอบ", owner.display_name], ["ติดต่อกลับที่", i.contact_phone]])}
+<p style="margin:16px 0 0">หากต้องการเพิ่มข้อมูล ตอบกลับอีเมลนี้ได้</p></td></tr></table></body></html>`,
+      })
+      .catch((e) => console.error("[intake] customer claim mail:", e.message));
+  }
   await enqueue("case.claimed", i, {
     event: "case.claimed",
     test: i.is_test,
@@ -676,6 +713,7 @@ publicApi.get("/intake/:token", wrap(async (req, res) => {
     contactEmail: link.contact_email || "",
     expiresAt: link.expires_at,
     test: link.is_test,
+    channel: link.line_user_id ? "line" : "link",
     products,
     severities: Object.entries(SEV).map(([value, hint]) => ({ value, hint })),
     attachments: ss && ss.attachments ? { maxFiles: s.attachMaxFiles, maxMb: s.attachMaxMb, ext: FILE_EXT } : null,
@@ -758,8 +796,20 @@ function mountInternal(api, { need, wrap: w }) {
   api.post("/intake/manual-link", need("case_create"), w(async (req, res) => {
     const b = req.body || {};
     if (!clean(b.customer)) throw bad("กรุณาเลือกลูกค้า");
-    const out = await createLink({ customer: b.customer, contactName: b.contactName, contactPhone: b.contactPhone, contactEmail: b.contactEmail }, { user: req.user, source: "manual", isTest: !!b.test });
-    await audit(req.user, "intake_link_manual", b.customer, { linkId: out.linkId, test: !!b.test });
+    const email = clean(b.contactEmail, 200);
+    if (b.sendEmail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw bad("กรุณาใส่อีเมลลูกค้าที่ถูกต้อง");
+    const s = await settings();
+    const out = await createLink({ customer: b.customer, contactName: b.contactName, contactPhone: b.contactPhone, contactEmail: email }, { user: req.user, source: "manual", isTest: !!b.test, minutes: s.manualLinkHours * 60 });
+    if (b.sendEmail) {
+      const r = await graph.sendMail({
+        to: [email],
+        cc: req.user.email ? [req.user.email] : [],
+        subject: `${b.test ? "[ทดสอบ] " : ""}ลิงก์แจ้งเคสถึงทีม Sinostech Support`,
+        html: customerLinkEmail({ name: clean(b.contactName, 120), customer: out.customer.site || b.customer, url: out.url, expiresAt: out.expiresAt, sender: req.user.display_name, note: clean(b.message, 1000) }),
+      });
+      out.emailed = { to: email, cc: req.user.email || null, dryRun: !!r.dryRun };
+    }
+    await audit(req.user, "intake_link_manual", b.customer, { linkId: out.linkId, test: !!b.test, emailedTo: b.sendEmail ? email : null });
     res.json(out);
   }));
 
@@ -799,6 +849,7 @@ function mountInternal(api, { need, wrap: w }) {
     const next = {
       ...cur,
       linkMinutes: num(b.linkMinutes, 10, 24 * 60, 60),
+      manualLinkHours: num(b.manualLinkHours, 1, 168, 24),
       notifyTo: splitList(b.notifyTo || "").join(", "),
       testNotifyTo: splitList(b.testNotifyTo || "").join(", "),
       telegram: !!b.telegram,

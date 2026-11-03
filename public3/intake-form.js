@@ -83,7 +83,7 @@ ${info.attachments ? `<div class="f"><span class="lbl">แนบไฟล์</sp
 <div class="foot" style="flex-direction:column;align-items:stretch">
 <label class="consent"><input type="checkbox" name="consent" required><span>ยินยอมให้ Sinostech ใช้ชื่อ เบอร์โทร และอีเมลนี้ เพื่อติดต่อเรื่องเคสนี้เท่านั้น</span></label>
 <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
-<span class="hint">หลังกดส่ง คุณได้เลขรับแจ้งทันที และได้ข้อความทาง LINE เมื่อมี Engineer รับเคส</span>
+<span class="hint">หลังกดส่ง คุณได้เลขรับแจ้งทันที และได้${info.channel === "line" ? "ข้อความทาง LINE" : "อีเมล"} เมื่อมี Engineer รับเคส</span>
 <button class="btn primary" type="submit" id="send">ส่งแจ้งเคส</button></div></div>
 </form>`;
     const f = $("f");
@@ -194,7 +194,7 @@ ${info.attachments ? `<div class="f"><span class="lbl">แนบไฟล์</sp
     $("exp").textContent = "";
     window.scrollTo(0, 0);
     app.innerHTML = `<div class="center"><div class="okmark"><svg width="32" height="32" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="#1C6B45" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-<h1>ได้รับแจ้งเคสของคุณแล้ว</h1><p class="lead" style="margin:0">ทีมงานได้รับแจ้งเตือนแล้ว เมื่อมี Engineer รับเคส คุณจะได้ข้อความทาง LINE พร้อมชื่อผู้รับผิดชอบ</p></div>
+<h1>ได้รับแจ้งเคสของคุณแล้ว</h1><p class="lead" style="margin:0">ทีมงานได้รับแจ้งเตือนแล้ว เมื่อมี Engineer รับเคส คุณจะได้${r.channel === "line" ? "ข้อความทาง LINE" : r.contactEmail ? "อีเมลที่ " + esc(r.contactEmail) : "การติดต่อกลับ"} พร้อมชื่อผู้รับผิดชอบ</p></div>
 <div class="reqno"><span>เลขรับแจ้งของคุณ</span><strong>${esc(r.reqNo)}</strong><span class="hint">ใช้เลขนี้อ้างอิงทุกครั้งที่ติดต่อทีมงาน</span></div>
 <dl class="sum">
 <div><dt>บริษัท</dt><dd>${esc(r.site || r.customerText || "-")}</dd></div>
@@ -203,10 +203,10 @@ ${info.attachments ? `<div class="f"><span class="lbl">แนบไฟล์</sp
 <div><dt>แจ้งเมื่อ</dt><dd>${esc(when(r.createdAt))}</dd></div>
 <div class="full"><dt>หัวข้อ</dt><dd>${esc(r.subject)}</dd></div></dl>
 <section><h2 style="border:0;padding:0">ขั้นตอนต่อจากนี้</h2><ol class="next">
-<li><span class="n">1</span><span><strong>ทีมงานรับเคส</strong> และมอบหมาย Engineer ผู้รับผิดชอบ คุณจะได้ข้อความทาง LINE</span></li>
+<li><span class="n">1</span><span><strong>ทีมงานรับเคส</strong> และมอบหมาย Engineer ผู้รับผิดชอบ คุณจะได้${r.channel === "line" ? "ข้อความทาง LINE" : "อีเมลแจ้ง"}</span></li>
 <li><span class="n">2</span><span><strong>Engineer ติดต่อกลับ</strong> เพื่อสอบถามข้อมูลเพิ่ม หรือขอ remote เข้าตรวจสอบ</span></li>
 <li><span class="n">3</span><span><strong>แจ้งผล</strong> เมื่อแก้ไขเสร็จและปิดเคส</span></li></ol></section>
-<p class="hint" style="text-align:center;margin:0">ปิดหน้านี้ได้เลย ถ้าต้องการแจ้งเรื่องใหม่ กด “แจ้งเคส” ใน LINE อีกครั้ง</p>`;
+<p class="hint" style="text-align:center;margin:0">ปิดหน้านี้ได้เลย${r.channel === "line" ? " ถ้าต้องการแจ้งเรื่องใหม่ กด “แจ้งเคส” ใน LINE อีกครั้ง" : ""}</p>`;
   }
 
   (async function boot() {
