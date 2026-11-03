@@ -125,7 +125,7 @@ async function sendDailySummary(opts = {}) {
   if (overdue.length) {
     const items = overdue.map(
       (c) =>
-        `🔴 ${c.csNumber || "-"} · ${c.site || "-"}\n   👤 ${c.owner || "-"} · เกิน ${c.daysOverdue} วัน (เปิด ${d.thaiDate(
+        `🔴 ${c.caseNo || c.csNumber || "-"}${c.caseNo && c.csNumber ? ` (${c.csNumber})` : ""} · ${c.site || "-"}\n   👤 ${c.owner || "-"} · เกิน ${c.daysOverdue} วัน (เปิด ${d.thaiDate(
           c.startDate
         )})\n`
     );
@@ -158,8 +158,9 @@ async function sendDailySummary(opts = {}) {
     const ws = wb.addWorksheet("Open cases");
     ws.columns = [
       { header: "เอกสาร", key: "source", width: 12 },
+      { header: "เลขเคส", key: "caseNo", width: 16 },
       { header: "CS Number", key: "csNumber", width: 14 },
-      { header: "Site", key: "site", width: 16 },
+      { header: "ลูกค้า (Site)", key: "site", width: 16 },
       { header: "Owner", key: "owner", width: 22 },
       { header: "สถานะ SLA", key: "stageLabel", width: 14 },
       { header: "Start date", key: "startDate", width: 12 },

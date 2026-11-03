@@ -119,10 +119,11 @@ async function buildReport({ from, to, owner, cases: given, changes: givenChange
 
 const CASE_COLUMNS = [
   { header: "เอกสาร", key: "source", width: 12 },
+  { header: "เลขเคส", key: "caseNo", width: 16 },
   { header: "CS Number", key: "csNumber", width: 14 },
   { header: "Status", key: "status", width: 13 },
   { header: "สถานะ SLA", key: "stageLabel", width: 14 },
-  { header: "Site", key: "site", width: 16 },
+  { header: "ลูกค้า (Site)", key: "site", width: 16 },
   { header: "Owner", key: "owner", width: 22 },
   { header: "Owner Email", key: "ownerEmail", width: 26 },
   { header: "Product", key: "product", width: 12 },
@@ -185,6 +186,8 @@ async function reportWorkbook(rep) {
     [
       { header: "ตรวจพบเมื่อ", key: "detected", width: 18 },
       { header: "เอกสาร", key: "source", width: 12 },
+      { header: "เลขเคส", key: "case_no", width: 16 },
+      { header: "ลูกค้า", key: "site", width: 16 },
       { header: "CS Number", key: "cs_number", width: 14 },
       { header: "Owner", key: "owner", width: 22 },
       { header: "ช่อง", key: "field", width: 12 },

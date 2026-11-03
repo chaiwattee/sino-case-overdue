@@ -35,6 +35,7 @@ function toCase(r) {
     product: r.product || "",
     severity: r.severity || "",
     csNumber: r.cs_number || "",
+    caseNo: r.case_no || "",
     task: r.task || "",
     detail: r.last_activity || "",
     note: r.note || "",
@@ -109,10 +110,10 @@ async function logChange(client, kase, user, field, oldV, newV, reason) {
   }
   await client.query(
     `INSERT INTO case_changes (case_id, cs_number, team, site, owner_name, owner_email, field, old_value, new_value,
-       direction, reason, changed_by, changed_by_name)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+       direction, reason, changed_by, changed_by_name, case_no)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
     [kase.id, kase.csNumber || null, kase.team, kase.site, kase.owner, kase.ownerEmail, field, oldV, newV, direction,
-      reason || null, user?.id || null, user?.display_name || "system"]
+      reason || null, user?.id || null, user?.display_name || "system", kase.caseNo || null]
   );
 }
 

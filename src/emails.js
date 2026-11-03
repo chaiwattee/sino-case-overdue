@@ -52,7 +52,7 @@ function button(href, label, primary = true) {
 
 /** Alert to the case owner: type = r1 | r2 | overdue */
 function caseAlertEmail(c, type) {
-  const id = c.csNumber || `แถว ${c.no || c.rowNumber}`;
+  const id = [c.caseNo, c.csNumber].filter(Boolean).join(" / ") || `แถว ${c.no || c.rowNumber}`;
   let subject;
   let lead;
   if (type === "r1") {
@@ -78,7 +78,8 @@ function caseAlertEmail(c, type) {
     `<p style="margin:0 0 12px">เรียน ${esc(c.owner || "Owner")}</p>
 <p style="margin:0 0 18px">${lead} กรุณาอัปเดตสถานะหรือปิดเคส${c.caseUrl ? "บนหน้าเว็บ" : "ใน Case List"}</p>
 ${fieldTable([
-  ["เลขเคส (CS)", c.csNumber || "-"],
+  ...(c.caseNo ? [["เลขเคส", c.caseNo]] : []),
+  ["CS Number", c.csNumber || "-"],
   ["ลูกค้า / Site", c.site || "-"],
   ["Product", c.product || "-"],
   ...(c.severity ? [["Severity", c.severity]] : []),

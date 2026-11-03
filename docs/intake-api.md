@@ -99,6 +99,7 @@ const ok = crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(req.headers
   "test": false,
   "reqNo": "REQ-2026-0012",
   "caseId": 812,
+  "caseNo": "CASE-2026-0042",
   "csNumber": "CS5056901",
   "customer": "KTB",
   "subject": "Agent login เข้าระบบไม่ได้",
@@ -108,7 +109,7 @@ const ok = crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(req.headers
   "lineUserId": "U4af4980629...",
   "externalRef": "chat-88123",
   "contact": { "name": "สมหญิง ใจดี", "phone": "081-234-5678" },
-  "message": "มี Engineer รับเคสแล้ว\nREQ-2026-0012 → CS5056901\nAgent login เข้าระบบไม่ได้\n\nผู้รับผิดชอบ: ภาณุวัฒน์ ทูวาศิน\nจะติดต่อกลับที่ 081-234-5678"
+  "message": "มี Engineer รับเคสแล้ว\nREQ-2026-0012 → CASE-2026-0042\nAgent login เข้าระบบไม่ได้\n\nผู้รับผิดชอบ: ภาณุวัฒน์ ทูวาศิน\nจะติดต่อกลับที่ 081-234-5678"
 }
 ```
 

@@ -61,6 +61,7 @@ function ser(c) {
     ownerId: ownerId(c),
     product: c.product,
     csNumber: c.csNumber,
+    caseNo: c.caseNo,
     task: c.task,
     detail: c.detail,
     note: c.note,

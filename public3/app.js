@@ -32,6 +32,11 @@
   const SEV_CHIP = { Critical: "overdue", High: "r2", Medium: "r1", Low: "normal", "Request information": "closed" };
   const SEV_SHORT = { "Request information": "Request info" };
   const sevChip = (v) => (v ? `<span class="chip c-${SEV_CHIP[v] || "closed"} sev" title="Severity: ${esc(v)}">${esc(SEV_SHORT[v] || v)}</span>` : "");
+  // Case number CASE-2026-0001 (every case) with the vendor CS Number underneath.
+  const caseRef = (c) => c.caseNo || c.case_no || c.csNumber || c.cs_number || "#" + (c.id || c.case_id);
+  const csOf = (c) => c.csNumber || c.cs_number || "";
+  const caseCell = (c, href, extra = "") =>
+    `<a class="mono" href="${href}">${esc(caseRef(c))}</a><div class="muted" style="font-size:12px">${csOf(c) ? esc(csOf(c)) : "ยังไม่มี CS"}${extra ? " · " + extra : ""}</div>`;
   const chip = (stage, text) => `<span class="chip c-${stage}">${esc(text || STAGE[stage] || stage)}</span>`;
   const qs = (o) =>
     Object.entries(o)
@@ -158,13 +163,14 @@
   function caseTable(cases, { showOwner = true } = {}) {
     if (!cases.length) return `<div class="empty">ไม่มีเคส</div>`;
     return `<div class="tablewrap"><table style="min-width:${showOwner ? 1080 : 980}px">
-<thead><tr><th>เลขเคส</th><th>Severity</th><th>ลูกค้า / งาน</th>${showOwner ? "<th>Owner</th>" : ""}<th>ทีม</th><th>เปิดเคส</th><th>Due</th><th>อายุเคส</th><th>สถานะ</th></tr></thead>
+<thead><tr><th>เลขเคส</th><th>ลูกค้า</th><th>Severity</th><th>งาน</th>${showOwner ? "<th>Owner</th>" : ""}<th>ทีม</th><th>เปิดเคส</th><th>Due</th><th>อายุเคส</th><th>สถานะ</th></tr></thead>
 <tbody>${cases
       .map(
         (c) => `<tr class="click" data-href="#/case/${c.id}">
-<td><a class="mono" href="#/case/${c.id}">${esc(c.csNumber || "#" + c.id)}</a></td>
+<td>${caseCell(c, `#/case/${c.id}`)}</td>
+<td style="font-weight:600">${esc(c.site || "-")}</td>
 <td>${sevChip(c.severity)}</td>
-<td><div style="font-weight:600">${esc(c.site || "-")}</div><div class="muted" style="font-size:12px">${esc(c.task || "")}</div></td>
+<td style="font-size:13px">${esc(c.task || "")}</td>
 ${showOwner ? `<td><a href="#/owner/${encodeURIComponent(c.ownerId)}">${esc(c.owner || "-")}</a></td>` : ""}
 <td>${esc(c.sourceLabel)}</td>
 <td>${fd(c.startDate)}</td>
@@ -181,11 +187,12 @@ ${showOwner ? `<td><a href="#/owner/${encodeURIComponent(c.ownerId)}">${esc(c.ow
   function changeRows(changes, { empty = "ยังไม่มีประวัติการแก้ไข" } = {}) {
     if (!changes.length) return `<div class="empty">${empty}</div>`;
     const val = (c, v) => (c.field === "start_date" || c.field === "target_date" ? fd(v, true) : esc(v || "-"));
-    return `<div class="tablewrap"><table style="min-width:860px"><thead><tr><th>เมื่อ</th><th>เคส</th><th>Owner</th><th>รายการ</th><th>เดิม → ใหม่</th><th>แก้โดย</th></tr></thead><tbody>${changes
+    return `<div class="tablewrap"><table style="min-width:860px"><thead><tr><th>เมื่อ</th><th>เลขเคส</th><th>ลูกค้า</th><th>Owner</th><th>รายการ</th><th>เดิม → ใหม่</th><th>แก้โดย</th></tr></thead><tbody>${changes
       .map(
         (c) => `<tr>
 <td>${fdt(c.detected_at)}</td>
-<td>${c.case_id ? `<a class="mono" href="#/case/${c.case_id}">${esc(c.cs_number || "#" + c.case_id)}</a>` : `<span class="mono">${esc(c.cs_number || "-")}</span>`}<div class="muted" style="font-size:12px">${esc(teamLabel(c.team || c.source))} · ${esc(c.site || "-")}</div></td>
+<td>${c.case_id ? `<a class="mono" href="#/case/${c.case_id}">${esc(caseRef(c))}</a>` : `<span class="mono">${esc(c.case_no || c.cs_number || "-")}</span>`}<div class="muted" style="font-size:12px">${c.cs_number ? esc(c.cs_number) + " · " : ""}${esc(teamLabel(c.team || c.source))}</div></td>
+<td style="font-weight:600">${esc(c.site || "-")}</td>
 <td>${esc(c.owner || c.owner_name || "-")}</td>
 <td>${esc(FIELD[c.field] || c.field)}</td>
 <td>${val(c, c.old_value)} → <strong>${val(c, c.new_value)}</strong>${c.direction ? `<div style="font-size:12px" class="${c.direction === "later" ? "t-r2" : "muted"}">${esc(DIR[c.direction] || "")}</div>` : ""}${c.reason ? `<div class="hint">เหตุผล: ${esc(c.reason)}</div>` : ""}</td>
@@ -221,7 +228,7 @@ ${showOwner ? `<td><a href="#/owner/${encodeURIComponent(c.ownerId)}">${esc(c.ow
     for (let day = 0; day <= cfg.slaDays; day++) cols.push({ day, zone: zoneOf(day), items: data.runway.filter((c) => c.age === day) });
     const over = data.runway.filter((c) => c.age > cfg.slaDays).sort((a, b) => b.daysOverdue - a.daysOverdue);
     const dotHtml = (c) =>
-      `<a class="rw-dot c-${c.stage}" href="#/case/${c.id}" title="${esc(`${c.csNumber || "#" + c.id} · ${c.site || "-"} · ${c.owner || "-"} · วันที่ ${c.age}${c.daysOverdue ? ` (เกิน ${c.daysOverdue} วัน)` : ""}`)}" aria-label="${esc(`${c.csNumber || "เคส"} ของ ${c.owner || "-"} วันที่ ${c.age}`)}"></a>`;
+      `<a class="rw-dot c-${c.stage}" href="#/case/${c.id}" title="${esc(`${caseRef(c)} · ${c.site || "-"} · ${c.owner || "-"} · วันที่ ${c.age}${c.daysOverdue ? ` (เกิน ${c.daysOverdue} วัน)` : ""}`)}" aria-label="${esc(`${caseRef(c)} ${c.site || ""} ของ ${c.owner || "-"} วันที่ ${c.age}`)}"></a>`;
     const dayLabel = (d) => (d === 0 ? "เปิดเคส" : d === cfg.alert1Day ? "แจ้งรอบ 1" : d === cfg.alert2Day ? "แจ้งรอบ 2" : d === cfg.slaDays ? "ครบ Due" : "&nbsp;");
     const runwayHtml = `<div class="runway-wrap"><div class="runway" role="img" aria-label="เคสที่ยังเปิดอยู่ แยกตามจำนวนวันนับจาก Start date">
 ${cols.map((c) => `<div class="rw-col"><div class="rw-count">${c.items.length || ""}</div><div class="rw-dots">${c.items.map(dotHtml).join("")}</div><div class="rw-band z-${c.zone}"></div><div class="rw-day"><strong>วันที่ ${c.day}</strong>${dayLabel(c.day)}</div></div>`).join("")}
@@ -237,7 +244,7 @@ ${can("case_create") ? `<a class="btn primary" href="#/case/new">เปิดเ
 ${ikHtml}
 <form class="filters" id="flt" onsubmit="return false">
 <label class="f">ทีม<select name="source"><option value="">ทุกทีมที่เห็นได้ (${data.sources.length})</option>${teamOpts}</select></label>
-<label class="f" style="flex:2 1 260px">ค้นหาเคส<input type="search" name="q" placeholder="เลขเคส, ลูกค้า, Owner, งาน"></label>
+<label class="f" style="flex:2 1 260px">ค้นหาเคส<input type="search" name="q" placeholder="เลขเคส, CS, ลูกค้า, Owner, งาน"></label>
 </form>
 <div class="kpis">
 ${kpi("all", "เคสที่ยังไม่ปิด", openTotal, params.source ? esc(teamLabel(params.source)) : "ทุกทีมที่เห็นได้")}
@@ -261,7 +268,7 @@ ${data.owners.map((o) => `<tr class="click" data-href="#/owner/${encodeURICompon
 ${data.topCases.length ? `<section class="card"><div class="title"><h2>เคสที่ต้องตามด่วน</h2><span>แจ้งรอบ 2 และเกิน Due · 10 อันดับแรก</span></div>${caseTable(data.topCases)}</section>` : ""}
 <section class="card"><div class="title"><h2>Email แจ้งเตือนที่ส่งวันนี้</h2><span>${(() => { const r = cfg.alertRules || {}; const t = (r.ccTypes || []).map((x) => ALERT[x]); return r.cc && t.length ? `ถึง Owner · CC ${esc(r.cc)} เฉพาะ${esc(t.join(", "))}` : "ถึง Owner เท่านั้น"; })()}</span></div>
 ${data.alertsToday.length ? `<div class="tablewrap"><table style="min-width:720px"><thead><tr><th>เวลา</th><th>เลขเคส</th><th>ลูกค้า</th><th>Owner</th><th>ประเภท</th><th>ผล</th></tr></thead><tbody>
-${data.alertsToday.map((a) => `<tr><td>${fdt(a.sent_at)}</td><td><a class="mono" href="#/case/${a.case_id}">${esc(a.cs_number || "#" + a.case_id)}</a></td><td>${esc(a.site || "-")}</td><td>${esc(a.owner || "-")}</td>
+${data.alertsToday.map((a) => `<tr><td>${fdt(a.sent_at)}</td><td>${caseCell(a, `#/case/${a.case_id}`)}</td><td style="font-weight:600">${esc(a.site || "-")}</td><td>${esc(a.owner || "-")}</td>
 <td>${chip(a.alert_type, ALERT[a.alert_type])}</td><td>${a.ok ? chip("ok", "ส่งแล้ว") : `<span class="chip c-fail" title="${esc(a.error)}">ส่งไม่สำเร็จ</span>`}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">วันนี้ยังไม่มีการส่ง email แจ้งเตือน</div>`}
 </section>
 ${lvl("audit_view") !== "none" ? `<section class="card"><div class="title"><h2>การแก้ไขล่าสุด (14 วัน)</h2><a href="#/audit">ดูทั้งหมด</a></div>${changeRows(data.changes.slice(0, 8))}</section>` : ""}`;
@@ -298,7 +305,7 @@ ${lvl("audit_view") !== "none" ? `<section class="card"><div class="title"><h2>�
     let list = tab === "open" ? open : tab === "closed" ? closed30 : cases;
     if (params.q) {
       const s = params.q.toLowerCase();
-      list = list.filter((c) => [c.csNumber, c.site, c.task, c.product, c.severity].some((v) => String(v || "").toLowerCase().includes(s)));
+      list = list.filter((c) => [c.caseNo, c.csNumber, c.site, c.task, c.product, c.severity].some((v) => String(v || "").toLowerCase().includes(s)));
     }
     list.sort((a, b) => (a.stage === "closed") - (b.stage === "closed") || (b.age || 0) - (a.age || 0));
     const cnt = (s) => open.filter((c) => c.stage === s).length;
@@ -319,7 +326,7 @@ ${lvl("audit_view") !== "none" ? `<section class="card"><div class="title"><h2>�
 <div class="actions">${lvl("export") !== "none" ? `<a class="btn" href="api/export?${qs({ from: daysAgo(89), to: daysAgo(0), owner: ME.user.email })}">Export เคสของฉัน</a>` : ""}
 ${can("case_create") ? `<a class="btn primary" href="#/case/new">เปิดเคสใหม่</a>` : ""}</div></div>
 ${ikHtml}
-${soon.length ? `<div class="banner warn" role="status">${soon.map((c) => `<a href="#/case/${c.id}">${esc(c.csNumber || "#" + c.id)}</a> ${c.stage === "overdue" ? `เกิน Due มาแล้ว ${c.daysOverdue} วัน` : c.daysLeft === 0 ? "ครบกำหนดวันนี้" : `เหลือ ${c.daysLeft} วัน`}`).join(" · ")}</div>` : ""}
+${soon.length ? `<div class="banner warn" role="status">${soon.map((c) => `<a href="#/case/${c.id}">${esc(caseRef(c))}</a> ${esc(c.site || "")} ${c.stage === "overdue" ? `เกิน Due มาแล้ว ${c.daysOverdue} วัน` : c.daysLeft === 0 ? "ครบกำหนดวันนี้" : `เหลือ ${c.daysLeft} วัน`}`).join(" · ")}</div>` : ""}
 <div class="kpis">
 <div class="kpi k-all"><div class="l">ยังเปิดอยู่</div><div class="v">${open.length}</div></div>
 <div class="kpi k-normal"><div class="l">ปกติ</div><div class="v">${cnt("normal")}</div></div>
@@ -333,12 +340,13 @@ ${soon.length ? `<div class="banner warn" role="status">${soon.map((c) => `<a hr
 <a role="tab" href="#/mine?tab=open" class="${tab === "open" ? "on" : ""}" aria-selected="${tab === "open"}">ยังเปิดอยู่ (${open.length})</a>
 <a role="tab" href="#/mine?tab=closed" class="${tab === "closed" ? "on" : ""}" aria-selected="${tab === "closed"}">ปิดแล้ว 30 วัน (${closed30.length})</a>
 <a role="tab" href="#/mine?tab=all" class="${tab === "all" ? "on" : ""}" aria-selected="${tab === "all"}">ทั้งหมด (${cases.length})</a></div>
-<label style="flex:0 1 280px"><span class="sr">ค้นหาเคส</span><input type="search" id="q" value="${esc(params.q || "")}" placeholder="ค้นหา CS, ลูกค้า, งาน"></label></div>
-${list.length ? `<div class="tablewrap"><table style="min-width:1080px"><thead><tr><th>เลขเคส</th><th>Severity</th><th>ลูกค้า / งาน</th><th>Product</th><th>เปิดเคส</th><th style="width:150px">อายุเคส</th><th style="width:170px">Status</th><th>อัปเดตล่าสุด</th><th></th></tr></thead><tbody>
+<label style="flex:0 1 280px"><span class="sr">ค้นหาเคส</span><input type="search" id="q" value="${esc(params.q || "")}" placeholder="ค้นหาเลขเคส, CS, ลูกค้า, งาน"></label></div>
+${list.length ? `<div class="tablewrap"><table style="min-width:1080px"><thead><tr><th>เลขเคส</th><th>ลูกค้า</th><th>Severity</th><th>งาน</th><th>Product</th><th>เปิดเคส</th><th style="width:150px">อายุเคส</th><th style="width:170px">Status</th><th>อัปเดตล่าสุด</th><th></th></tr></thead><tbody>
 ${list.map((c) => `<tr class="click" data-href="#/case/${c.id}">
-<td><a class="mono" href="#/case/${c.id}">${esc(c.csNumber || "#" + c.id)}</a><div class="hint">${esc(c.sourceLabel)}</div></td>
+<td>${caseCell(c, `#/case/${c.id}`, esc(c.sourceLabel))}</td>
+<td style="font-weight:600">${esc(c.site)}</td>
 <td>${sevChip(c.severity)}</td>
-<td><div style="font-weight:600">${esc(c.site)}</div><div class="muted" style="font-size:12px">${esc(c.task)}</div></td>
+<td style="font-size:13px">${esc(c.task)}</td>
 <td>${esc(c.product || "-")}</td>
 <td>${fd(c.startDate)}<div class="hint">Due ${fd(c.dueDate)}</div></td>
 <td>${ageCell(c)}</td>
@@ -476,8 +484,8 @@ ${allowNew ? `<span class="hint">พิมพ์ชื่อใหม่ได�
       : "";
 
     $app.innerHTML = `
-<div class="crumb">${lvl("case_edit") === "none" && lvl("case_create") === "none" ? `<a href="#/">ภาพรวม</a>` : `<a href="#/mine">เคสของฉัน</a>`} / ${isNew ? "เปิดเคสใหม่" : esc(c.csNumber || "#" + c.id)}</div>
-<div class="head"><div><h1>${isNew ? "เปิดเคสใหม่" : `เคส <span class="mono" style="font-size:26px">${esc(c.csNumber || "#" + c.id)}</span>`}</h1>
+<div class="crumb">${lvl("case_edit") === "none" && lvl("case_create") === "none" ? `<a href="#/">ภาพรวม</a>` : `<a href="#/mine">เคสของฉัน</a>`} / ${isNew ? "เปิดเคสใหม่" : esc(caseRef(c))}</div>
+<div class="head"><div><h1>${isNew ? "เปิดเคสใหม่" : `เคส <span class="mono" style="font-size:26px">${esc(caseRef(c))}</span> <span class="muted" style="font-size:16px;font-weight:500">${esc(c.site || "")}${csOf(c) ? " · " + esc(csOf(c)) : ""}</span>`}</h1>
 <p>${isNew ? "Start date จะบันทึกเป็นวันนี้อัตโนมัติ และ Due = Start date + " + cfg.slaDays + " วัน" : `${esc(c.sourceLabel)} · Owner ${esc(c.owner || "-")} · ${chip(c.stage)} ${sevChip(c.severity)}`}</p></div>
 <div class="actions">
 ${!isNew && c.site && lvl("export") === "all" ? `<a class="btn" href="#/reports?site=${encodeURIComponent(c.site)}">Export เคสของ ${esc(c.site)}</a>` : ""}
@@ -643,7 +651,7 @@ ${actsHtml(data.activities)}</section>`}
       .slice(0, 6)
       .map(([cid, list]) => {
         const c = byId[cid];
-        return `<div><div style="font-weight:600;margin-bottom:8px"><a class="mono" href="#/case/${cid}">${esc(c?.csNumber || "#" + cid)}</a> · ${esc(c?.site || "")}</div><div class="timeline">${list
+        return `<div><div style="font-weight:600;margin-bottom:8px"><a class="mono" href="#/case/${cid}">${esc(c ? caseRef(c) : "#" + cid)}</a> · ${esc(c?.site || "")}${c && csOf(c) ? ` <span class="muted">${esc(csOf(c))}</span>` : ""}</div><div class="timeline">${list
           .slice()
           .reverse()
           .map((a) => `<div class="it"><span class="dot d-${a.alert_type}" aria-hidden="true"></span><div><div class="t">${ALERT[a.alert_type]} · ${fdt(a.sent_at)}</div><div class="s">${a.ok ? `ถึง ${esc(a.to_list)}${a.cc_list ? " · CC " + esc(a.cc_list) : ""}` : "ส่งไม่สำเร็จ: " + esc(a.error)}</div></div></div>`)
@@ -717,7 +725,7 @@ ${closed.length ? `<section class="card"><div class="title"><h2>ปิดแล�
     };
     const card = (c, i) => `<article class="mt-case ${c.stage}" id="mc-${c.id}">
 <header><div class="mt-no">${i + 1}</div>
-<div class="mt-title"><div><span class="mono">${esc(c.csNumber || "#" + c.id)}</span> ${sevChip(c.severity)} ${chip(c.stage)}</div>
+<div class="mt-title"><div><span class="mono">${esc(caseRef(c))}</span>${csOf(c) ? ` <span class="muted">${esc(csOf(c))}</span>` : ""} ${sevChip(c.severity)} ${chip(c.stage)}</div>
 <h3>${esc(c.site || "-")} — ${esc(c.task || "-")}</h3></div>
 <a class="mt-open noprint" href="#/case/${c.id}">เปิดเคส</a></header>
 <dl class="mt-meta">
@@ -750,9 +758,9 @@ ${actRows(c)}
 <div><b>${k.open}</b>ยังไม่ปิด</div><div class="k-normal"><b>${k.normal}</b>ปกติ</div><div class="k-r1"><b>${k.r1}</b>แจ้งรอบ 1</div>
 <div class="k-r2"><b>${k.r2}</b>แจ้งรอบ 2</div><div class="k-overdue"><b>${k.overdue}</b>เกิน Due</div>
 <div><b>${k.sla.pct === null ? "-" : k.sla.pct + "%"}</b>ปิดทัน SLA (30 วัน)</div></div>
-${m.cases.length ? `<table class="mt-index"><thead><tr><th>#</th><th>เลขเคส</th><th>Severity</th><th>ลูกค้า / งาน</th><th>Status</th><th>อายุเคส</th><th>อัปเดตล่าสุด</th></tr></thead><tbody>
-${m.cases.map((c, i) => { const la = lastAct(c); return `<tr class="${c.stage === "closed" ? "done" : ""}"><td>${i + 1}</td><td class="mono"><a href="#mc-${c.id}" data-jump="${c.id}">${esc(c.csNumber || "#" + c.id)}</a></td><td>${sevChip(c.severity)}</td>
-<td><strong>${esc(c.site || "-")}</strong> <span class="muted">${esc(c.task || "")}</span></td><td>${esc(c.status || "-")}</td>
+${m.cases.length ? `<table class="mt-index"><thead><tr><th>#</th><th>เลขเคส</th><th>ลูกค้า</th><th>Severity</th><th>งาน</th><th>Status</th><th>อายุเคส</th><th>อัปเดตล่าสุด</th></tr></thead><tbody>
+${m.cases.map((c, i) => { const la = lastAct(c); return `<tr class="${c.stage === "closed" ? "done" : ""}"><td>${i + 1}</td><td class="mono"><a href="#mc-${c.id}" data-jump="${c.id}">${esc(caseRef(c))}</a>${csOf(c) ? `<div class="muted" style="font-size:11px">${esc(csOf(c))}</div>` : ""}</td><td><strong>${esc(c.site || "-")}</strong></td><td>${sevChip(c.severity)}</td>
+<td class="muted">${esc(c.task || "")}</td><td>${esc(c.status || "-")}</td>
 <td>${chip(c.stage)} <span class="muted">${esc(ageText(c))}</span></td><td class="muted">${la ? `${fd(la.activity_date)} · ${esc(la.detail.length > 70 ? la.detail.slice(0, 70) + "…" : la.detail)}` : "-"}</td></tr>`; }).join("")}
 </tbody></table>` : `<div class="empty">ไม่มีเคสที่ต้องแสดง</div>`}
 ${open.length ? `<h2 class="mt-sec">เคสที่ยังไม่ปิด (${open.length})</h2>${open.map((c, i) => card(c, i)).join("")}` : ""}
@@ -1640,7 +1648,7 @@ ${i.site ? "" : `<label class="f">ลูกค้า (Site)<select name="site" r
           site: f.site ? f.site.value : undefined, team: f.team.value, csNumber: f.cs.value, severity: f.sev.value, note: f.note.value,
         });
         dlg.close();
-        toast(`${r.reqNo} เป็นเคสของ ${r.owner} แล้ว เริ่มนับ SLA วันนี้`, 5000);
+        toast(`${r.reqNo} เป็นเคส ${r.caseNo} ของ ${r.owner} แล้ว เริ่มนับ SLA วันนี้`, 5000);
         if (after) after(r);
         else location.hash = `#/case/${r.caseId}`;
       } catch (err) {
@@ -1721,7 +1729,7 @@ ${i.site ? "" : `<label class="f">ลูกค้า (Site)<select name="site" r
 <td><strong>${ikCustomer(i)}</strong><div class="muted" style="font-size:13px">${esc(i.subject)}</div>${ikTags(i) ? `<div style="margin-top:4px">${ikTags(i)}</div>` : ""}</td>
 <td>${esc(i.contact_name)}<div class="muted" style="font-size:13px">${esc(i.contact_phone)}</div></td>
 ${status === "pending" || status === "held" ? `<td class="${Date.now() - new Date(i.created_at).getTime() > 3600000 ? "t-over" : ""}">${waitedText(i.created_at)}</td><td>${esc(i.recent_owner_name || "-")}</td>`
-      : status === "claimed" ? `<td>${fdt(i.claimed_at)}</td><td>${esc(i.owner_name || "-")}${i.case_id ? `<div><a href="#/case/${i.case_id}">${esc(i.cs_number || "เคส #" + i.case_id)}</a></div>` : ""}</td>`
+      : status === "claimed" ? `<td>${fdt(i.claimed_at)}</td><td>${esc(i.owner_name || "-")}${i.case_id ? `<div><a href="#/case/${i.case_id}">${esc(i.case_no || i.cs_number || "เคส #" + i.case_id)}</a></div>` : ""}</td>`
       : `<td>${fdt(i.claimed_at)}</td><td>${esc(i.duplicate_of ? "ซ้ำกับ " + i.duplicate_of : i.closed_reason || "-")}</td>`}</tr>`).join("");
     const heads = status === "pending" || status === "held" ? "<th>รอมาแล้ว</th><th>ดูแลเคสล่าสุด</th>" : status === "claimed" ? "<th>รับเมื่อ</th><th>Owner / เคส</th>" : "<th>ปิดเมื่อ</th><th>เหตุผล</th>";
     $app.innerHTML = `<div class="head"><div><h1>เคสจากลูกค้า</h1><p>ลูกค้าแจ้งผ่าน LINE OA หรือลิงก์ ทุกคนในทีมรับได้ · SLA ${cfg.slaDays} วันเริ่มนับเมื่อรับเคส · ยังไม่มีคนรับเกิน 1 ชม. ระบบเตือนทีมทุกชั่วโมง 06:00–22:00</p></div>
@@ -1744,7 +1752,7 @@ ${status === "pending" && d.items.length ? `<div class="ik-grid">${d.items.map(i
 <div class="head"><div><h1>${esc(i.req_no)} ${sevChip(i.severity)}</h1><p>${ikCustomer(i)} · ${esc(i.subject)}</p></div>
 <div class="actions">${i.status === "pending" && !i.held && can("case_create") ? `<button class="btn primary" type="button" data-claim="${i.id}">รับเคสเอง</button><button class="btn" type="button" data-transfer="${i.id}">โอนให้ Owner</button><button class="btn" type="button" id="rej">ปิดคำขอ (ซ้ำ / ไม่ใช่เคส)</button>` : ""}
 ${i.held && lvl("settings_manage") === "all" ? `<button class="btn primary" type="button" id="rel">ปล่อยคำขอนี้ (แจ้งทีมตามปกติ)</button>` : ""}
-${i.case_id ? `<a class="btn primary" href="#/case/${i.case_id}">เปิดเคส ${esc(i.cs_number || "#" + i.case_id)}</a>` : ""}</div></div>
+${i.case_id ? `<a class="btn primary" href="#/case/${i.case_id}">เปิดเคส ${esc(i.case_no || i.cs_number || "#" + i.case_id)}</a>` : ""}</div></div>
 ${ikTags(i) ? `<div>${ikTags(i)}</div>` : ""}
 <div class="grid2"><section class="card"><h2>ข้อมูลที่ลูกค้าแจ้ง</h2>
 <div class="stat2" style="grid-template-columns:1fr 1fr">

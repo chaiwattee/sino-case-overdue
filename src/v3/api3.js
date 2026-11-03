@@ -110,13 +110,13 @@ api.get("/overview", wrap(async (req, res) => {
     changes,
     topCases: open.filter((c) => c.stage === "overdue" || c.stage === "r2").sort((a, b) => (b.age || 0) - (a.age || 0)).slice(0, 10).map(ser3),
     runway: open.filter((c) => c.age != null).map((c) => ({
-      id: c.id, csNumber: c.csNumber, site: c.site, owner: c.owner, ownerId: ownerId(c), age: c.age, stage: c.stage, daysOverdue: c.daysOverdue || 0,
+      id: c.id, caseNo: c.caseNo, csNumber: c.csNumber, site: c.site, owner: c.owner, ownerId: ownerId(c), age: c.age, stage: c.stage, daysOverdue: c.daysOverdue || 0,
     })),
   });
 }));
 
 function ser3(c) {
-  return { ...ser(c), severity: c.severity, id: c.id, team: c.team, ownerUserId: c.owner_id, updatedAt: c.updatedAt, startAt: c.startAt };
+  return { ...ser(c), caseNo: c.caseNo, severity: c.severity, id: c.id, team: c.team, ownerUserId: c.owner_id, updatedAt: c.updatedAt, startAt: c.startAt };
 }
 
 api.get("/cases", wrap(async (req, res) => {
@@ -129,7 +129,7 @@ api.get("/cases", wrap(async (req, res) => {
   if (qy.stage) cases = cases.filter((c) => c.stage === qy.stage);
   if (qy.q) {
     const s = String(qy.q).toLowerCase();
-    cases = cases.filter((c) => [c.csNumber, c.site, c.owner, c.task, c.product, c.note].some((v) => String(v || "").toLowerCase().includes(s)));
+    cases = cases.filter((c) => [c.caseNo, c.csNumber, c.site, c.owner, c.task, c.product, c.note].some((v) => String(v || "").toLowerCase().includes(s)));
   }
   res.json({ cases: cases.map(ser3) });
 }));
@@ -282,7 +282,7 @@ api.put("/case/:id", wrap(async (req, res) => {
   const r = await repo.updateCase(u, c, b, { allowReassign });
   // Status and owner changes are already in case_changes; record the other edited fields here.
   const other = (r.changed || []).filter((f) => !["status", "owner", "owner_id", "end_date", "closed_at"].includes(f));
-  if (other.length) await audit(u, "case_update", `${c.csNumber || "#" + c.id} · ${c.site || ""}`, { case_id: c.id, fields: other });
+  if (other.length) await audit(u, "case_update", `${c.caseNo || c.csNumber || "#" + c.id} · ${c.site || ""}`, { case_id: c.id, fields: other });
   res.json({ ok: true, ...r });
 }));
 
@@ -311,7 +311,7 @@ api.delete("/case/:id", wrap(async (req, res) => {
   const c = await loadVisible(req);
   if (!(await perms.can(req.user, "case_delete", c))) throw bad("ไม่มีสิทธิ์ลบเคส", 403);
   await repo.deleteCase(req.user, c, req.body?.reason);
-  await audit(req.user, "case_delete", String(c.id), { cs: c.csNumber, reason: req.body?.reason });
+  await audit(req.user, "case_delete", String(c.id), { case_no: c.caseNo, cs: c.csNumber, reason: req.body?.reason });
   res.json({ ok: true });
 }));
 
@@ -593,7 +593,7 @@ async function sampleCase(type) {
   return {
     sample: true,
     c: {
-      key: "sample", id: 0, csNumber: "CS0000000", site: "ลูกค้าตัวอย่าง", task: "ตัวอย่างงาน", status: "In Progress",
+      key: "sample", id: 0, caseNo: "CASE-2026-0000", csNumber: "CS0000000", site: "ลูกค้าตัวอย่าง", task: "ตัวอย่างงาน", status: "In Progress",
       owner: "Owner ตัวอย่าง", ownerEmail: "owner@sinostech.co.th", source: "ENGAGE", sourceLabel: "Engage / NRX / CXone",
       startDate: start, targetDate: d.addDays(start, config.slaDays), dueDate: d.addDays(start, config.slaDays), age, stage: type,
       daysLeft: Math.max(0, config.slaDays - age), daysOverdue: Math.max(0, age - config.slaDays),
@@ -729,7 +729,7 @@ async function auditRows(qry) {
        SELECT 'c' || id, detected_at, changed_by, changed_by_name,
               CASE field WHEN 'status' THEN 'case_status' WHEN 'owner' THEN 'case_owner' WHEN 'start_date' THEN 'case_start_date'
                          WHEN 'deleted' THEN 'case_deleted' WHEN 'severity' THEN 'case_severity' ELSE 'case_' || field END,
-              coalesce(cs_number, '#' || case_id) || coalesce(' · ' || site, ''),
+              coalesce(case_no, cs_number, '#' || case_id) || coalesce(' · ' || site, ''),
               jsonb_strip_nulls(jsonb_build_object('old', old_value, 'new', new_value, 'reason', reason, 'case_id', case_id)),
               NULL, NULL
        FROM case_changes

@@ -64,7 +64,7 @@ async function runAlerts({ dryRun = false } = {}) {
   const todo = due.filter((x) => !sent.has(x.dedupe)).sort((a, b) => (b.c.age || 0) - (a.c.age || 0));
   const result = { candidates: due.length, alreadySent: due.length - todo.length, sent: 0, failed: 0, items: [] };
   if (dryRun) {
-    result.items = todo.map((x) => ({ case: x.c.csNumber || x.c.id, owner: x.c.owner, type: x.type }));
+    result.items = todo.map((x) => ({ case: x.c.caseNo || x.c.csNumber || x.c.id, owner: x.c.owner, type: x.type }));
     return result;
   }
   const rules = await alertRules();
@@ -88,9 +88,9 @@ async function runAlerts({ dryRun = false } = {}) {
     if (!dry) {
       await q(
         `INSERT INTO alert_log (dedupe_key, case_id, team, cs_number, owner, owner_email, site, alert_type, case_age,
-           to_list, cc_list, subject, ok, error) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+           to_list, cc_list, subject, ok, error, case_no) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
         [x.dedupe, c.id, c.team, c.csNumber || null, c.owner, c.ownerEmail, c.site, x.type, c.age, to.join(","),
-          cc.join(","), finalSubject, ok, error]
+          cc.join(","), finalSubject, ok, error, c.caseNo || null]
       ).catch((e) => console.error("[v3 alerts] log:", e.message));
       if (ok) {
         const label = { r1: "แจ้งเตือนรอบ 1", r2: "แจ้งเตือนรอบ 2", overdue: "แจ้งเกิน Due" }[x.type];
@@ -98,7 +98,7 @@ async function runAlerts({ dryRun = false } = {}) {
           .catch(() => {});
       }
     }
-    result.items.push({ case: c.csNumber || c.id, owner: c.owner, type: x.type, ok });
+    result.items.push({ case: c.caseNo || c.csNumber || c.id, owner: c.owner, type: x.type, ok });
     await sleep(config.mock ? 0 : 2500);
   }
   return result;

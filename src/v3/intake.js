@@ -479,7 +479,7 @@ async function claim(user, id, b) {
     await audit(user, "intake_claim", i.req_no, { caseId, owner: owner.display_name, transfer: owner.id !== user.id });
     const kase = await repo.getCase(caseId);
     notifyClaimed(done, kase, user, owner).catch((e) => console.error("[intake] claim notify:", e.message));
-    return { ok: true, caseId, reqNo: i.req_no, owner: owner.display_name };
+    return { ok: true, caseId, caseNo: kase.caseNo, reqNo: i.req_no, owner: owner.display_name };
   } catch (e) {
     await q("UPDATE intakes SET status = 'pending' WHERE id = $1 AND status = 'claiming'", [i.id]);
     throw e;
@@ -503,7 +503,7 @@ async function notifyClaimed(i, kase, by, owner) {
   if (s.telegram && !i.is_test) {
     const mins = Math.round((new Date(i.claimed_at) - new Date(i.created_at)) / 60000);
     await telegram
-      .sendText(`✅ รับเคสแล้ว ${i.req_no}${kase.csNumber ? ` → ${kase.csNumber}` : ""}\n${i.site} · ${i.severity} · Owner: ${owner.display_name}\nโดย ${by.display_name} · รอรับ ${mins < 60 ? mins + " นาที" : Math.floor(mins / 60) + " ชม. " + (mins % 60) + " นาที"}`)
+      .sendText(`✅ รับเคสแล้ว ${i.req_no} → ${kase.caseNo}${kase.csNumber ? ` (${kase.csNumber})` : ""}\n${i.site} · ${i.severity} · Owner: ${owner.display_name}\nโดย ${by.display_name} · รอรับ ${mins < 60 ? mins + " นาที" : Math.floor(mins / 60) + " ชม. " + (mins % 60) + " นาที"}`)
       .catch(() => {});
   }
   // Customers who came through an emailed link (not LINE) get the "case accepted" message by email instead.
@@ -518,7 +518,7 @@ async function notifyClaimed(i, kase, by, owner) {
 <tr><td style="height:6px;background:#1C6B45;font-size:0;line-height:0">&nbsp;</td></tr><tr><td style="padding:28px 30px;font-size:15px;line-height:1.7">
 <p style="margin:0 0 6px;font-size:13px;color:#5B6675">Sinostech Support</p><p style="margin:0 0 14px">เรียน ${esc(i.contact_name)}</p>
 <p style="margin:0 0 14px">มี Engineer รับเคสของคุณแล้ว</p>
-${fieldTable([["เลขรับแจ้ง", `${i.req_no}${kase.csNumber ? ` → ${kase.csNumber}` : ""}`], ["หัวข้อ", i.subject], ["ผู้รับผิดชอบ", owner.display_name], ["ติดต่อกลับที่", i.contact_phone]])}
+${fieldTable([["เลขรับแจ้ง", `${i.req_no} → ${kase.caseNo}${kase.csNumber ? ` (${kase.csNumber})` : ""}`], ["หัวข้อ", i.subject], ["ผู้รับผิดชอบ", owner.display_name], ["ติดต่อกลับที่", i.contact_phone]])}
 <p style="margin:16px 0 0">หากต้องการเพิ่มข้อมูล ตอบกลับอีเมลนี้ได้</p></td></tr></table></body></html>`,
       })
       .catch((e) => console.error("[intake] customer claim mail:", e.message));
@@ -528,6 +528,7 @@ ${fieldTable([["เลขรับแจ้ง", `${i.req_no}${kase.csNumber ? `
     test: i.is_test,
     reqNo: i.req_no,
     caseId: kase.id,
+    caseNo: kase.caseNo,
     csNumber: kase.csNumber || null,
     customer: i.site,
     subject: i.subject,
@@ -537,7 +538,7 @@ ${fieldTable([["เลขรับแจ้ง", `${i.req_no}${kase.csNumber ? `
     lineUserId: i.line_user_id,
     externalRef: i.external_ref,
     contact: { name: i.contact_name, phone: i.contact_phone },
-    message: `มี Engineer รับเคสแล้ว\n${i.req_no}${kase.csNumber ? ` → ${kase.csNumber}` : ""}\n${i.subject}\n\nผู้รับผิดชอบ: ${owner.display_name}\nจะติดต่อกลับที่ ${i.contact_phone}`,
+    message: `มี Engineer รับเคสแล้ว\n${i.req_no} → ${kase.caseNo}\n${i.subject}\n\nผู้รับผิดชอบ: ${owner.display_name}\nจะติดต่อกลับที่ ${i.contact_phone}`,
   });
 }
 
@@ -742,7 +743,7 @@ publicApi.use((req, res) => res.status(404).json({ ok: false, error: "not found"
 
 // ------------------------------------------------------------ internal (logged-in) routes, mounted on the v3 api router
 function mountInternal(api, { need, wrap: w }) {
-  const LIST = `SELECT i.*, cb.display_name AS claimed_by_name, ow.display_name AS owner_name, c.cs_number,
+  const LIST = `SELECT i.*, cb.display_name AS claimed_by_name, ow.display_name AS owner_name, c.cs_number, c.case_no,
       ro.id AS recent_owner_id, ro.display_name AS recent_owner_name, ro.start_date AS recent_owner_date, s.team AS site_team,
       (SELECT count(*)::int FROM intake_files f WHERE f.intake_id = i.id) AS files
     FROM intakes i LEFT JOIN users cb ON cb.id = i.claimed_by LEFT JOIN users ow ON ow.id = i.owner_id
