@@ -169,6 +169,16 @@ async function siteSettings(site) {
   );
 }
 
+/** Who looked after this customer's most recent case (active users only) — shown instead of a fixed site owner. */
+async function recentOwner(site) {
+  if (!site) return null;
+  return one(
+    `SELECT u.id, u.display_name, u.email, c.start_date FROM cases c JOIN users u ON u.id = c.owner_id AND u.active
+     WHERE c.site = $1 ORDER BY c.start_at DESC NULLS LAST, c.id DESC LIMIT 1`,
+    [site]
+  );
+}
+
 // ------------------------------------------------------------ request numbers
 async function nextReqNo(client) {
   const year = Number(new Intl.DateTimeFormat("en-CA", { timeZone: config.tz, year: "numeric" }).format(new Date()));
@@ -301,8 +311,8 @@ async function teamRecipients(i) {
     const ae = await getSetting("alert_email", null);
     to = splitList((ae && ae.cc) || config.alertCc.join(","));
   }
-  const ss = await siteSettings(i.site);
-  const cc = ss && ss.owner_email && !to.includes(ss.owner_email.toLowerCase()) ? [ss.owner_email] : [];
+  const ro = await recentOwner(i.site);
+  const cc = ro && ro.email && !to.includes(ro.email.toLowerCase()) ? [ro.email] : [];
   return { to, cc };
 }
 
@@ -322,11 +332,11 @@ async function notifyNew(i) {
   const s = await settings();
   if (i.held) return notifyBurst();
   const { to, cc } = await teamRecipients(i);
-  const ss = await siteSettings(i.site);
+  const ro = await recentOwner(i.site);
   const subject = `${tag(i)}[เคสใหม่จากลูกค้า] ${i.severity} · ${customerName(i)} · ${i.subject}`;
   const html = shell(
     SEV_COLOR[i.severity] || "#1F4FD1",
-    `<p style="margin:0 0 14px">มีเคสใหม่จากลูกค้า <strong>รอรับเคส</strong> ใครในทีมก็รับได้ SLA 7 วันเริ่มนับเมื่อรับเคส${ss && ss.owner_name ? ` · เจ้าของ Site: ${esc(ss.owner_name)}` : ""}</p>
+    `<p style="margin:0 0 14px">มีเคสใหม่จากลูกค้า <strong>รอรับเคส</strong> ใครในทีมก็รับได้ SLA 7 วันเริ่มนับเมื่อรับเคส${ro ? ` · ดูแลเคสล่าสุดของลูกค้ารายนี้: ${esc(ro.display_name)}` : ""}</p>
 ${intakeFields(i)}
 <p style="margin:14px 0;white-space:pre-wrap;background:#F6F7F9;padding:12px 14px;border-radius:8px">${esc(i.detail)}</p>
 ${i.new_line ? `<p style="margin:0 0 12px;color:#7A4A00">เคสแรกจากบัญชี LINE นี้ กรุณาโทรยืนยันกับลูกค้าตอนรับเคส</p>` : ""}
@@ -336,7 +346,7 @@ ${button(intakeUrl(i), "รับเคส / โอนให้ Owner")}`
   if (s.telegram && !i.is_test) {
     await telegram
       .sendText(
-        `🆕 ${tag(i)}เคสใหม่จากลูกค้า · ${i.req_no}\n${SEV_ICON[i.severity] || ""} ${i.severity} · ${i.product || "-"}\n🏢 ${customerName(i)}\n👤 ${i.contact_name} · ${i.contact_phone}\n\n${i.subject}\n${ss && ss.owner_name ? `เจ้าของ Site: ${ss.owner_name}\n` : ""}รับเคส: ${intakeUrl(i)}`
+        `🆕 ${tag(i)}เคสใหม่จากลูกค้า · ${i.req_no}\n${SEV_ICON[i.severity] || ""} ${i.severity} · ${i.product || "-"}\n🏢 ${customerName(i)}\n👤 ${i.contact_name} · ${i.contact_phone}\n\n${i.subject}\n${ro ? `ดูแลเคสล่าสุด: ${ro.display_name}\n` : ""}รับเคส: ${intakeUrl(i)}`
       )
       .catch((e) => console.error("[intake] telegram:", e.message));
   }
@@ -695,10 +705,12 @@ publicApi.use((req, res) => res.status(404).json({ ok: false, error: "not found"
 // ------------------------------------------------------------ internal (logged-in) routes, mounted on the v3 api router
 function mountInternal(api, { need, wrap: w }) {
   const LIST = `SELECT i.*, cb.display_name AS claimed_by_name, ow.display_name AS owner_name, c.cs_number,
-      s.owner_id AS site_owner_id, so.display_name AS site_owner_name, s.team AS site_team,
+      ro.id AS recent_owner_id, ro.display_name AS recent_owner_name, ro.start_date AS recent_owner_date, s.team AS site_team,
       (SELECT count(*)::int FROM intake_files f WHERE f.intake_id = i.id) AS files
     FROM intakes i LEFT JOIN users cb ON cb.id = i.claimed_by LEFT JOIN users ow ON ow.id = i.owner_id
-    LEFT JOIN cases c ON c.id = i.case_id LEFT JOIN intake_sites s ON s.site = i.site LEFT JOIN users so ON so.id = s.owner_id`;
+    LEFT JOIN cases c ON c.id = i.case_id LEFT JOIN intake_sites s ON s.site = i.site
+    LEFT JOIN LATERAL (SELECT u2.id, u2.display_name, c2.start_date FROM cases c2 JOIN users u2 ON u2.id = c2.owner_id AND u2.active
+      WHERE c2.site = i.site AND c2.id IS DISTINCT FROM i.case_id ORDER BY c2.start_at DESC NULLS LAST, c2.id DESC LIMIT 1) ro ON true`;
 
   api.get("/intake", w(async (req, res) => {
     const st = String(req.query.status || "pending");
@@ -809,8 +821,8 @@ function mountInternal(api, { need, wrap: w }) {
     if (!(await siteList()).includes(site)) throw bad("ไม่พบ Site นี้");
     await q(
       `INSERT INTO intake_sites (site, owner_id, team, attachments, updated_at) VALUES ($1,$2,$3,$4, now())
-       ON CONFLICT (site) DO UPDATE SET owner_id = EXCLUDED.owner_id, team = EXCLUDED.team, attachments = EXCLUDED.attachments, updated_at = now()`,
-      [site, Number(b.owner_id) || null, clean(b.team, 40) || null, !!b.attachments]
+       ON CONFLICT (site) DO UPDATE SET team = EXCLUDED.team, attachments = EXCLUDED.attachments, updated_at = now()`,
+      [site, null, clean(b.team, 40) || null, !!b.attachments]
     );
     const aliases = [...new Set(splitText(b.aliases).map((a) => clean(a, 120)).filter(Boolean))];
     await tx(async (c) => {
@@ -822,7 +834,7 @@ function mountInternal(api, { need, wrap: w }) {
         if (!r.rowCount) throw bad(`ชื่อเรียก “${a}” ถูกใช้กับลูกค้ารายอื่นแล้ว`);
       }
     });
-    await audit(req.user, "intake_site", site, { owner_id: b.owner_id, team: b.team, attachments: !!b.attachments, aliases });
+    await audit(req.user, "intake_site", site, { team: b.team, attachments: !!b.attachments, aliases });
     res.json({ ok: true });
   }));
   api.post("/intake-admin/keys", admin, w(async (req, res) => res.json({ ok: true, ...(await createKey(req.user, req.body || {})) })));

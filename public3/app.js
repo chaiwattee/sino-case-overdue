@@ -1535,21 +1535,22 @@ ${forced ? "" : `<label class="f">รหัสผ่านปัจจุบั�
     return t.join(" ");
   }
   function ikOwnerNote(i) {
-    if (i.site_owner_id && i.site_owner_id === ME.user.id) return `<div class="ik-note mine">คุณเป็นเจ้าของ Site นี้</div>`;
     const late = Date.now() - new Date(i.created_at).getTime() > 3600000;
-    if (i.site_owner_name) return `<div class="ik-note ${late ? "late" : ""}">เจ้าของ Site: ${esc(i.site_owner_name)}${late ? " · เกิน 1 ชม. ใครในทีมรับแทนได้" : ""}</div>`;
-    return `<div class="ik-note warn">Site นี้ยังไม่มีเจ้าของ · ใครในทีมรับได้</div>`;
+    const tail = late ? `<br><strong>ยังไม่มีคนรับเกิน 1 ชม.</strong> ใครในทีมรับได้` : "";
+    if (i.recent_owner_id && i.recent_owner_id === ME.user.id) return `<div class="ik-note mine">คุณดูแลเคสล่าสุดของลูกค้ารายนี้ (${fd(i.recent_owner_date, true)})${tail}</div>`;
+    if (i.recent_owner_name) return `<div class="ik-note ${late ? "late" : ""}">ดูแลเคสล่าสุดของลูกค้ารายนี้: ${esc(i.recent_owner_name)} (${fd(i.recent_owner_date, true)})${tail}</div>`;
+    return `<div class="ik-note ${late ? "late" : ""}">ยังไม่เคยมีเคสของลูกค้ารายนี้ · ใครในทีมรับได้${late ? " · ยังไม่มีคนรับเกิน 1 ชม." : ""}</div>`;
   }
   function ikCard(i) {
     const canClaim = can("case_create") && i.status === "pending" && !i.held;
-    const mineSite = i.site_owner_id === ME.user.id;
+    const mineSite = i.recent_owner_id === ME.user.id;
     return `<article class="ik-card ${mineSite ? "mine" : ""}">
 <div class="ik-top"><a class="mono" href="#/intake/${i.id}">${esc(i.req_no)}</a>${sevChip(i.severity)}</div>
 <div><div class="ik-cust">${ikCustomer(i)}</div><div class="ik-subj">${esc(i.subject)}</div></div>
 <div class="muted ik-meta">${esc(i.contact_name)} · ${esc(i.contact_phone)}<br>แจ้งเมื่อ ${fdt(i.created_at)} · <span class="${Date.now() - new Date(i.created_at).getTime() > 3600000 ? "t-over" : ""}">รอมาแล้ว ${waitedText(i.created_at)}</span>${i.files ? ` · ไฟล์แนบ ${i.files}` : ""}</div>
 ${ikTags(i) ? `<div>${ikTags(i)}</div>` : ""}
 ${ikOwnerNote(i)}
-<div class="ik-actions">${canClaim ? `<button class="btn ${mineSite || !i.site_owner_id ? "primary" : ""}" type="button" data-claim="${i.id}">${mineSite || !i.site_owner_id ? "รับเคสเอง" : "รับแทน"}</button><button class="btn" type="button" data-transfer="${i.id}">โอนให้ Owner</button>` : ""}<a class="btn" href="#/intake/${i.id}">ดูรายละเอียด</a></div>
+<div class="ik-actions">${canClaim ? `<button class="btn primary" type="button" data-claim="${i.id}">รับเคสเอง</button><button class="btn" type="button" data-transfer="${i.id}">โอนให้ Owner</button>` : ""}<a class="btn" href="#/intake/${i.id}">ดูรายละเอียด</a></div>
 </article>`;
   }
   /** Section shown at the top of the overview and "my cases" while requests wait to be claimed. */
@@ -1562,7 +1563,7 @@ ${ikOwnerNote(i)}
     }
     setIntakeBadge(d.counts.pending);
     if (!d.items.length) return "";
-    const items = d.items.slice().sort((a, b) => (b.site_owner_id === ME.user.id) - (a.site_owner_id === ME.user.id));
+    const items = d.items.slice().sort((a, b) => (b.recent_owner_id === ME.user.id) - (a.recent_owner_id === ME.user.id));
     INTAKE_CACHE = Object.fromEntries(d.items.map((i) => [i.id, i]));
     return `<section class="card ik-wrap"><div class="title"><h2>เคสใหม่จากลูกค้า รอรับเคส (${d.items.length})</h2><span>ทุกคนในทีมเห็นและรับเคสได้ · SLA ${cfg.slaDays} วันเริ่มนับเมื่อรับเคส · <a href="#/intake">ดูทั้งหมด</a></span></div>
 <div class="ik-grid">${items.slice(0, 6).map(ikCard).join("")}</div>${items.length > 6 ? `<div class="hint"><a href="#/intake">ดูอีก ${items.length - 6} เคส</a></div>` : ""}</section>`;
@@ -1610,7 +1611,7 @@ ${i.new_line ? `<div class="banner warn">เคสแรกจากบัญช
 <fieldset class="stack" style="border:0;margin:0;padding:0;gap:8px"><legend style="font-weight:700;margin-bottom:6px">ใครเป็น Owner ของเคสนี้</legend>
 <label class="chk ik-opt"><input type="radio" name="who" value="self" ${mode !== "transfer" ? "checked" : ""}> <span><strong>รับเคสเอง</strong><br><span class="muted">${esc(ME.user.display_name)} (คุณ) เป็น Owner</span></span></label>
 <label class="chk ik-opt"><input type="radio" name="who" value="transfer" ${mode === "transfer" ? "checked" : ""}> <span style="flex:1"><strong>โอนให้ Owner คนอื่น</strong><br><span class="muted">ระบบแจ้งเขาทาง email ทันที</span>
-${others.length ? `<select name="owner" aria-label="เลือก Owner" style="margin-top:6px">${others.map((u) => `<option value="${u.id}">${esc(u.display_name)}${u.teams && u.teams.length ? " · " + esc(u.teams.map(teamLabel).join(", ")) : ""}</option>`).join("")}</select>` : `<span class="hint">ยังไม่มีผู้ใช้อื่นในระบบ</span><input type="hidden" name="owner" value="">`}</span></label>
+${others.length ? `<select name="owner" aria-label="เลือก Owner" style="margin-top:6px">${others.map((u) => `<option value="${u.id}" ${u.id === i.recent_owner_id ? "selected" : ""}>${esc(u.display_name)}${u.teams && u.teams.length ? " · " + esc(u.teams.map(teamLabel).join(", ")) : ""}</option>`).join("")}</select>` : `<span class="hint">ยังไม่มีผู้ใช้อื่นในระบบ</span><input type="hidden" name="owner" value="">`}</span></label>
 </fieldset>
 <div class="formgrid">
 ${i.site ? "" : `<label class="f">ลูกค้า (Site)<select name="site" required><option value="">เลือกลูกค้า</option>${lk.site.map((s) => `<option>${esc(s)}</option>`).join("")}</select><span class="hint">ลูกค้าพิมพ์ว่า “${esc(i.customer_text || "-")}”</span></label>`}
@@ -1715,10 +1716,10 @@ ${i.site ? "" : `<label class="f">ลูกค้า (Site)<select name="site" r
     const rows = d.items.map((i) => `<tr class="click" data-href="#/intake/${i.id}"><td><a class="mono" href="#/intake/${i.id}">${esc(i.req_no)}</a></td><td>${sevChip(i.severity)}</td>
 <td><strong>${ikCustomer(i)}</strong><div class="muted" style="font-size:13px">${esc(i.subject)}</div>${ikTags(i) ? `<div style="margin-top:4px">${ikTags(i)}</div>` : ""}</td>
 <td>${esc(i.contact_name)}<div class="muted" style="font-size:13px">${esc(i.contact_phone)}</div></td>
-${status === "pending" || status === "held" ? `<td class="${Date.now() - new Date(i.created_at).getTime() > 3600000 ? "t-over" : ""}">${waitedText(i.created_at)}</td><td>${esc(i.site_owner_name || "-")}</td>`
+${status === "pending" || status === "held" ? `<td class="${Date.now() - new Date(i.created_at).getTime() > 3600000 ? "t-over" : ""}">${waitedText(i.created_at)}</td><td>${esc(i.recent_owner_name || "-")}</td>`
       : status === "claimed" ? `<td>${fdt(i.claimed_at)}</td><td>${esc(i.owner_name || "-")}${i.case_id ? `<div><a href="#/case/${i.case_id}">${esc(i.cs_number || "เคส #" + i.case_id)}</a></div>` : ""}</td>`
       : `<td>${fdt(i.claimed_at)}</td><td>${esc(i.duplicate_of ? "ซ้ำกับ " + i.duplicate_of : i.closed_reason || "-")}</td>`}</tr>`).join("");
-    const heads = status === "pending" || status === "held" ? "<th>รอมาแล้ว</th><th>เจ้าของ Site</th>" : status === "claimed" ? "<th>รับเมื่อ</th><th>Owner / เคส</th>" : "<th>ปิดเมื่อ</th><th>เหตุผล</th>";
+    const heads = status === "pending" || status === "held" ? "<th>รอมาแล้ว</th><th>ดูแลเคสล่าสุด</th>" : status === "claimed" ? "<th>รับเมื่อ</th><th>Owner / เคส</th>" : "<th>ปิดเมื่อ</th><th>เหตุผล</th>";
     $app.innerHTML = `<div class="head"><div><h1>เคสจากลูกค้า</h1><p>ลูกค้าแจ้งผ่าน LINE OA หรือลิงก์ ทุกคนในทีมรับได้ · SLA ${cfg.slaDays} วันเริ่มนับเมื่อรับเคส · ยังไม่มีคนรับเกิน 1 ชม. ระบบเตือนทีมทุกชั่วโมง 06:00–22:00</p></div>
 <div class="actions">${can("case_create") ? `<button class="btn" type="button" id="ml-btn">สร้างลิงก์ส่งให้ลูกค้าเอง</button>` : ""}${lvl("settings_manage") === "all" ? `<a class="btn" href="#/intake-admin">ตั้งค่า LINE OA และ API</a>` : ""}</div></div>
 <div class="chips" style="gap:8px">${tab("pending", "รอรับเคส", d.counts.pending)}${d.counts.held ? tab("held", "พักไว้ตรวจ", d.counts.held) : ""}${tab("claimed", "รับแล้ว 30 วัน", d.counts.claimed)}${tab("closed", "ปฏิเสธ / ซ้ำ 90 วัน", d.counts.closed)}</div>
@@ -1750,7 +1751,7 @@ ${row("เบอร์ / อีเมล", `<a href="tel:${esc(i.contact_phone)}
 ${row("ระบบ", esc(i.product || "-"))}
 ${row("เริ่มพบปัญหา", esc([i.started_text, i.affected ? "กระทบ " + i.affected : ""].filter(Boolean).join(" · ") || "-"))}
 ${row("เลขอ้างอิงลูกค้า", esc(i.customer_ref || "-"))}
-${row("เจ้าของ Site", esc(i.site_owner_name || "ยังไม่กำหนด"))}</div>
+${row("ดูแลเคสล่าสุดของลูกค้ารายนี้", i.recent_owner_name ? `${esc(i.recent_owner_name)} (${fd(i.recent_owner_date, true)})` : "ยังไม่เคยมีเคส")}</div>
 <div class="k" style="margin-top:6px">รายละเอียด</div><div class="ik-detail">${esc(i.detail)}</div>
 ${files.length ? `<div class="k">ไฟล์แนบ</div><div class="chips">${files.map((f) => `<a class="lk" href="api/intake/${i.id}/files/${f.id}" target="_blank" rel="noopener">${esc(f.file_name)} <span class="muted">${Math.ceil(f.size / 1024)} KB</span></a>`).join("")}</div>` : ""}
 </section>
@@ -1803,11 +1804,11 @@ ${d.keys.map((k) => `<tr class="${k.revoked_at ? "muted" : ""}"><td style="font-
 <label class="chk"><input type="checkbox" id="k-test"> key ทดสอบ (เคสที่สร้างติดป้าย “ทดสอบ”)</label>
 <div class="actions"><button class="btn primary" type="button" id="k-new">สร้าง API key</button></div><div id="k-out"></div></section>
 
-<section class="card"><div class="title"><h2>ลูกค้า: ชื่อเรียก เจ้าของ Site ทีม และไฟล์แนบ</h2><span>ชื่อที่ลูกค้าพิมพ์ใน LINE ตรงกับชื่อเหล่านี้ เคสเข้าลูกค้ารายนั้นทันที</span></div>
-<div class="tablewrap"><table style="min-width:900px"><thead><tr><th>Site</th><th>ชื่อเรียกอื่น (คั่นด้วย ,)</th><th>เจ้าของ Site</th><th>ทีม</th><th>แนบไฟล์</th><th class="n">เคสเปิด</th><th></th></tr></thead><tbody>
+<section class="card"><div class="title"><h2>ลูกค้า: ชื่อเรียก ทีม และไฟล์แนบ</h2><span>ชื่อที่ลูกค้าพิมพ์ใน LINE ตรงกับชื่อเหล่านี้ เคสเข้าลูกค้ารายนั้นทันที</span></div>
+<div class="tablewrap"><table style="min-width:900px"><thead><tr><th>Site</th><th>ชื่อเรียกอื่น (คั่นด้วย ,)</th><th>ทีมของเคส</th><th>แนบไฟล์</th><th class="n">เคสเปิด</th><th></th></tr></thead><tbody>
 ${d.sites.map((x, n) => `<tr data-site="${n}"><td style="font-weight:600">${esc(x.site)}</td>
 <td><input class="sx-al" value="${esc(x.aliases.join(", "))}" placeholder="เช่น กรุงไทย, Krungthai" style="width:100%"></td>
-<td><select class="sx-own"><option value="">ยังไม่กำหนด (ใครในทีมรับได้)</option>${users.map((u) => `<option value="${u.id}" ${u.id === x.owner_id ? "selected" : ""}>${esc(u.display_name)}</option>`).join("")}</select></td>
+
 <td><select class="sx-team"><option value="">ตามทีมของผู้รับ</option>${ME.teams.map((t) => `<option value="${esc(t.key)}" ${t.key === x.team ? "selected" : ""}>${esc(t.label)}</option>`).join("")}</select></td>
 <td><label class="chk" style="min-height:0"><input type="checkbox" class="sx-att" ${x.attachments ? "checked" : ""}><span class="sr">แนบไฟล์</span></label></td><td class="n">${x.open}</td>
 <td><button class="btn" type="button" data-sxsave="${n}" style="min-height:34px">บันทึก</button></td></tr>`).join("")}</tbody></table></div>
@@ -1905,7 +1906,7 @@ ${d.outbox.map((o) => `<tr><td>${fdt(o.created_at)}</td><td class="mono">${esc(o
     $app.querySelectorAll("[data-sxsave]").forEach((b) => (b.onclick = act(async () => {
       const tr = b.closest("tr");
       const x = d.sites[Number(b.dataset.sxsave)];
-      await post("/intake-admin/sites", { site: x.site, aliases: tr.querySelector(".sx-al").value, owner_id: tr.querySelector(".sx-own").value, team: tr.querySelector(".sx-team").value, attachments: tr.querySelector(".sx-att").checked }, "PUT");
+      await post("/intake-admin/sites", { site: x.site, aliases: tr.querySelector(".sx-al").value, team: tr.querySelector(".sx-team").value, attachments: tr.querySelector(".sx-att").checked }, "PUT");
       toast(`บันทึก ${x.site} แล้ว`);
     })));
     $app.querySelectorAll("[data-lsite]").forEach((sel) => (sel.onchange = async () => {
