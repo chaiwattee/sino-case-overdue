@@ -37,6 +37,7 @@ const config3 = {
     reports: flag("V3_REPORTS"),
     retention: flag("V3_RETENTION", true),
     annual: flag("V3_ANNUAL", true),
+    intake: flag("V3_INTAKE", true),
   },
   disableScheduler: flag("DISABLE_SCHEDULER"),
 };

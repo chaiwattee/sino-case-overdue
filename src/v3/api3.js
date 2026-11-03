@@ -32,6 +32,7 @@ const wrap = (fn) => (req, res) =>
   });
 const need = (perm) => async (req, res, next) => ((await perms.can(req.user, perm)) ? next() : res.status(403).json({ error: "ไม่มีสิทธิ์ทำรายการนี้" }));
 const bad = (msg, status = 400) => Object.assign(new Error(msg), { status });
+require("./intake").mountInternal(api, { need, wrap });
 
 async function visibleCases(user) {
   return repo.loadCases(user);

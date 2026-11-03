@@ -369,6 +369,11 @@ function startJobs() {
   job("retention", "0 2 * * *", j.retention, () => runRetention());
   job("annual", "0 6 1 1 *", j.annual, () => runAnnual());
   job("cert", "15 9 * * *", true, () => checkCert());
+  // Customer intake: hourly "nobody has claimed this yet" reminders (checked every 5 min), chatbot webhooks, cleanup.
+  const intake = require("./intake");
+  job("intake-reminders", "*/5 * * * *", j.intake, () => intake.runReminders());
+  job("intake-webhook", "* * * * *", j.intake, () => intake.deliver());
+  job("intake-retention", "20 2 * * *", j.intake, () => intake.runRetention());
   console.log("[v3 jobs]", Object.entries(j).map(([k, v]) => `${k}=${v ? "on" : "off"}`).join(" "));
 }
 

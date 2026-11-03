@@ -211,4 +211,4 @@ ${
   return { subject, html };
 }
 
-module.exports = { caseAlertEmail, auditEmail, reportEmail, COLORS, esc };
+module.exports = { caseAlertEmail, auditEmail, reportEmail, COLORS, esc, shell, fieldTable, button };

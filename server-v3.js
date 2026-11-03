@@ -10,6 +10,7 @@ const { migrate, requestContext } = require("./src/v3/db");
 const auth = require("./src/v3/auth");
 const { api } = require("./src/v3/api3");
 const jobs = require("./src/v3/jobs");
+const intake = require("./src/v3/intake");
 
 const miss = missing3();
 if (miss.length) {
@@ -73,12 +74,20 @@ app.get("/run-reports", ops(async () => ({ results: await jobs.runDueSchedules()
 app.get("/run-retention", ops(() => jobs.runRetention()));
 
 app.use(auth.router);
+// Customer case intake: chatbot API (API key) and the customer form (one-time link), no login.
+app.use("/api/v1", intake.apiV1);
+app.use("/api/public", intake.publicApi);
 app.use("/api", api);
 
 const pub = path.join(__dirname, "public3");
 const noCache = { setHeaders: (res) => res.setHeader("Cache-Control", "no-cache") };
 // Login page and its assets are public; everything else needs a session.
-app.get(["/login.html", "/style.css", "/login.js"], express.static(pub, noCache));
+app.get(["/login.html", "/style.css", "/login.js", "/intake-form.js"], express.static(pub, noCache));
+app.get("/r/:token", (req, res) => {
+  res.set("Cache-Control", "no-store");
+  res.set("X-Robots-Tag", "noindex, nofollow");
+  res.sendFile(path.join(pub, "intake.html"));
+});
 app.use(async (req, res, next) => {
   if (req.method !== "GET") return next();
   const s = auth.verify(String(req.headers.cookie || "").match(/(?:^|;\s*)sid=([^;]+)/)?.[1] && decodeURIComponent(String(req.headers.cookie).match(/(?:^|;\s*)sid=([^;]+)/)[1]));

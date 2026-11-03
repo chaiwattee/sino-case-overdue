@@ -5,3 +5,6 @@ cutover-*.log
 .cutover-done
 .env.bak*
 tls/
+
+# Customer intake files (attachments from the customer form)
+data/
