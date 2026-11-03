@@ -15,9 +15,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, config.mock ? 0 : ms));
  * Round 1 and round 2 go out once each; overdue goes out once per day.
  */
 function alertFor(c, todayIso) {
-  if (c.stage === "r1") return { type: "r1", dedupe: `${c.key}|r1` };
-  if (c.stage === "r2") return { type: "r2", dedupe: `${c.key}|r2` };
-  if (c.stage === "overdue") return { type: "overdue", dedupe: `${c.key}|overdue|${todayIso}` };
+  // alertKey: a new key per extension period, so rounds 1 and 2 are sent again after an extension.
+  const k = c.alertKey || c.key;
+  if (c.stage === "r1") return { type: "r1", dedupe: `${k}|r1` };
+  if (c.stage === "r2") return { type: "r2", dedupe: `${k}|r2` };
+  if (c.stage === "overdue") return { type: "overdue", dedupe: `${k}|overdue|${todayIso}` };
   return null;
 }
 

@@ -372,3 +372,13 @@ dialog.wide { width: min(980px, calc(100vw - 32px)); }
 .ik-opt input[type=radio] { flex: 0 0 auto; width: 18px; height: 18px; min-height: 0; margin: 3px 0 0; padding: 0; }
 .ik-opt > span { flex: 1; min-width: 0; }
 .ik-opt select { width: 100%; }
+
+/* Case extensions */
+tr.ext-row td { background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+tr.ext-row td:first-child { border-left: 4px solid var(--accent); }
+.ext-hist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; font-size: 14px; }
+.ext-hist li { border-top: 1px solid var(--line); padding-top: 10px; line-height: 1.6; }
+.ext-wrap { border: 2px solid var(--r1, #B07800); }
+.ext-item { display: flex; flex-direction: column; gap: 6px; padding: 12px 0; border-top: 1px solid var(--line); }
+.ext-item:first-of-type { border-top: 0; }
+.ext-reason { background: var(--surface-2); border-radius: 8px; padding: 8px 12px; font-size: 14px; white-space: pre-wrap; }

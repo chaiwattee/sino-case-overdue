@@ -33,6 +33,8 @@ const wrap = (fn) => (req, res) =>
 const need = (perm) => async (req, res, next) => ((await perms.can(req.user, perm)) ? next() : res.status(403).json({ error: "ไม่มีสิทธิ์ทำรายการนี้" }));
 const bad = (msg, status = 400) => Object.assign(new Error(msg), { status });
 require("./intake").mountInternal(api, { need, wrap });
+const ext = require("./extensions");
+ext.mount(api, { wrap });
 
 async function visibleCases(user) {
   return repo.loadCases(user);
@@ -116,7 +118,9 @@ api.get("/overview", wrap(async (req, res) => {
 }));
 
 function ser3(c) {
-  return { ...ser(c), caseNo: c.caseNo, severity: c.severity, id: c.id, team: c.team, ownerUserId: c.owner_id, updatedAt: c.updatedAt, startAt: c.startAt };
+  const iso = (x) => (x instanceof Date ? d.toISODate(x) : x || null);
+  return { ...ser(c), caseNo: c.caseNo, extCount: c.extCount || 0, origDueDate: iso(c.origDueDate), periodStart: iso(c.periodStart), totalAge: c.totalAge,
+    pendingExtId: c.pendingExtId, lastExt: c.lastExt, closedInExtension: c.closedInExtension ?? null, severity: c.severity, id: c.id, team: c.team, ownerUserId: c.owner_id, updatedAt: c.updatedAt, startAt: c.startAt };
 }
 
 api.get("/cases", wrap(async (req, res) => {
@@ -144,9 +148,10 @@ api.get("/owner/:id", wrap(async (req, res) => {
   );
   const ids = mine.map((c) => c.id);
   const since = d.addDays(d.today(), -60).toISOString();
-  const [alerts, changes] = await Promise.all([
+  const [alerts, changes, extensions] = await Promise.all([
     all("SELECT * FROM alert_log WHERE sent_at >= $1 AND case_id = ANY($2) ORDER BY sent_at DESC", [since, ids]),
     jobs.listChanges({ from: since, caseIds: ids }),
+    ext.forCases(ids),
   ]);
   const weeks = [];
   const monday = d.addDays(d.today(), -((d.today().getDay() + 6) % 7));
@@ -163,7 +168,7 @@ api.get("/owner/:id", wrap(async (req, res) => {
     cases: mine.filter((c) => c.stage !== "closed" || c.endDate >= recent)
       .sort((a, b) => (a.stage === "closed") - (b.stage === "closed") || (b.age || 0) - (a.age || 0)).map(ser3),
     alerts: alerts.map((a) => ({ ...a, case_key: `v3:${a.case_id}` })),
-    changes, weeks,
+    changes, weeks, extensions,
   });
 }));
 
@@ -192,11 +197,12 @@ api.get("/owner/:id/meeting", wrap(async (req, res) => {
   const byCase = (rows) => rows.reduce((m, r) => ((m[r.case_id] = m[r.case_id] || []).push(r), m), {});
   const A = byCase(acts);
   const L = byCase(alerts);
+  const E = byCase(await ext.forCases(ids));
   res.json({
     id, owner: mine[0].owner, email: mine[0].ownerEmail, teams: [...new Set(mine.map((c) => c.sourceLabel))],
     generatedAt: new Date().toISOString(), closedDays,
     kpis: { ...stageCounts(mine), sla: slaStats(mine) },
-    cases: pick.map((c) => ({ ...ser3(c), activities: A[c.id] || [], alerts: L[c.id] || [] })),
+    cases: pick.map((c) => ({ ...ser3(c), activities: A[c.id] || [], alerts: L[c.id] || [], extensions: (E[c.id] || []).reverse() })),
   });
 }));
 
@@ -331,8 +337,9 @@ api.get("/reports/preview", wrap(async (req, res) => {
   if ((await perms.level(req.user, "export")) === "own" && (await perms.level(req.user, "reports_manage")) === "none") cases = cases.filter((c) => c.owner_id === req.user.id);
   const changes = await jobs.listChanges({ from: from.toISOString(), limit: 5000, caseIds: cases.map((c) => c.id) });
   const rep = await reports.buildReport({ from, to, owner: req.query.owner || undefined, cases, changes });
+  await ext.augmentReport(rep, { caseIds: jobs.scopeIds(rep) });
   const customers = new Set([...rep.openedCases, ...rep.closedCases, ...rep.openCases].map((c) => c.site)).size;
-  res.json({ rangeLabel: rep.rangeLabel, kpis: rep.kpis, owners: rep.owners, changes: rep.changes.length, customers, sites });
+  res.json({ rangeLabel: rep.rangeLabel, kpis: rep.kpis, owners: rep.owners, changes: rep.changes.length, customers, sites, extensions: rep.extensions });
 }));
 
 api.get("/export", wrap(async (req, res) => {
@@ -348,6 +355,7 @@ api.get("/export", wrap(async (req, res) => {
   }
   const changes = await jobs.listChanges({ from: from.toISOString(), limit: 5000, caseIds: cases.map((c) => c.id) });
   const rep = await reports.buildReport({ from, to, owner, cases, changes });
+  await ext.augmentReport(rep, { caseIds: jobs.scopeIds(rep) });
   await audit(req.user, "export", `${d.toISODate(from)} – ${d.toISODate(to)}`, { format: req.query.format === "csv" ? "csv" : "xlsx", owner: owner || null, sites, cases: rep.openedCases.length + rep.closedCases.length + rep.openCases.length });
   const safe = (x) => String(x).replace(/[^\p{L}\p{N}._-]+/gu, "-").slice(0, 40);
   const tag = `${sites.length === 1 ? safe(sites[0]) + "_" : sites.length ? `${sites.length}-customers_` : ""}${d.toISODate(from)}_${d.toISODate(to)}`;

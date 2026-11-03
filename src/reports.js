@@ -173,6 +173,14 @@ async function reportWorkbook(rep) {
       { header: "ปิดทัน SLA", key: "closedOnTime", width: 12 },
       { header: "ยังเปิดอยู่", key: "open", width: 12 },
       { header: "เกิน Due ขณะนี้", key: "overdue", width: 15 },
+      ...(rep.extensions
+        ? [
+            { header: "ขอขยาย (เคส)", key: "extCases", width: 13 },
+            { header: "ขอขยาย (ครั้ง)", key: "extCount", width: 13 },
+            { header: "อนุมัติ", key: "extApproved", width: 9 },
+            { header: "ไม่อนุมัติ", key: "extRejected", width: 10 },
+          ]
+        : []),
     ],
     rep.owners
   );

@@ -47,6 +47,11 @@ async function listChanges({ from, limit = 500, caseIds } = {}) {
   }));
 }
 
+/** Ids of the cases a report covers (opened, closed in range, or open now). */
+function scopeIds(rep) {
+  return [...new Set([...rep.openedCases, ...rep.closedCases, ...rep.openCases].map((c) => c.id))];
+}
+
 // ------------------------------------------------------------ owner alerts
 async function alertRules() {
   const def = defaultRules();
@@ -136,6 +141,7 @@ function sitesLabel(sites) {
 async function addCustomerSheet(buf, rep) {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buf);
+  require("./extensions").addSheet(wb, rep);
   const by = new Map();
   const row = (c) => {
     const k = c.site || "(ไม่ระบุ)";
@@ -176,6 +182,7 @@ async function sendReport({ title, recipients, cc, from, to, owner, sites = [], 
   const cases = filterSites(await repo.loadCases(user), sites);
   const changes = await listChanges({ from: from.toISOString(), limit: 5000, caseIds: sites.length ? cases.map((c) => c.id) : undefined });
   const rep = await reports.buildReport({ from, to, owner, cases, changes });
+  await require("./extensions").augmentReport(rep, { caseIds: scopeIds(rep) });
   title = (title || "รายงานสถานะเคส") + (sites.length ? ` · ลูกค้า ${sitesLabel(sites)}` : "");
   const { subject, html } = reportEmail(rep, title);
   const toList = splitList(recipients);
@@ -250,9 +257,11 @@ async function buildAnnualWorkbook(year, { toDate } = {}) {
   const cases = await repo.loadCases(null);
   const changes = await listChanges({ from: from.toISOString(), limit: 100000 });
   const rep = await reports.buildReport({ from, to, cases, changes });
+  await require("./extensions").augmentReport(rep);
   const buf = await reports.reportWorkbook(rep);
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buf);
+  require("./extensions").addSheet(wb, rep);
   // Monthly summary sheet first
   const ws = wb.addWorksheet("สรุปรายเดือน", { views: [{ state: "frozen", ySplit: 1 }] });
   ws.columns = [
@@ -378,6 +387,6 @@ function startJobs() {
 }
 
 module.exports = {
-  startJobs, lastRuns, runAlerts, sendTelegram, sendReport, runDueSchedules, runRetention, runAnnual,
+  startJobs, lastRuns, scopeIds, runAlerts, sendTelegram, sendReport, runDueSchedules, runRetention, runAnnual,
   buildAnnualWorkbook, listChanges, teams, splitList, alertRules, certInfo, checkCert, siteList, filterSites, sitesLabel, addCustomerSheet,
 };

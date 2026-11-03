@@ -174,19 +174,19 @@
 ${showOwner ? `<td><a href="#/owner/${encodeURIComponent(c.ownerId)}">${esc(c.owner || "-")}</a></td>` : ""}
 <td>${esc(c.sourceLabel)}</td>
 <td>${fd(c.startDate)}</td>
-<td>${fd(c.dueDate)}</td>
-<td>${ageCell(c)}</td>
-<td>${chip(c.stage)}<div class="muted" style="font-size:12px;margin-top:4px">${esc(c.status || "")}</div></td>
-</tr>`
+<td>${c.extCount ? `<span class="muted" style="text-decoration:line-through">${fd(c.origDueDate)}</span>` : fd(c.dueDate)}</td>
+<td>${c.extCount ? `<small class="muted">รวม ${c.totalAge} วัน · ขยายแล้ว</small>` : ageCell(c)}</td>
+<td>${c.extCount ? "" : chip(c.stage)}${extTag(c)}<div class="muted" style="font-size:12px;margin-top:4px">${esc(c.status || "")}</div></td>
+</tr>${extRow(c, { before: showOwner ? 6 : 5, after: 1 })}`
       )
       .join("")}</tbody></table></div>`;
   }
 
-  const FIELD = { severity: "Severity", start_date: "Start date", target_date: "Target date", status: "Status", owner: "Owner", deleted: "ลบเคส" };
+  const FIELD = { extension: "ขยายเวลา (Due)", severity: "Severity", start_date: "Start date", target_date: "Target date", status: "Status", owner: "Owner", deleted: "ลบเคส" };
   const DIR = { later: "เลื่อนออกไป", earlier: "เลื่อนเข้ามา", set: "ใส่ค่าใหม่", cleared: "ลบค่าออก" };
   function changeRows(changes, { empty = "ยังไม่มีประวัติการแก้ไข" } = {}) {
     if (!changes.length) return `<div class="empty">${empty}</div>`;
-    const val = (c, v) => (c.field === "start_date" || c.field === "target_date" ? fd(v, true) : esc(v || "-"));
+    const val = (c, v) => (c.field === "start_date" || c.field === "target_date" || c.field === "extension" ? fd(v, true) : esc(v || "-"));
     return `<div class="tablewrap"><table style="min-width:860px"><thead><tr><th>เมื่อ</th><th>เลขเคส</th><th>ลูกค้า</th><th>Owner</th><th>รายการ</th><th>เดิม → ใหม่</th><th>แก้โดย</th></tr></thead><tbody>${changes
       .map(
         (c) => `<tr>
@@ -213,7 +213,7 @@ ${showOwner ? `<td><a href="#/owner/${encodeURIComponent(c.ownerId)}">${esc(c.ow
   // ------------------------------------------------------------ overview
   async function viewOverview(params) {
     setNav("overview");
-    const [data, ikHtml] = await Promise.all([api("/overview?" + qs({ source: params.source })), intakeSection()]);
+    const [data, ikHtml, extHtml] = await Promise.all([api("/overview?" + qs({ source: params.source })), intakeSection(), extPendingSection()]);
     cfg = data.config;
     const k = data.kpis;
     const openTotal = k.open || 0;
@@ -241,6 +241,7 @@ ${cols.map((c) => `<div class="rw-col"><div class="rw-count">${c.items.length ||
 <div class="actions">
 ${lvl("export") === "all" ? `<a class="btn" href="api/export?${qs({ from: daysAgo(29), to: daysAgo(0), source: params.source })}">Export Excel (30 วัน)</a>` : ""}
 ${can("case_create") ? `<a class="btn primary" href="#/case/new">เปิดเคสใหม่</a>` : ""}</div></div>
+${extHtml}
 ${ikHtml}
 <form class="filters" id="flt" onsubmit="return false">
 <label class="f">ทีม<select name="source"><option value="">ทุกทีมที่เห็นได้ (${data.sources.length})</option>${teamOpts}</select></label>
@@ -280,6 +281,7 @@ ${lvl("audit_view") !== "none" ? `<section class="card"><div class="title"><h2>�
     };
     bindRowLinks();
     bindIntakeActions($app, () => route());
+    bindExtPending($app);
   }
 
   // ------------------------------------------------------------ case lists
@@ -298,7 +300,7 @@ ${lvl("audit_view") !== "none" ? `<section class="card"><div class="title"><h2>�
 
   async function viewMine(params) {
     setNav("mine");
-    const [{ cases }, lk, ikHtml] = await Promise.all([api("/cases?mine=1"), lookups(), intakeSection()]);
+    const [{ cases }, lk, ikHtml, extHtml] = await Promise.all([api("/cases?mine=1"), lookups(), intakeSection(), extPendingSection()]);
     const tab = params.tab || "open";
     const open = cases.filter((c) => c.stage !== "closed");
     const closed30 = cases.filter((c) => c.stage === "closed" && (c.endDate || "") >= daysAgo(30));
@@ -325,6 +327,7 @@ ${lvl("audit_view") !== "none" ? `<section class="card"><div class="title"><h2>�
 <div class="head"><div><h1>เคสของฉัน</h1><p>เปิดเคสใหม่ อัปเดตความคืบหน้า และปิดเคสได้จากหน้านี้</p></div>
 <div class="actions">${lvl("export") !== "none" ? `<a class="btn" href="api/export?${qs({ from: daysAgo(89), to: daysAgo(0), owner: ME.user.email })}">Export เคสของฉัน</a>` : ""}
 ${can("case_create") ? `<a class="btn primary" href="#/case/new">เปิดเคสใหม่</a>` : ""}</div></div>
+${extHtml}
 ${ikHtml}
 ${soon.length ? `<div class="banner warn" role="status">${soon.map((c) => `<a href="#/case/${c.id}">${esc(caseRef(c))}</a> ${esc(c.site || "")} ${c.stage === "overdue" ? `เกิน Due มาแล้ว ${c.daysOverdue} วัน` : c.daysLeft === 0 ? "ครบกำหนดวันนี้" : `เหลือ ${c.daysLeft} วัน`}`).join(" · ")}</div>` : ""}
 <div class="kpis">
@@ -348,15 +351,16 @@ ${list.map((c) => `<tr class="click" data-href="#/case/${c.id}">
 <td>${sevChip(c.severity)}</td>
 <td style="font-size:13px">${esc(c.task)}</td>
 <td>${esc(c.product || "-")}</td>
-<td>${fd(c.startDate)}<div class="hint">Due ${fd(c.dueDate)}</div></td>
-<td>${ageCell(c)}</td>
+<td>${fd(c.startDate)}<div class="hint">Due ${c.extCount ? `<s>${fd(c.origDueDate)}</s> ${fd(c.dueDate)}` : fd(c.dueDate)}</div></td>
+<td>${c.extCount ? `<small class="muted">รวม ${c.totalAge} วัน · ขยาย ${c.extCount} ครั้ง</small>` : ageCell(c)}${c.pendingExtId ? `<div><span class="chip c-r1">รออนุมัติขยาย</span></div>` : ""}</td>
 <td>${statusSel(c)}</td>
 <td style="font-size:13px" class="muted">${fdt(c.updatedAt)}</td>
-<td style="text-align:right"><a href="#/case/${c.id}" style="font-weight:600">แก้ไข</a></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">${tab === "open" ? "ไม่มีเคสที่เปิดอยู่ กด “เปิดเคสใหม่” เพื่อเริ่ม" : "ไม่มีเคส"}</div>`}
+<td style="text-align:right"><a href="#/case/${c.id}" style="font-weight:600">แก้ไข</a></td></tr>${extRow(c, { before: 5, after: 3 })}`).join("")}</tbody></table></div>` : `<div class="empty">${tab === "open" ? "ไม่มีเคสที่เปิดอยู่ กด “เปิดเคสใหม่” เพื่อเริ่ม" : "ไม่มีเคส"}</div>`}
 </section>
 <p class="hint">เปลี่ยน Status ในตารางแล้วบันทึกทันที ถ้าเลือก Success, Resolved, Cancel หรือ N/A ระบบจะใส่ End date ให้และหยุดแจ้งเตือน</p>`;
     bindRowLinks();
     bindIntakeActions($app, () => route());
+    bindExtPending($app);
     const q = document.getElementById("q");
     q.onkeydown = (e) => {
       if (e.key === "Enter") location.hash = "#/mine?" + qs({ tab, q: q.value });
@@ -451,6 +455,7 @@ ${allowNew ? `<span class="hint">พิมพ์ชื่อใหม่ได�
       can("case_reassign") ? api("/users/options") : Promise.resolve({ users: [] }),
       isNew ? Promise.resolve(null) : api("/case/" + id),
     ]);
+    const extData = isNew ? { extensions: [] } : await api(`/case/${Number(id)}/extensions`).catch(() => ({ extensions: [] }));
     const c = data ? data.case : { team: ME.user.teams[0] || (ME.teams[0] || {}).key, status: "In Progress", ownerUserId: ME.user.id, owner: ME.user.display_name, ownerEmail: ME.user.email };
     const permsC = data ? data.can : { edit: true, close: can("case_close"), reassign: can("case_reassign"), editStart: false, delete: false };
     const ro = !permsC.edit;
@@ -477,7 +482,7 @@ ${allowNew ? `<span class="hint">พิมพ์ชื่อใหม่ได�
     const slaCard = data
       ? `<section class="card"><h2>สถานะ SLA</h2>
 <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><span style="font-size:38px;font-weight:700;line-height:1" class="${c.stage === "overdue" ? "t-over" : c.stage === "r2" ? "t-r2" : ""}">${closed ? "ปิดแล้ว" : `วันที่ ${c.age}`}</span>
-<span class="muted">${closed ? (c.closedOnTime ? "ทัน SLA" : "เกิน Due") : c.stage === "overdue" ? `เกิน Due ${c.daysOverdue} วัน` : c.daysLeft === 0 ? "ครบกำหนดวันนี้" : `เหลือ ${c.daysLeft} วัน`}</span></div>
+<span class="muted">${c.extCount && !closed ? `ช่วงขยายครั้งที่ ${c.extCount} · ` : ""}${closed ? (c.closedOnTime ? "ทัน SLA" : c.extCount ? (c.closedInExtension ? "ไม่ทัน SLA เดิม · ปิดทันเวลาที่ขยาย" : "เกิน Due") : "เกิน Due") : c.stage === "overdue" ? `เกิน Due ${c.daysOverdue} วัน` : c.daysLeft === 0 ? "ครบกำหนดวันนี้" : `เหลือ ${c.daysLeft} วัน`}</span></div>
 <div class="daybar" aria-hidden="true">${days.join("")}</div>
 <div class="hint">${data.alerts.length ? data.alerts.slice(0, 4).map((a) => `${ALERT[a.alert_type]} ${fdt(a.sent_at)}${a.ok ? "" : " (ไม่สำเร็จ)"}`).join(" · ") : "ยังไม่มี email แจ้งเตือนสำหรับเคสนี้"}</div>
 </section>`
@@ -512,13 +517,14 @@ ${isNew ? "" : `<section class="card" style="display:grid;grid-template-columns:
 <h2 style="grid-column:1/-1">วันที่ (ระบบกรอกให้)</h2>
 <div class="f">Start date<div class="ro" style="min-height:44px;display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:10px;padding:0 12px">${fd(c.startDate, true)}</div>
 <span class="hint">บันทึกตอนเปิดเคส ${permsC.editStart ? `<button type="button" class="btn" id="btn-start" style="min-height:32px;padding:0 10px;margin-top:6px">แก้ Start date</button>` : "แก้ได้เฉพาะ Admin พร้อมระบุเหตุผล"}</span></div>
-<div class="f">Target date (Due)<div class="ro" style="min-height:44px;display:flex;align-items:center;border:1px solid var(--line);border-radius:10px;padding:0 12px">${fd(c.dueDate, true)}</div><span class="hint">Start date + ${cfg.slaDays} วัน</span></div>
+<div class="f">Target date (Due)<div class="ro" style="min-height:44px;display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:10px;padding:0 12px">${c.extCount ? `<span class="muted" style="text-decoration:line-through">${fd(c.origDueDate, true)}</span> ` : ""}${fd(c.dueDate, true)}</div><span class="hint">${c.extCount ? `ขยายแล้ว ${c.extCount} ครั้ง (ครั้งละ ${cfg.slaDays} วัน)` : `Start date + ${cfg.slaDays} วัน`}</span></div>
 <div class="f">End date<div class="ro" style="min-height:44px;display:flex;align-items:center;border:1px solid var(--line);border-radius:10px;padding:0 12px">${c.endDate ? fd(c.endDate, true) : "ยังไม่ปิด"}</div><span class="hint">ใส่ให้อัตโนมัติเมื่อปิดเคส</span></div>
 </section>`}
 ${data && data.changes.length ? `<section class="card"><h2>ประวัติแก้ไขของเคสนี้</h2>${changeRows(data.changes)}</section>` : ""}
 </form>
 <aside class="side">
 ${slaCard}
+${isNew ? "" : extCard(c, extData.extensions, closed, permsC)}
 ${isNew ? `<section class="card"><h2>ก่อนเปิดเคส</h2><p class="muted" style="margin:0;font-size:14px">กรอก Site, Task และ Status ให้ครบ ระบบจะส่ง email เตือน Owner ในวันที่ ${cfg.alert1Day}, ${cfg.alert2Day} และทุกวันหลังเกิน Due ถ้ายังไม่ปิดเคส</p></section>` : `
 <section class="card"><div><h2>Activity / Detail</h2><div class="hint" style="margin-top:4px">ทุกบันทึกมีวันที่และชื่อผู้บันทึก แก้หรือลบย้อนหลังไม่ได้</div></div>
 ${permsC.edit ? `<form id="af" class="stack">
@@ -531,6 +537,7 @@ ${actsHtml(data.activities)}</section>`}
 </aside></div>
 <dialog id="dlg"></dialog>`;
 
+    if (!isNew) bindExtCard(c, extData.extensions);
     const f = document.getElementById("cf");
     bindCombo(f, "site", lk.site);
     f.onsubmit = async (e) => {
@@ -686,6 +693,7 @@ ${w.late ? `<div style="flex:${w.late};background:var(--over)"></div>` : ""}${w.
 <div>สัปดาห์ ${fd(w.from)}</div></div>`).join("")}</div>
 <div class="legend"><span><span class="dot d-normal" aria-hidden="true"></span>ปิดทัน SLA</span><span><span class="dot d-overdue" aria-hidden="true"></span>ปิดเกิน Due</span></div>
 </section></div>
+${extTable(o.extensions || [], `${esc(o.owner)} · การขอขยายเวลา`)}
 ${o.changes.length && lvl("audit_view") !== "none" ? `<section class="card"><h2>การแก้ไขในเคสของ Owner นี้</h2>${changeRows(o.changes)}</section>` : ""}
 ${closed.length ? `<section class="card"><div class="title"><h2>ปิดแล้วใน 30 วัน</h2><span>${closed.length} เคส</span></div>${caseTable(closed, { showOwner: false })}</section>` : ""}`;
     document.getElementById("pick").onchange = (e) => (location.hash = "#/owner/" + encodeURIComponent(e.target.value));
@@ -733,11 +741,12 @@ ${closed.length ? `<section class="card"><div class="title"><h2>ปิดแล�
 <div><dt>Status</dt><dd>${esc(c.status || "-")}</dd></div>
 <div><dt>ทีม</dt><dd>${esc(c.sourceLabel)}</dd></div>
 <div><dt>Start date</dt><dd>${fd(c.startDate, true)}</dd></div>
-<div><dt>Due</dt><dd>${fd(c.dueDate, true)}</dd></div>
+<div><dt>Due</dt><dd>${c.extCount ? `<s class="muted">${fd(c.origDueDate)}</s> ` : ""}${fd(c.dueDate, true)}${c.extCount ? ` <span class="chip c-normal">ขยาย ${c.extCount} ครั้ง</span>` : ""}</dd></div>
 <div><dt>อายุเคส</dt><dd class="${c.stage === "overdue" ? "t-over" : c.stage === "r2" ? "t-r2" : ""}">${ageText(c)}</dd></div>
 <div><dt>Email แจ้งเตือน</dt><dd>${alertText(c)}</dd></div>
 </dl>
 ${c.note ? `<div class="mt-note"><strong>Note:</strong> ${esc(c.note)}</div>` : ""}
+${(c.extensions || []).filter((e) => e.status !== "cancelled").map((e) => `<div class="mt-note"><strong>คำขอขยายครั้งที่ ${e.seq}</strong> (${fd(e.requested_at.slice(0, 10))}) ${EXT_ST[e.status][1]}${e.approver_name ? " โดย " + esc(e.approver_name) : ""}${e.status === "approved" ? ` · Due ${fd(e.old_due)} → ${fd(e.new_due)}` : ""} · เหตุผล: ${esc(e.reason)}${e.decision_note ? ` · ความเห็น: ${esc(e.decision_note)}` : ""}</div>`).join("")}
 <div class="mt-acth">Activity / Detail <span>${(c.activities || []).filter((a) => !a.is_system).length} รายการ</span></div>
 ${actRows(c)}
 </article>`;
@@ -872,7 +881,10 @@ ${hist.reports.map((r) => `<tr><td>${fdt(r.sent_at)}</td><td>${esc(r.title)}</td
         try {
           const p = await api("/reports/preview?" + qs(params()) + siteQs());
           const k = p.kpis;
-          document.getElementById("preview").innerHTML = `${sites.length ? `ลูกค้า ${esc(sites.join(", "))} · ` : `ทุกลูกค้า (${p.customers} ราย) · `}ช่วง ${esc(p.rangeLabel)}: เปิดใหม่ <strong>${k.opened}</strong> · ปิด <strong>${k.closed}</strong> (ทัน SLA ${k.slaPct === null ? "-" : k.slaPct + "%"}) · ยังเปิดอยู่ ${k.openNow} · เกิน Due ขณะนี้ <strong>${k.overdueNow}</strong>`;
+          document.getElementById("preview").innerHTML = `${sites.length ? `ลูกค้า ${esc(sites.join(", "))} · ` : `ทุกลูกค้า (${p.customers} ราย) · `}ช่วง ${esc(p.rangeLabel)}: เปิดใหม่ <strong>${k.opened}</strong> · ปิด <strong>${k.closed}</strong> (ทัน SLA ${k.slaPct === null ? "-" : k.slaPct + "%"}) · ยังเปิดอยู่ ${k.openNow} · เกิน Due ขณะนี้ <strong>${k.overdueNow}</strong>${k.extCount ? ` · ขอขยายเวลา <strong>${k.extCases}</strong> เคส ${k.extCount} ครั้ง` : ""}
+<div class="tablewrap" style="margin-top:12px"><table style="min-width:860px"><thead><tr><th>Owner</th><th class="n">เปิดใหม่</th><th class="n">ปิด</th><th class="n">ปิดทัน SLA เดิม</th><th class="n">ยังเปิดอยู่</th><th class="n">เกิน Due</th><th class="n">ขอขยาย (เคส)</th><th class="n">ขอขยาย (ครั้ง)</th><th class="n">อนุมัติ / ไม่อนุมัติ</th></tr></thead><tbody>
+${p.owners.map((o) => `<tr><td style="font-weight:600">${esc(o.owner)}</td><td class="n">${o.opened}</td><td class="n">${o.closed}</td><td class="n">${o.closedOnTime}</td><td class="n">${o.open}</td><td class="n t-over">${o.overdue || 0}</td><td class="n" style="font-weight:700">${o.extCases || 0}</td><td class="n" style="font-weight:700">${o.extCount || 0}</td><td class="n">${o.extCount ? `${o.extApproved} / ${o.extRejected}` : "-"}</td></tr>`).join("")}</tbody></table></div>
+${extTable(p.extensions || [], "การขอขยายเวลาในช่วงนี้ พร้อมเหตุผล")}`;
         } catch (e) {
           toast(e.message, 6000);
         }
@@ -1525,6 +1537,133 @@ ${forced ? "" : `<label class="f">รหัสผ่านปัจจุบั�
       }
     };
   }
+
+
+  // ------------------------------------------------------------ case extensions (ขอขยายเวลา)
+  const EXT_ST = { pending: ["r1", "รออนุมัติ"], approved: ["ok", "อนุมัติ"], rejected: ["fail", "ไม่อนุมัติ"], cancelled: ["closed", "ยกเลิก"] };
+  function canRequestExt(c) {
+    return c.stage !== "closed" && !c.pendingExtId && (c.ownerUserId === ME.user.id || lvl("case_edit") === "all");
+  }
+  function extCard(c, list, closed) {
+    const pending = list.find((e) => e.status === "pending");
+    const hist = list.filter((e) => e.status !== "pending").slice().reverse();
+    return `<section class="card" id="ext-card"><div class="title"><h2>ขยายเวลา</h2><span>${c.extCount ? `ขยายแล้ว ${c.extCount} ครั้ง` : "ยังไม่เคยขยาย"}</span></div>
+${pending ? `<div class="banner warn" style="display:flex;flex-direction:column;gap:8px">
+<div><strong>รออนุมัติคำขอขยายครั้งที่ ${pending.seq}</strong> · ส่งให้ ${esc(pending.approver_name || "-")} · ${fdt(pending.requested_at)}</div>
+<div>Due ${fd(pending.old_due)} → <strong>${fd(pending.new_due)}</strong> · เหตุผล: ${esc(pending.reason)}</div>
+${pending.approver_id === ME.user.id || ME.user.role === "admin" ? `<label class="f">ความเห็น (บังคับเมื่อไม่อนุมัติ)<input id="ext-note" placeholder="เช่น อนุมัติ ติดตาม Vendor ทุกวัน"></label>
+<div class="actions" style="justify-content:flex-start"><button class="btn primary" type="button" data-extdec="1" data-id="${pending.id}">อนุมัติ ขยาย ${pending.days} วัน</button><button class="btn" type="button" data-extdec="0" data-id="${pending.id}">ไม่อนุมัติ</button></div>` : ""}
+${pending.requested_by === ME.user.id ? `<div><button class="btn" type="button" id="ext-cancel" data-id="${pending.id}" style="min-height:34px">ยกเลิกคำขอ</button></div>` : ""}</div>` : ""}
+${!closed && canRequestExt(c) ? `<button class="btn primary" type="button" id="ext-req">ขอขยายเวลา ${cfg.slaDays} วัน</button>` : ""}
+${hist.length ? `<ul class="ext-hist">${hist.map((e) => `<li>${chip(EXT_ST[e.status][0], EXT_ST[e.status][1])} <strong>คำขอครั้งที่ ${e.seq}</strong> · ${fdt(e.requested_at)} · โดย ${esc(e.requested_by_name || "-")}
+<div>${e.status === "approved" ? `Due ${fd(e.old_due)} → <strong>${fd(e.new_due)}</strong> · ` : ""}เหตุผล: ${esc(e.reason)}</div>
+${e.approver_name && e.status !== "cancelled" ? `<div class="muted">${esc(e.approver_name)}${e.decision_note ? ` · “${esc(e.decision_note)}”` : ""}</div>` : ""}</li>`).join("")}</ul>` : ""}
+${!pending && !hist.length && closed ? `<div class="hint">เคสปิดแล้ว</div>` : ""}</section>`;
+  }
+  function bindExtCard(c, list) {
+    const card = document.getElementById("ext-card");
+    if (!card) return;
+    const reload = () => viewCase(c.id);
+    const req = document.getElementById("ext-req");
+    if (req) req.onclick = () => openExtRequest(c, list, reload);
+    const cn = document.getElementById("ext-cancel");
+    if (cn) cn.onclick = async () => {
+      try {
+        await post(`/extensions/${cn.dataset.id}/cancel`);
+        toast("ยกเลิกคำขอแล้ว");
+        reload();
+      } catch (e) {
+        toast(e.message, 6000);
+      }
+    };
+    card.querySelectorAll("[data-extdec]").forEach((b) => (b.onclick = () => decideExt(b, document.getElementById("ext-note"), reload)));
+  }
+  async function decideExt(b, noteEl, after) {
+    b.disabled = true;
+    try {
+      const r = await post(`/extensions/${b.dataset.id}/decide`, { approve: b.dataset.extdec === "1", note: noteEl ? noteEl.value : "" });
+      toast(r.status === "approved" ? `อนุมัติแล้ว Due ใหม่ ${fd(r.newDue, true)} ระบบแจ้ง Owner ทาง email` : "ไม่อนุมัติ ระบบแจ้ง Owner ทาง email แล้ว", 6000);
+      after && after();
+    } catch (e) {
+      b.disabled = false;
+      toast(e.message, 6000);
+    }
+  }
+  async function openExtRequest(c, list, after) {
+    const { approvers } = await api("/extensions/approvers");
+    const dlg = document.getElementById("dlg");
+    const newDue = (() => {
+      const t = new Date(c.dueDate + "T00:00:00");
+      t.setDate(t.getDate() + cfg.slaDays);
+      return isoDay(t);
+    })();
+    const lastApprover = (list.filter((e) => e.status === "approved").pop() || {}).approver_id;
+    dlg.innerHTML = `<form class="card" method="dialog" id="xf"><h2>ขอขยายเวลา ${esc(caseRef(c))}</h2>
+<div class="stat2" style="grid-template-columns:repeat(3,1fr)"><div><div class="k">Due ปัจจุบัน</div><div class="v" style="font-size:20px">${fd(c.dueDate)}</div></div>
+<div><div class="k">Due ใหม่ถ้าอนุมัติ</div><div class="v" style="font-size:20px;color:var(--accent)">${fd(newDue)}</div></div>
+<div><div class="k">ขยายไปแล้ว</div><div class="v" style="font-size:20px">${c.extCount || 0} ครั้ง</div></div></div>
+<label class="f">ส่งให้ Manager อนุมัติ<select name="ap" required><option value="">เลือก Manager</option>${approvers.filter((u) => u.id !== ME.user.id).map((u) => `<option value="${u.id}" ${u.id === lastApprover ? "selected" : ""}>${esc(u.display_name)} · ${ROLE[u.role]}</option>`).join("")}</select></label>
+<label class="f">เหตุผลที่ต้องขยาย<textarea name="reason" rows="3" required minlength="5" placeholder="เช่น รอ Vendor ส่ง patch คาดว่าได้รับภายใน 10 พ.ย. เปิดเคส Vendor ไว้แล้ว #00912345"></textarea></label>
+<p class="hint" style="margin:0">ถ้าอนุมัติ ระบบนับช่วงใหม่ ${cfg.slaDays} วันต่อจาก Due เดิม และแจ้งเตือนวันที่ ${cfg.alert1Day}, ${cfg.alert2Day} และเมื่อเกิน Due เหมือนเคสปกติ</p>
+<div class="right"><button class="btn" value="cancel" formnovalidate>ยกเลิก</button><button class="btn primary" value="ok">ส่งคำขอ</button></div></form>`;
+    const f = dlg.querySelector("#xf");
+    f.onsubmit = async (e) => {
+      if (e.submitter && e.submitter.value === "cancel") return;
+      e.preventDefault();
+      if (!f.ap.value) return toast("เลือก Manager ที่จะอนุมัติ");
+      if (f.reason.value.trim().length < 5) return toast("ใส่เหตุผลที่ต้องขยาย");
+      try {
+        await post(`/case/${c.id}/extensions`, { approverId: Number(f.ap.value), reason: f.reason.value });
+        dlg.close();
+        toast("ส่งคำขอแล้ว ระบบแจ้ง Manager ทาง email", 5000);
+        after && after();
+      } catch (err) {
+        toast(err.message, 6000);
+      }
+    };
+    dlg.showModal();
+  }
+  /** Box on the overview / my cases: extension requests waiting for me, and mine waiting for a manager. */
+  async function extPendingSection() {
+    let d;
+    try {
+      d = await api("/extensions/pending");
+    } catch (e) {
+      return "";
+    }
+    const row = (e, forMe) => `<div class="ext-item"><div><a class="mono" href="#/case/${e.case_id}">${esc(e.case_no)}</a> · <strong>${esc(e.site || "-")}</strong> · ${esc(e.task || "")} <span class="chip c-r1">คำขอครั้งที่ ${e.seq}</span>${e.ext_done ? "" : ""}</div>
+<div class="muted" style="font-size:13px">${forMe ? `ขอโดย ${esc(e.requested_by_name || "-")}` : `ส่งให้ ${esc(e.approver_name || "-")}`} · ${fdt(e.requested_at)} · Due ${fd(e.old_due)} → <strong>${fd(e.new_due)}</strong></div>
+<div class="ext-reason">${esc(e.reason)}</div>
+${forMe ? `<div class="formgrid" style="align-items:end"><label class="f">ความเห็น (บังคับเมื่อไม่อนุมัติ)<input data-note="${e.id}"></label><div class="actions" style="justify-content:flex-start"><button class="btn primary" type="button" data-extdec="1" data-id="${e.id}">อนุมัติ ขยาย ${e.days} วัน</button><button class="btn" type="button" data-extdec="0" data-id="${e.id}">ไม่อนุมัติ</button></div></div>` : ""}</div>`;
+    return `${d.forMe.length ? `<section class="card ext-wrap"><div class="title"><h2>คำขอขยายเวลา รออนุมัติจากคุณ (${d.forMe.length})</h2></div>${d.forMe.map((e) => row(e, true)).join("")}</section>` : ""}
+${d.mine.length ? `<section class="card"><div class="title"><h2>คำขอขยายเวลาของคุณ รออนุมัติ (${d.mine.length})</h2></div>${d.mine.map((e) => row(e, false)).join("")}</section>` : ""}`;
+  }
+  function bindExtPending(root) {
+    root.querySelectorAll(".ext-wrap [data-extdec]").forEach((b) => (b.onclick = () => decideExt(b, root.querySelector(`[data-note="${b.dataset.id}"]`), () => route())));
+  }
+  /** Extra table row under a case that has been extended. cols: cells before / after the age cell. */
+  function extRow(c, { before, after }) {
+    if (!c.extCount) return "";
+    const e = c.lastExt || {};
+    const notYet = c.periodStart && c.periodStart > daysAgo(0) && c.stage !== "closed";
+    return `<tr class="ext-row click" data-href="#/case/${c.id}"><td>↳ <span class="mono">${esc(caseRef(c))}</span> <span class="chip c-normal">ขยายครั้งที่ ${c.extCount}</span><div class="muted" style="font-size:12px">อนุมัติโดย ${esc(e.approver || "-")}</div></td>
+<td colspan="${before}" style="font-size:13px">${fd(c.periodStart)} – <strong>${fd(c.dueDate)}</strong> · เหตุผล: ${esc(e.reason || "-")}</td>
+<td>${c.stage === "closed" ? (c.closedInExtension ? "ปิดทันเวลาที่ขยาย" : "ปิดเกิน Due") : notYet ? `<small>เริ่มช่วงขยาย ${fd(c.periodStart)}</small>` : ageCell(c)}</td>
+${after ? `<td colspan="${after}">${c.stage === "closed" ? "" : chip(c.stage)}</td>` : ""}</tr>`;
+  }
+  /** Table of extension requests (owner page, reports): one row per request with reason and decision. */
+  function extTable(list, title) {
+    if (!list.length) return "";
+    const live = list.filter((e) => e.status !== "cancelled");
+    const nCases = new Set(live.map((e) => e.case_id)).size;
+    const n = (st) => live.filter((e) => e.status === st).length;
+    return `<section class="card"><div class="title"><h2>${title}</h2><span>${nCases} เคส · ${live.length} ครั้ง (อนุมัติ ${n("approved")} · ไม่อนุมัติ ${n("rejected")}${n("pending") ? ` · รออนุมัติ ${n("pending")}` : ""})</span></div>
+<div class="tablewrap"><table style="min-width:1000px"><thead><tr><th>เลขเคส</th><th>ลูกค้า</th><th>คำขอครั้งที่</th><th>ขอเมื่อ</th><th>เหตุผลที่ขอ</th><th>Due เดิม → ใหม่</th><th>ผล / ผู้พิจารณา</th></tr></thead><tbody>
+${live.map((e) => `<tr><td><a class="mono" href="#/case/${e.case_id}">${esc(e.case_no)}</a><div class="muted" style="font-size:12px">${esc(e.cs_number || "ยังไม่มี CS")}</div></td><td style="font-weight:600">${esc(e.site || "-")}</td><td>${e.seq}</td><td>${fdt(e.requested_at)}</td>
+<td style="max-width:360px">${esc(e.reason)}</td><td>${fd(e.old_due)} → ${e.status === "rejected" ? "-" : `<strong>${fd(e.new_due)}</strong>`}</td>
+<td>${chip(EXT_ST[e.status][0], EXT_ST[e.status][1])}<div class="muted" style="font-size:12px">${esc(e.approver_name || "-")}${e.decision_note ? ` · “${esc(e.decision_note)}”` : ""}</div></td></tr>`).join("")}</tbody></table></div></section>`;
+  }
+  const extTag = (c) => (c.pendingExtId ? ` <span class="chip c-r1">รออนุมัติขยาย</span>` : c.extCount ? ` <span class="chip c-normal">ขยาย ${c.extCount} ครั้ง</span>` : "");
 
   // ------------------------------------------------------------ customer intake (requests from LINE OA / links)
   const IK_STATUS = { pending: "รอรับเคส", claiming: "กำลังรับ", claimed: "รับแล้ว", rejected: "ปฏิเสธ", duplicate: "ซ้ำ" };

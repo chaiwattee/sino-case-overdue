@@ -2,7 +2,7 @@
 // v2 code (withStage, emails, reports, telegram) already works with.
 const { config } = require("../config");
 const { config3 } = require("./config3");
-const { withStage, isClosed } = require("../cases");
+const { withStage, isClosed, STAGES } = require("../cases");
 const d = require("../dates");
 const { q, one, all, tx } = require("./db");
 
@@ -10,7 +10,12 @@ const CASE_SELECT = `
   SELECT c.*, t.label AS team_label, u.display_name AS owner_name, u.email AS owner_email,
          (SELECT a.detail FROM case_activities a WHERE a.case_id = c.id AND NOT a.is_system
            ORDER BY a.activity_date DESC, a.id DESC LIMIT 1) AS last_activity,
-         (SELECT max(a.created_at) FROM case_activities a WHERE a.case_id = c.id) AS last_activity_at
+         (SELECT max(a.created_at) FROM case_activities a WHERE a.case_id = c.id) AS last_activity_at,
+         (SELECT e.id FROM case_extensions e WHERE e.case_id = c.id AND e.status = 'pending' LIMIT 1) AS pending_ext_id,
+         (SELECT json_build_object('seq', e.seq, 'reason', e.reason, 'approver', ua.display_name, 'decidedAt', e.decided_at,
+                   'from', e.old_due, 'to', e.new_due, 'note', e.decision_note)
+            FROM case_extensions e LEFT JOIN users ua ON ua.id = e.approver_id
+           WHERE e.case_id = c.id AND e.status = 'approved' ORDER BY e.seq DESC LIMIT 1) AS last_ext
   FROM cases c
   JOIN teams t ON t.code = c.team
   LEFT JOIN users u ON u.id = c.owner_id`;
@@ -49,6 +54,39 @@ function toCase(r) {
   };
   const c = withStage(base);
   c.closedAt = c.endDate;
+  // Extensions: Due moved by SLA days per approval. SLA "on time" stays measured against the original Due;
+  // stage, age and alert rounds follow the current 7-day period (same rules as a new case).
+  const ext = r.ext_count || 0;
+  c.extCount = ext;
+  c.origDueDate = c.dueDate;
+  c.totalAge = c.age;
+  c.pendingExtId = r.pending_ext_id || null;
+  c.lastExt = r.last_ext || null;
+  if (ext > 0) {
+    const due = d.fromISODate(r.due_date);
+    const periodStart = d.addDays(due, -config.slaDays);
+    c.dueDate = due;
+    c.periodStart = periodStart;
+    c.alertKey = `${c.key}|e${ext}`;
+    if (c.stage === "closed") {
+      c.closedInExtension = c.endDate ? c.endDate <= due : null;
+    } else {
+      const today = d.today();
+      if (today < periodStart) {
+        // Approved before the original Due: no alerts until the new period starts.
+        c.stage = "normal";
+        c.daysLeft = d.daysBetween(today, due);
+        c.daysOverdue = 0;
+      } else {
+        const p = withStage({ ...base, startDate: periodStart });
+        c.stage = p.stage;
+        c.age = p.age;
+        c.daysLeft = p.daysLeft;
+        c.daysOverdue = p.daysOverdue;
+      }
+      c.stageLabel = STAGES[c.stage].label;
+    }
+  }
   return c;
 }
 
@@ -224,7 +262,7 @@ async function editStartDate(user, kase, newDate, reason) {
   if (oldIso === iso) return;
   await tx(async (c) => {
     await c.query("UPDATE cases SET start_date=$1, due_date=$2, updated_at=now() WHERE id=$3", [
-      iso, d.toISODate(d.addDays(start, config.slaDays)), kase.id,
+      iso, d.toISODate(d.addDays(start, config.slaDays * (1 + (kase.extCount || 0)))), kase.id,
     ]);
     await logChange(c, kase, user, "start_date", oldIso, iso, String(reason).trim());
     await addActivity(c, kase.id, user, { kind: "แก้ Start date", detail: `${oldIso} → ${iso} เหตุผล: ${String(reason).trim()}`, system: true });

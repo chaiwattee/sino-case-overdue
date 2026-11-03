@@ -72,6 +72,7 @@ function caseAlertEmail(c, type) {
     )}) ระบบจะแจ้งเตือนทุกวันจนกว่าสถานะจะเป็นปิดเคส`;
   }
   if (c.site) subject += ` · ${c.site}`;
+  if (c.extCount) subject += ` · ขยายครั้งที่ ${c.extCount}`;
 
   const html = shell(
     COLORS[type].bar,
@@ -87,7 +88,7 @@ ${fieldTable([
   ["รายละเอียด", c.detail || "-"],
   c.caseUrl ? ["ทีม", c.sourceLabel] : ["เอกสาร", `${c.sourceLabel} · tab ${config.sheetName} แถว ${c.rowNumber}`],
   ["วันเปิดเคส", thaiDate(c.startDate)],
-  ["กำหนดปิด (Due)", thaiDate(c.dueDate)],
+  ["กำหนดปิด (Due)", thaiDate(c.dueDate) + (c.extCount ? ` (ขยายแล้ว ${c.extCount} ครั้ง จาก ${thaiDate(c.origDueDate)})` : "")],
   ["สถานะปัจจุบัน", c.status || "-"],
 ])}
 <p style="margin:18px 0 0">${
@@ -150,6 +151,7 @@ function reportEmail(rep, title) {
     `<td style="padding:12px 14px;border:1px solid #E2E5EA;border-radius:8px;width:25%"><div style="font-size:12px;color:#5B6576">${esc(
       label
     )}</div><div style="font-size:24px;font-weight:700;color:${color}">${esc(value)}</div></td>`;
+  const hasExt = !!rep.extensions;
   const ownerRows = rep.owners
     .map(
       (o) => `<tr>
@@ -159,6 +161,7 @@ function reportEmail(rep, title) {
 <td style="padding:8px 10px;border-bottom:1px solid #EEF0F3;text-align:right">${o.closedOnTime}</td>
 <td style="padding:8px 10px;border-bottom:1px solid #EEF0F3;text-align:right">${o.open}</td>
 <td style="padding:8px 10px;border-bottom:1px solid #EEF0F3;text-align:right;color:#8E1B3A;font-weight:700">${o.overdue}</td>
+${hasExt ? `<td style="padding:8px 10px;border-bottom:1px solid #EEF0F3;text-align:right">${o.extCases || 0} เคส / ${o.extCount || 0} ครั้ง</td>` : ""}
 </tr>`
     )
     .join("");
@@ -166,7 +169,7 @@ function reportEmail(rep, title) {
     .slice(0, 30)
     .map(
       (c) => `<tr>
-<td style="padding:7px 10px;border-bottom:1px solid #EEF0F3">${esc(c.csNumber || "-")}</td>
+<td style="padding:7px 10px;border-bottom:1px solid #EEF0F3">${esc(c.caseNo || c.csNumber || "-")}${c.caseNo && c.csNumber ? `<br><span style="color:#5B6576;font-size:12px">${esc(c.csNumber)}</span>` : ""}</td>
 <td style="padding:7px 10px;border-bottom:1px solid #EEF0F3">${esc(c.site || "-")}</td>
 <td style="padding:7px 10px;border-bottom:1px solid #EEF0F3">${esc(c.owner || "-")}</td>
 <td style="padding:7px 10px;border-bottom:1px solid #EEF0F3;text-align:right;color:#8E1B3A;font-weight:700">${c.daysOverdue} วัน</td>
@@ -193,19 +196,30 @@ ${tile("เปิดเคสในช่วงนี้", k.opened, "#18212E")}
 <tr style="color:#5B6576;font-size:12px">${th("Owner")}${th("เปิดใหม่", 1)}${th("ปิด", 1)}${th("ปิดทัน SLA", 1)}${th(
       "ยังเปิดอยู่",
       1
-    )}${th("เกิน Due", 1)}</tr>
-${ownerRows || `<tr><td colspan="6" style="padding:10px;color:#5B6576">ไม่มีข้อมูลในช่วงนี้</td></tr>`}
+    )}${th("เกิน Due", 1)}${hasExt ? th("ขอขยายเวลา", 1) : ""}</tr>
+${ownerRows || `<tr><td colspan="7" style="padding:10px;color:#5B6576">ไม่มีข้อมูลในช่วงนี้</td></tr>`}
 </table>
 ${
   rep.overdueCases.length
     ? `<p style="margin:0 0 8px;font-weight:700">เคสที่เกิน Due ขณะนี้ (${rep.overdueCases.length})</p>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;margin:0 0 18px">
-<tr style="color:#5B6576;font-size:12px">${th("CS")}${th("ลูกค้า")}${th("Owner")}${th("เกิน", 1)}</tr>${overdueRows}</table>`
+<tr style="color:#5B6576;font-size:12px">${th("เลขเคส")}${th("ลูกค้า")}${th("Owner")}${th("เกิน", 1)}</tr>${overdueRows}</table>`
     : ""
 }
 ${
   rep.changes.length
     ? `<p style="margin:0;font-size:14px">มีการแก้ไข Start date / Target date <strong>${rep.changes.length} ครั้ง</strong> ในช่วงนี้ (ดูรายละเอียดในไฟล์แนบ)</p>`
+    : ""
+}
+${
+  hasExt && rep.extensions.length
+    ? `<p style="margin:18px 0 8px;font-weight:700">การขอขยายเวลาในช่วงนี้ (${rep.extensions.length} ครั้ง)</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px">
+<tr style="color:#5B6576;font-size:12px">${th("Owner")}${th("เลขเคส")}${th("เหตุผล")}${th("ผล")}</tr>${rep.extensions
+        .map(
+          (e) => `<tr><td style="padding:7px 10px;border-bottom:1px solid #EEF0F3">${esc(e.owner_name || "-")}</td><td style="padding:7px 10px;border-bottom:1px solid #EEF0F3">${esc(e.case_no)}<br><span style="color:#5B6576;font-size:12px">${esc(e.site || "")} · คำขอครั้งที่ ${e.seq}</span></td><td style="padding:7px 10px;border-bottom:1px solid #EEF0F3">${esc(e.reason)}</td><td style="padding:7px 10px;border-bottom:1px solid #EEF0F3">${esc({ pending: "รออนุมัติ", approved: "อนุมัติ", rejected: "ไม่อนุมัติ" }[e.status] || e.status)}${e.approver_name ? `<br><span style="color:#5B6576;font-size:12px">${esc(e.approver_name)}</span>` : ""}</td></tr>`
+        )
+        .join("")}</table>`
     : ""
 }`
   );
