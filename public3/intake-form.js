@@ -28,6 +28,13 @@
     return body;
   }
 
+  // Company identity on every state of the page (helps customers and browsers trust the form).
+  function company(c) {
+    if (!c) return;
+    const contact = [c.supportPhone ? `โทร ${esc(c.supportPhone)}` : "", c.supportEmail ? `<a href="mailto:${esc(c.supportEmail)}">${esc(c.supportEmail)}</a>` : ""].filter(Boolean).join(" · ");
+    document.getElementById("foot").innerHTML = `${esc(c.legalName || c.name)} · ฝ่าย Support${c.url ? ` · <a href="${esc(c.url)}" rel="noopener">${esc(c.url.replace(/^https?:\/\//, "").replace(/\/$/, ""))}</a>` : ""}${contact ? ` · ${contact}` : ""}<br>ลิงก์นี้ใช้ได้ครั้งเดียว กรุณาอย่าส่งต่อให้ผู้อื่น · ข้อมูลที่กรอกใช้ติดต่อเรื่องเคสนี้เท่านั้น`;
+  }
+
   function fail(msg) {
     app.innerHTML = `<div class="center"><h1>เปิดฟอร์มไม่ได้</h1><p class="lead">${esc(msg)}</p>
 <p class="hint">ต้องการความช่วยเหลือ ติดต่อทีม Support ทาง LINE OA หรือโทรหาทีมงานได้ตามปกติ</p></div>`;
@@ -212,8 +219,10 @@ ${info.attachments ? `<div class="f"><span class="lbl">แนบไฟล์</sp
   (async function boot() {
     try {
       info = await call("");
+      company(info.company);
       render();
     } catch (e) {
+      if (e.body) company(e.body.company);
       fail(e.message);
     }
   })();

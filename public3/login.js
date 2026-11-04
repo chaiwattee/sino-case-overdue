@@ -32,23 +32,39 @@
     el.hidden = !text;
   }
 
-  function renderLogin(sso) {
+  // Staff sign in on Microsoft's own page; the password form (outside accounts) is shown only on request,
+  // so the page never looks like a copied Microsoft login.
+  function companyNote(c) {
+    if (!c) return "";
+    return `<div class="login-note">ระบบภายในของ <strong>${esc(c.legalName || c.name)}</strong> สำหรับพนักงานและผู้ที่ได้รับสิทธิ์เท่านั้น
+ปุ่มด้านบนพาไปยืนยันตัวตนที่หน้า login ของ Microsoft 365 ขององค์กรโดยตรง หน้านี้ไม่ได้ขอรหัสผ่าน Microsoft ของคุณ${c.url ? `<br><a href="${esc(c.url)}" rel="noopener">เว็บไซต์ ${esc(c.name)}</a>` : ""}</div>`;
+  }
+  function renderLogin(sso, company) {
     const e = params.get("e");
     const errText = e ? ERR[e] || (e.startsWith("ms_") ? "Microsoft ปฏิเสธการเข้าสู่ระบบ" : ERR.failed) : "";
-    box.innerHTML = `<h2 style="font-size:24px">เข้าสู่ระบบ</h2>
+    const showPw = !sso || e === "uselocal" || params.get("pw") === "1";
+    box.innerHTML = `<h2 style="font-size:24px">เข้าสู่ระบบ Sino Case SLA</h2>
 <div id="msg" class="banner err" ${errText ? "" : "hidden"} role="alert">${esc(errText)}</div>
 ${sso ? `<a class="btn primary big" href="/auth/login">
-<svg width="18" height="18" viewBox="0 0 20 20" aria-hidden="true"><rect x="1" y="1" width="8" height="8" fill="currentColor"/><rect x="11" y="1" width="8" height="8" fill="currentColor"/><rect x="1" y="11" width="8" height="8" fill="currentColor"/><rect x="11" y="11" width="8" height="8" fill="currentColor"/></svg>
-เข้าด้วยบัญชี Microsoft ของบริษัท</a>
-<p class="muted" style="margin:0;font-size:13px">พนักงาน Sinostech ใช้ปุ่มนี้ ไม่ต้องจำรหัสผ่านแยก</p>
-<div class="or"><span></span>บัญชีภายนอก<span></span></div>` : ""}
+<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 11V8a5 5 0 0 1 10 0v3M5 11h14v10H5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+เข้าสู่ระบบด้วยบัญชีบริษัท</a>` : ""}
+${companyNote(company)}
+${sso && !showPw ? `<button type="button" class="linkbtn" id="show-pw">บัญชีภายนอก: เข้าด้วยอีเมลและรหัสผ่านของระบบนี้</button>` : ""}
+<div id="pw" ${showPw ? "" : "hidden"}>
+${sso ? `<div class="or"><span></span>บัญชีภายนอก<span></span></div>` : ""}
 <form id="f" class="stack">
 <label class="f">อีเมล<input type="email" name="email" autocomplete="username" required></label>
-<label class="f">รหัสผ่าน<input type="password" name="password" autocomplete="current-password" required></label>
+<label class="f">รหัสผ่านของระบบนี้<input type="password" name="password" autocomplete="current-password" required></label>
 <label class="chk"><input type="checkbox" name="remember" checked>จำการเข้าสู่ระบบ</label>
 <button class="btn ${sso ? "" : "primary"} big" type="submit">เข้าสู่ระบบด้วยรหัสผ่าน</button>
 </form>
-<p class="muted" style="margin:0;font-size:13px">ลืมรหัสผ่านหรือยังไม่มีบัญชี ติดต่อ Admin ของระบบ</p>`;
+<p class="muted" style="margin:0;font-size:13px">ลืมรหัสผ่านหรือยังไม่มีบัญชี ติดต่อ Admin ของระบบ</p></div>`;
+    const sp = document.getElementById("show-pw");
+    if (sp) sp.onclick = () => {
+      document.getElementById("pw").hidden = false;
+      sp.hidden = true;
+      document.querySelector("#f input[name=email]").focus();
+    };
     const f = document.getElementById("f");
     f.onsubmit = async (ev) => {
       ev.preventDefault();
@@ -79,7 +95,7 @@ ${sso ? `<a class="btn primary big" href="/auth/login">
       try {
         await post("/auth/reset", { token, password: f.p1.value });
         history.replaceState(null, "", "/login.html");
-        renderLogin(window.__sso);
+        renderLogin(window.__sso, window.__company);
         msg("ตั้งรหัสผ่านใหม่แล้ว เข้าสู่ระบบได้เลย", "ok");
       } catch (e) {
         msg(e.message);
@@ -91,9 +107,10 @@ ${sso ? `<a class="btn primary big" href="/auth/login">
     .then((r) => r.json())
     .then((c) => {
       window.__sso = c.sso;
+      window.__company = c.company;
       const token = params.get("reset");
       if (token) renderReset(token);
-      else renderLogin(c.sso);
+      else renderLogin(c.sso, c.company);
     })
     .catch(() => renderLogin(false));
 })();

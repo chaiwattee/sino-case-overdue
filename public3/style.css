@@ -382,3 +382,7 @@ tr.ext-row td:first-child { border-left: 4px solid var(--accent); }
 .ext-item { display: flex; flex-direction: column; gap: 6px; padding: 12px 0; border-top: 1px solid var(--line); }
 .ext-item:first-of-type { border-top: 0; }
 .ext-reason { background: var(--surface-2); border-radius: 8px; padding: 8px 12px; font-size: 14px; white-space: pre-wrap; }
+
+/* Login: company notice and the outside-account link */
+.login-note { font-size: 13px; line-height: 1.6; color: var(--muted); background: var(--surface-2); border-radius: 10px; padding: 10px 12px; }
+.linkbtn { font: inherit; font-size: 14px; background: none; border: 0; padding: 4px 0; color: var(--accent); cursor: pointer; text-align: left; text-decoration: underline; }

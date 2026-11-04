@@ -369,6 +369,71 @@ async function checkCert() {
   return { ok: true, warned: true, cert: c };
 }
 
+// ------------------------------------------------------------ browser warning check (Google Web Risk / Safe Browsing)
+const THREAT_TH = { SOCIAL_ENGINEERING: "หลอกลวง / phishing", MALWARE: "มัลแวร์", UNWANTED_SOFTWARE: "ซอฟต์แวร์ไม่พึงประสงค์", POTENTIALLY_HARMFUL_APPLICATION: "แอปที่อาจเป็นอันตราย" };
+function riskUrls() {
+  const base = config3.baseUrl;
+  return [`${base}/`, `${base}/login.html`, `${base}/r/check`];
+}
+/** Ask Google whether browsers will warn about our URLs. Returns { ok, flagged: [{url, threats}] }. */
+async function webRiskLookup() {
+  const axios = require("axios");
+  const urls = riskUrls();
+  if (config3.webRiskKey) {
+    const flagged = [];
+    for (const u of urls) {
+      const qs = ["SOCIAL_ENGINEERING", "MALWARE", "UNWANTED_SOFTWARE"].map((t) => `threatTypes=${t}`).join("&");
+      const r = await axios.get(`https://webrisk.googleapis.com/v1/uris:search?${qs}&uri=${encodeURIComponent(u)}&key=${encodeURIComponent(config3.webRiskKey)}`, { timeout: 15000 });
+      if (r.data && r.data.threat) flagged.push({ url: u, threats: r.data.threat.threatTypes || [] });
+    }
+    return { api: "Web Risk", flagged };
+  }
+  if (config3.safeBrowsingKey) {
+    const r = await axios.post(
+      `https://safebrowsing.googleapis.com/v4/threatMatches:find?key=${encodeURIComponent(config3.safeBrowsingKey)}`,
+      {
+        client: { clientId: "sino-case-sla", clientVersion: "3" },
+        threatInfo: {
+          threatTypes: ["SOCIAL_ENGINEERING", "MALWARE", "UNWANTED_SOFTWARE", "POTENTIALLY_HARMFUL_APPLICATION"],
+          platformTypes: ["ANY_PLATFORM"],
+          threatEntryTypes: ["URL"],
+          threatEntries: urls.map((url) => ({ url })),
+        },
+      },
+      { timeout: 15000 }
+    );
+    const by = {};
+    (r.data.matches || []).forEach((m) => (by[m.threat.url] = [...(by[m.threat.url] || []), m.threatType]));
+    return { api: "Safe Browsing", flagged: Object.entries(by).map(([url, threats]) => ({ url, threats })) };
+  }
+  return null;
+}
+async function checkWebRisk({ notifyClean = false } = {}) {
+  const { setSetting } = require("./db");
+  let res;
+  try {
+    res = await webRiskLookup();
+  } catch (e) {
+    const err = String(e.response?.data?.error?.message || e.message).slice(0, 300);
+    await setSetting("web_risk", { at: new Date().toISOString(), error: err });
+    return { ok: false, error: err };
+  }
+  if (!res) return { ok: false, skipped: "ยังไม่ได้ตั้ง WEB_RISK_API_KEY หรือ SAFE_BROWSING_API_KEY" };
+  const prev = await getSetting("web_risk", null);
+  const flagged = res.flagged.length > 0;
+  await setSetting("web_risk", { at: new Date().toISOString(), api: res.api, flagged: res.flagged, urls: riskUrls() });
+  const to = splitList(config3.bootstrapAdmin);
+  if (flagged) {
+    const list = res.flagged.map((f) => `${f.url} (${f.threats.map((t) => THREAT_TH[t] || t).join(", ")})`).join("\n");
+    const msg = `Google ติดธงเว็บ ${config3.baseUrl} ว่าไม่ปลอดภัย ผู้ใช้ Chrome จะเห็นคำเตือน "Dangerous"\n${list}\nแก้: Google Search Console → Security issues → Request review`;
+    await telegram.sendText("🚨 " + msg).catch((e) => console.error("[web-risk] telegram:", e.message));
+    if (to.length) await graph.sendMail({ to, cc: [], subject: `[Sino Case SLA] Chrome เตือนว่าเว็บไม่ปลอดภัย (${config3.baseUrl})`, html: `<p style="white-space:pre-wrap">${msg.replace(/</g, "&lt;")}</p>` }).catch((e) => console.error("[web-risk] mail:", e.message));
+  } else if ((prev && prev.flagged && prev.flagged.length) || notifyClean) {
+    await telegram.sendText(`✅ Google ไม่ติดธงเว็บ ${config3.baseUrl} แล้ว (ตรวจด้วย ${res.api})`).catch(() => {});
+  }
+  return { ok: true, api: res.api, flagged: res.flagged };
+}
+
 function startJobs() {
   if (config3.disableScheduler) return console.log("[v3 jobs] scheduler disabled");
   const j = config3.jobs;
@@ -378,6 +443,7 @@ function startJobs() {
   job("retention", "0 2 * * *", j.retention, () => runRetention());
   job("annual", "0 6 1 1 *", j.annual, () => runAnnual());
   job("cert", "15 9 * * *", true, () => checkCert());
+  job("web-risk", "40 7 * * *", true, () => checkWebRisk());
   // Customer intake: hourly "nobody has claimed this yet" reminders (checked every 5 min), chatbot webhooks, cleanup.
   const intake = require("./intake");
   job("intake-reminders", "*/5 * * * *", j.intake, () => intake.runReminders());
@@ -387,6 +453,6 @@ function startJobs() {
 }
 
 module.exports = {
-  startJobs, lastRuns, scopeIds, runAlerts, sendTelegram, sendReport, runDueSchedules, runRetention, runAnnual,
+  startJobs, lastRuns, scopeIds, checkWebRisk, runAlerts, sendTelegram, sendReport, runDueSchedules, runRetention, runAnnual,
   buildAnnualWorkbook, listChanges, teams, splitList, alertRules, certInfo, checkCert, siteList, filterSites, sitesLabel, addCustomerSheet,
 };

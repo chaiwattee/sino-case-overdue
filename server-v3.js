@@ -22,6 +22,8 @@ const app = express();
 app.disable("x-powered-by");
 app.set("trust proxy", true);
 app.use((req, res, next) => {
+  // Internal system: never indexed by search engines (also helps avoid "deceptive site" heuristics).
+  res.set("X-Robots-Tag", "noindex, nofollow, noarchive");
   res.set("X-Frame-Options", "DENY");
   res.set("X-Content-Type-Options", "nosniff");
   res.set("Referrer-Policy", "same-origin");
@@ -52,6 +54,21 @@ app.use((req, res, next) => {
 });
 
 app.get("/health", (req, res) => res.json({ ok: true }));
+app.get("/robots.txt", (req, res) => res.type("text/plain").send("User-agent: *\nDisallow: /\n"));
+// RFC 9116: where to report security problems with this site.
+app.get(["/.well-known/security.txt", "/security.txt"], (req, res) => {
+  const c = config3.company;
+  const exp = new Date(Date.now() + 300 * 86400000).toISOString().slice(0, 19) + "Z";
+  const lines = [
+    c.securityContact ? `Contact: mailto:${c.securityContact}` : null,
+    c.url ? `Contact: ${c.url}` : null,
+    `Expires: ${exp}`,
+    "Preferred-Languages: th, en",
+    `Canonical: ${config3.baseUrl}/.well-known/security.txt`,
+    `# ${c.legalName}: internal case tracking system (Sino Case SLA)`,
+  ].filter(Boolean);
+  res.type("text/plain").send(lines.join("\n") + "\n");
+});
 app.get("/version", (req, res) => res.json({ version: "v3-web-input" }));
 
 // Ops endpoints for manual runs (RUN_SECRET)

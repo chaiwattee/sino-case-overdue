@@ -1349,6 +1349,12 @@ ${audit.map((r) => { const a = ACTION[r.action] || ["closed", r.action]; return 
     $app.innerHTML = `
 <div class="head"><div><h1>ตั้งค่าระบบ</h1><p>แทน tab Settings ในไฟล์ Excel เดิม แก้ได้เฉพาะ Admin</p></div><div class="actions"><a class="btn" href="#/intake-admin">รับแจ้งเคสจากลูกค้า: LINE OA และ API</a></div></div>
 ${s.cert && !s.cert.error ? `<div class="banner ${s.cert.daysLeft <= 21 ? "warn" : "ok"}">ใบรับรอง HTTPS ${esc(s.cert.issuer)} ใช้ได้ถึง ${fd(s.cert.validTo, true)} (อีก ${s.cert.daysLeft} วัน)${s.cert.daysLeft <= 21 ? " ต้องต่ออายุ ระบบแจ้งทาง Telegram และ email ทุกวันจนกว่าจะต่ออายุ" : ""}</div>` : ""}
+${(() => {
+      const w = s.webRisk || {};
+      if (!w.configured) return `<div class="banner">ตรวจคำเตือน “Dangerous” ของ Chrome อัตโนมัติ: ยังไม่ได้ตั้ง API key (WEB_RISK_API_KEY หรือ SAFE_BROWSING_API_KEY ใน .env)</div>`;
+      const bad = (w.flagged || []).length;
+      return `<div class="banner ${w.error ? "warn" : bad ? "err" : "ok"}" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><span style="flex:1">${w.error ? `ตรวจคำเตือนของ Chrome ไม่สำเร็จ: ${esc(w.error)}` : bad ? `Google ติดธงเว็บนี้ว่าไม่ปลอดภัย (${bad} URL) ผู้ใช้ Chrome จะเห็นคำเตือน · แก้ที่ Google Search Console → Security issues → Request review` : w.at ? `Google ไม่ติดธงเว็บนี้ (ตรวจล่าสุด ${fdt(w.at)} ด้วย ${esc(w.api || "")})` : "ยังไม่เคยตรวจ"}</span><button class="btn" type="button" id="wr-check" style="min-height:34px">ตรวจตอนนี้</button></div>`;
+    })()}
 ${newSites.length ? `<div class="banner warn">มีรายการที่ผู้ใช้เพิ่มใหม่ ${newSites.length} รายการ รอตรวจ (มีป้าย “ใหม่”) กด “แก้” เพื่อยืนยัน แก้ชื่อ หรือรวมกับรายการเดิม</div>` : ""}
 <section class="card" id="ae"><div class="title"><h2>Email แจ้งเตือน Owner</h2><span>ผู้รับ email แจ้งเตือนแต่ละรอบ</span></div>
 <div class="tablewrap"><table style="min-width:720px"><thead><tr><th>รอบ</th><th>ส่งเมื่อ</th><th>ถึง</th><th style="text-align:center">CC รายชื่อด้านล่าง</th><th></th></tr></thead><tbody>
@@ -1389,6 +1395,18 @@ ${s.annualReports.map((a) => `<tr><td style="font-weight:600">${a.year + 543} ($
 </section>
 <dialog id="dlg"></dialog>`;
 
+    const wr = document.getElementById("wr-check");
+    if (wr) wr.onclick = async () => {
+      wr.disabled = true;
+      try {
+        const r = await post("/settings/web-risk/check");
+        toast(r.ok ? (r.flagged.length ? `Google ยังติดธงอยู่ ${r.flagged.length} URL` : "Google ไม่ติดธงเว็บนี้") : r.skipped || "ตรวจไม่สำเร็จ: " + r.error, 6000);
+        viewSettings();
+      } catch (e) {
+        toast(e.message, 6000);
+        wr.disabled = false;
+      }
+    };
     document.getElementById("ae-save").onclick = async () => {
       const ccTypes = [...document.querySelectorAll("input[name=cct]:checked")].map((x) => x.value);
       try {

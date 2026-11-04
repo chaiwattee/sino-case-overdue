@@ -40,6 +40,19 @@ const config3 = {
     intake: flag("V3_INTAKE", true),
   },
   disableScheduler: flag("DISABLE_SCHEDULER"),
+
+  // Shown on the login page and the customer form so they read clearly as the company's own system.
+  company: {
+    name: env.COMPANY_NAME || "Sinostech",
+    legalName: env.COMPANY_LEGAL_NAME || "SINO S-Tech Co., Ltd.",
+    url: env.COMPANY_URL || "",
+    supportPhone: env.SUPPORT_PHONE || "",
+    supportEmail: env.SUPPORT_EMAIL || "",
+    securityContact: env.SECURITY_CONTACT || env.BOOTSTRAP_ADMIN_EMAIL || "",
+  },
+  // Daily check that browsers don't flag the site (Google Web Risk or Safe Browsing API key).
+  webRiskKey: env.WEB_RISK_API_KEY || "",
+  safeBrowsingKey: env.SAFE_BROWSING_API_KEY || "",
 };
 
 function missing3() {

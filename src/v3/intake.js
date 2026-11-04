@@ -701,7 +701,7 @@ const publicApi = express.Router();
 publicApi.get("/intake/:token", wrap(async (req, res) => {
   const link = await linkByToken(req.params.token);
   const st = linkState(link);
-  if (st) return res.status(st.status).json({ ok: false, error: st.error, code: st.code });
+  if (st) return res.status(st.status).json({ ok: false, error: st.error, code: st.code, company: config3.company });
   const s = await settings();
   const ss = await siteSettings(link.site);
   const products = (await all("SELECT value FROM lookups WHERE kind='product' AND active ORDER BY sort, lower(value)")).map((r) => r.value);
@@ -715,6 +715,7 @@ publicApi.get("/intake/:token", wrap(async (req, res) => {
     expiresAt: link.expires_at,
     test: link.is_test,
     channel: link.line_user_id ? "line" : "link",
+    company: config3.company,
     products,
     severities: Object.entries(SEV).map(([value, hint]) => ({ value, hint })),
     attachments: ss && ss.attachments ? { maxFiles: s.attachMaxFiles, maxMb: s.attachMaxMb, ext: FILE_EXT } : null,

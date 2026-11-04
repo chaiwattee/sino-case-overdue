@@ -131,7 +131,7 @@ function ssoReady() {
   return !!(config3.sso.clientId && config3.sso.clientSecret && config3.sso.tenantId);
 }
 
-router.get("/auth/config", (req, res) => res.json({ sso: ssoReady() }));
+router.get("/auth/config", (req, res) => res.json({ sso: ssoReady(), company: config3.company }));
 
 router.get("/auth/login", (req, res) => {
   if (!ssoReady()) return res.redirect("/login.html?e=sso_off");

@@ -641,9 +641,12 @@ api.get("/settings", need("settings_manage"), wrap(async (req, res) => {
     annual: await getSetting("annual_report", { recipients: "", cc: "" }),
     alertEmail: await jobs.alertRules(),
     cert: jobs.certInfo(),
+    webRisk: { ...(await getSetting("web_risk", {})), configured: !!(config3.webRiskKey || config3.safeBrowsingKey) },
     lookups, stats: { ...stats, dbSize: size.size }, annualReports: annual, jobs: config3.jobs,
   });
 }));
+api.post("/settings/web-risk/check", need("settings_manage"), wrap(async (req, res) => res.json(await jobs.checkWebRisk({ notifyClean: true }))));
+
 api.put("/settings", need("settings_manage"), wrap(async (req, res) => {
   const b = req.body || {};
   if (b.retentionYears !== undefined) {
