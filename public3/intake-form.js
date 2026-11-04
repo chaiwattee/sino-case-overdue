@@ -47,7 +47,8 @@ ${ex ? `<div class="ex">ตัวอย่าง: <b>${esc(ex)}</b></div>` : ""}
 
   function render() {
     const left = Math.max(0, Math.round((new Date(info.expiresAt) - Date.now()) / 60000));
-    $("exp").textContent = `ลิงก์ใช้ได้ 1 ครั้ง · หมดอายุ ${hm(new Date(info.expiresAt))} น. (อีก ${left} นาที)`;
+    const ex = new Date(info.expiresAt);
+    $("exp").textContent = left <= 120 ? `ลิงก์ใช้ได้ 1 ครั้ง · หมดอายุ ${hm(ex)} น. (อีก ${left} นาที)` : `ลิงก์ใช้ได้ 1 ครั้ง · หมดอายุ ${ex.getDate()} ${TH_MONTHS[ex.getMonth()]} ${hm(ex)} น.`;
     app.innerHTML = `
 <div><h1>แจ้งเคสถึงทีม Support</h1>
 <p class="lead">กรอกข้อมูลให้ครบเพื่อให้ทีมงานเริ่มตรวจสอบได้ทันที ทุกช่องมีตัวอย่างและคำอธิบาย ช่องที่มี <span class="req">*</span> ต้องกรอก</p></div>
@@ -88,7 +89,7 @@ ${info.attachments ? `<div class="f"><span class="lbl">แนบไฟล์</sp
 </section>
 <div id="msg"></div>
 <div class="foot" style="flex-direction:column;align-items:stretch">
-<label class="consent"><input type="checkbox" name="consent" required><span>ยินยอมให้ Sinostech ใช้ชื่อ เบอร์โทร และอีเมลนี้ เพื่อติดต่อเรื่องเคสนี้เท่านั้น</span></label>
+<label class="consent"><input type="checkbox" name="consent" required><span>ยินยอมให้บริษัท ซีโน เอส-เทค จำกัด ใช้ชื่อ เบอร์โทร และอีเมลนี้ เพื่อติดต่อเรื่องเคสนี้เท่านั้น</span></label>
 <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
 <span class="hint">หลังกดส่ง คุณได้เลขรับแจ้งทันที และได้${info.channel === "line" ? "ข้อความทาง LINE" : "อีเมล"} เมื่อมี Engineer รับเคส</span>
 <button class="btn primary" type="submit" id="send">ส่งแจ้งเคส</button></div></div>

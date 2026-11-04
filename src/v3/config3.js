@@ -44,7 +44,7 @@ const config3 = {
   // Shown on the login page and the customer form so they read clearly as the company's own system.
   company: {
     name: env.COMPANY_NAME || "Sinostech",
-    legalName: env.COMPANY_LEGAL_NAME || "SINO S-Tech Co., Ltd.",
+    legalName: env.COMPANY_LEGAL_NAME || "SINO S-TECH LIMITED (บริษัท ซีโน เอส-เทค จำกัด)",
     url: env.COMPANY_URL || "",
     supportPhone: env.SUPPORT_PHONE || "",
     supportEmail: env.SUPPORT_EMAIL || "",

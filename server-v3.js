@@ -65,7 +65,7 @@ app.get(["/.well-known/security.txt", "/security.txt"], (req, res) => {
     `Expires: ${exp}`,
     "Preferred-Languages: th, en",
     `Canonical: ${config3.baseUrl}/.well-known/security.txt`,
-    `# ${c.legalName}: internal case tracking system (Sino Case SLA)`,
+    `# SINO S-TECH LIMITED: internal case tracking system (Sino Case SLA)`,
   ].filter(Boolean);
   res.type("text/plain").send(lines.join("\n") + "\n");
 });
@@ -99,7 +99,7 @@ app.use("/api", api);
 const pub = path.join(__dirname, "public3");
 const noCache = { setHeaders: (res) => res.setHeader("Cache-Control", "no-cache") };
 // Login page and its assets are public; everything else needs a session.
-app.get(["/login.html", "/style.css", "/login.js", "/intake-form.js"], express.static(pub, noCache));
+app.get(["/login.html", "/style.css", "/login.js", "/intake-form.js", "/sinostech-logo.png"], express.static(pub, noCache));
 app.get("/r/:token", (req, res) => {
   res.set("Cache-Control", "no-store");
   res.set("X-Robots-Tag", "noindex, nofollow");

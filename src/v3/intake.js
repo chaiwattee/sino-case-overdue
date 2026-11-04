@@ -188,14 +188,14 @@ function customerLinkEmail({ name, customer, url, expiresAt, sender, note }) {
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;background:#FFFFFF;border:1px solid #D9DFE8;border-radius:12px;overflow:hidden">
 <tr><td style="height:6px;background:#1F5FBF;font-size:0;line-height:0">&nbsp;</td></tr>
 <tr><td style="padding:28px 30px;font-size:15px;line-height:1.7">
-<p style="margin:0 0 6px;font-size:13px;color:#5B6675">Sinostech Support</p>
+<p style="margin:0 0 16px"><img src="${esc(config3.baseUrl)}/sinostech-logo.png" alt="SINO S-TECH LIMITED" width="185" height="60" style="display:block;border:0"></p>
 <p style="margin:0 0 14px">เรียน ${esc(name || "ลูกค้า")}${customer ? ` (${esc(customer)})` : ""}</p>
 <p style="margin:0 0 14px">กรุณาแจ้งรายละเอียดปัญหาผ่านแบบฟอร์มด้านล่าง ทุกช่องมีตัวอย่างและคำอธิบาย เมื่อส่งแล้วคุณจะได้เลขรับแจ้งทันที และทีมงานจะติดต่อกลับ</p>
 ${note ? `<p style="margin:0 0 14px;padding:12px 14px;background:#F6F7F9;border-radius:8px;white-space:pre-wrap">${esc(note)}</p>` : ""}
 <p style="margin:18px 0"><a href="${esc(url)}" style="display:inline-block;padding:12px 22px;border-radius:8px;background:#1F5FBF;color:#FFFFFF;text-decoration:none;font-weight:700">กรอกแบบฟอร์มแจ้งเคส</a></p>
 <p style="margin:0 0 6px;font-size:13px;color:#5B6675">ลิงก์ใช้ได้ 1 ครั้ง ภายใน ${esc(fmt)} น. ถ้าลิงก์หมดอายุ กรุณาติดต่อทีมงานเพื่อขอลิงก์ใหม่</p>
 <p style="margin:0;font-size:13px;color:#5B6675;word-break:break-all">ถ้ากดปุ่มไม่ได้ คัดลอกลิงก์นี้ไปเปิด: ${esc(url)}</p>
-<p style="margin:22px 0 0;padding-top:14px;border-top:1px solid #E2E5EA;font-size:13px;color:#5B6675">ส่งโดย ${esc(sender || "ทีม Support")} · Sinostech Support</p>
+<p style="margin:22px 0 0;padding-top:14px;border-top:1px solid #E2E5EA;font-size:13px;color:#5B6675">ส่งโดย ${esc(sender || "ทีม Support")} · ฝ่าย Support, SINO S-TECH LIMITED (บริษัท ซีโน เอส-เทค จำกัด)</p>
 </td></tr></table></body></html>`;
 }
 
@@ -516,7 +516,7 @@ async function notifyClaimed(i, kase, by, owner) {
         html: `<!doctype html><html><body style="margin:0;padding:24px;background:#F3F5F9;font-family:'Segoe UI',Tahoma,sans-serif;color:#18212F">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;background:#FFFFFF;border:1px solid #D9DFE8;border-radius:12px;overflow:hidden">
 <tr><td style="height:6px;background:#1C6B45;font-size:0;line-height:0">&nbsp;</td></tr><tr><td style="padding:28px 30px;font-size:15px;line-height:1.7">
-<p style="margin:0 0 6px;font-size:13px;color:#5B6675">Sinostech Support</p><p style="margin:0 0 14px">เรียน ${esc(i.contact_name)}</p>
+<p style="margin:0 0 16px"><img src="${esc(config3.baseUrl)}/sinostech-logo.png" alt="SINO S-TECH LIMITED" width="185" height="60" style="display:block;border:0"></p><p style="margin:0 0 14px">เรียน ${esc(i.contact_name)}</p>
 <p style="margin:0 0 14px">มี Engineer รับเคสของคุณแล้ว</p>
 ${fieldTable([["เลขรับแจ้ง", `${i.req_no} → ${kase.caseNo}${kase.csNumber ? ` (${kase.csNumber})` : ""}`], ["หัวข้อ", i.subject], ["ผู้รับผิดชอบ", owner.display_name], ["ติดต่อกลับที่", i.contact_phone]])}
 <p style="margin:16px 0 0">หากต้องการเพิ่มข้อมูล ตอบกลับอีเมลนี้ได้</p></td></tr></table></body></html>`,
