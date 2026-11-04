@@ -409,3 +409,6 @@ tr.ext-row td:first-child { border-left: 4px solid var(--accent); }
 .kp-tag.lo { background: var(--surface-2); color: var(--muted); }
 .kp-ai { background: var(--surface-2); border-left: 4px solid var(--accent); border-radius: 8px; padding: 12px 16px; font-size: 14px; line-height: 1.8; }
 @media print { .noprint, #tabs, .topbar { display: none !important; } }
+.kp-beta { display: inline-block; vertical-align: middle; font-size: 14px; font-weight: 700; color: var(--r1-fg); background: var(--r1-bg); border-radius: 999px; padding: 3px 12px; margin-left: 8px; }
+.kp-trial { margin-bottom: 12px; }
+@media print { .kp-trial { display: block !important; } }

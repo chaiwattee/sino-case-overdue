@@ -98,7 +98,7 @@
       ["mine", "#/mine", "เคสของฉัน", lvl("case_create") !== "none" || lvl("case_edit") !== "none"],
       ["intake", "#/intake", "เคสจากลูกค้า", true],
       ["owner", "#/owner", "ราย Owner", true],
-      ["kpi", "#/kpi", "KPI", ME.user.role !== "viewer"],
+      ["kpi", "#/kpi", "KPI (ทดลองใช้)", ME.user.role !== "viewer"],
       ["reports", "#/reports", "Report &amp; Export", lvl("export") !== "none" || lvl("reports_manage") !== "none"],
       ["audit", "#/audit", "ประวัติแก้ไข", lvl("audit_view") !== "none"],
       ["users", "#/users", "จัดการผู้ใช้", lvl("users_manage") !== "none"],
@@ -2167,7 +2167,8 @@ ${d.outbox.map((o) => `<tr><td>${fdt(o.created_at)}</td><td class="mono">${esc(o
     const owners = r.owners;
     const sel = owners.find((o) => String(o.id) === String(params.owner)) || owners.find((o) => o.id === ME.user.id) || owners[0];
     const current = month === months[0];
-    const head = `<div class="head"><div><h1>KPI ราย Owner · ${ymLabel(month, true)}</h1><p>คำนวณจากข้อมูลเคสในระบบ${current ? " · <strong>เดือนนี้ยังไม่จบ ตัวเลขยังเปลี่ยนได้</strong>" : ""} · Manager ปรับคะแนนได้ ±10 พร้อมเหตุผล</p></div>
+    const head = `<div class="banner warn kp-trial"><strong>ทดลองใช้</strong> · เกณฑ์และคะแนนอยู่ระหว่างทดลอง ยังไม่ใช้ประเมินผลงานจริง ถ้าเห็นตัวเลขที่ไม่ตรงกับงานจริง แจ้ง Admin เพื่อปรับเกณฑ์</div>
+<div class="head"><div><h1>KPI ราย Owner · ${ymLabel(month, true)} <span class="kp-beta">ทดลองใช้</span></h1><p>คำนวณจากข้อมูลเคสในระบบ${current ? " · <strong>เดือนนี้ยังไม่จบ ตัวเลขยังเปลี่ยนได้</strong>" : ""} · Manager ปรับคะแนนได้ ±10 พร้อมเหตุผล</p></div>
 <div class="actions" style="flex-direction:row;align-items:center">
 ${r.canAll && owners.length ? `<select id="kp-owner" aria-label="Owner" style="width:auto">${owners.map((o) => `<option value="${o.id}" ${sel && o.id === sel.id ? "selected" : ""}>${esc(o.name)}</option>`).join("")}</select>` : ""}
 <select id="kp-month" aria-label="เดือน" style="width:auto">${months.map((m) => `<option value="${m}" ${m === month ? "selected" : ""}>${ymLabel(m)}</option>`).join("")}</select>

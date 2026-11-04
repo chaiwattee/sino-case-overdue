@@ -330,12 +330,13 @@ async function sendMonthly({ month } = {}) {
   const th = (t, right) => `<th style="padding:8px 10px;border-bottom:1px solid #E2E5EA;font-weight:600;color:#5B6576;font-size:12px;${right ? "text-align:right" : "text-align:left"}">${t}</th>`;
   const html = shell(
     "#1764D8",
-    `<p style="margin:0 0 4px;font-size:19px;font-weight:700">KPI ราย Owner · ${esc(label)}</p>
+    `<p style="margin:0 0 10px;padding:8px 12px;background:#FBF0D2;color:#7A5600;border-radius:8px;font-size:13px"><strong>ทดลองใช้</strong> · เกณฑ์และคะแนนอยู่ระหว่างทดลอง ยังไม่ใช้ประเมินผลงานจริง</p>
+<p style="margin:0 0 4px;font-size:19px;font-weight:700">KPI ราย Owner · ${esc(label)}</p>
 <p style="margin:0 0 16px;color:#5B6576;font-size:14px">คำนวณจากข้อมูลเคสในระบบ${r.team.avgScore != null ? ` · ทีมเฉลี่ย ${r.team.avgScore}` : ""} · ปรับคะแนนได้ ±10 พร้อมเหตุผลในหน้า KPI</p>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;margin:0 0 16px"><tr>${th("Owner")}${th("คะแนน", 1)}${th("ดูแล / ปิด", 1)}${th("ทัน SLA", 1)}${th("เกิน Due สิ้นเดือน", 1)}${th("หลากหลาย", 1)}</tr>${rows}</table>
 ${button(`${config3.baseUrl}/#/kpi?month=${ym}`, "เปิดหน้า KPI")}`
   );
-  await graph.sendMail({ to, cc: [], subject: `[Sino Case SLA] KPI ราย Owner ${label}`, html });
+  await graph.sendMail({ to, cc: [], subject: `[Sino Case SLA] KPI ราย Owner ${label} (ทดลองใช้)`, html });
   return { ok: true, month: ym, to: to.length, owners: r.owners.length };
 }
 
