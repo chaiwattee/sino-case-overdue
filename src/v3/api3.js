@@ -35,6 +35,7 @@ const bad = (msg, status = 400) => Object.assign(new Error(msg), { status });
 require("./intake").mountInternal(api, { need, wrap });
 const ext = require("./extensions");
 ext.mount(api, { wrap });
+require("./kpi").mount(api, { wrap, need });
 
 async function visibleCases(user) {
   return repo.loadCases(user);

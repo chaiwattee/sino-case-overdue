@@ -98,6 +98,7 @@
       ["mine", "#/mine", "เคสของฉัน", lvl("case_create") !== "none" || lvl("case_edit") !== "none"],
       ["intake", "#/intake", "เคสจากลูกค้า", true],
       ["owner", "#/owner", "ราย Owner", true],
+      ["kpi", "#/kpi", "KPI", ME.user.role !== "viewer"],
       ["reports", "#/reports", "Report &amp; Export", lvl("export") !== "none" || lvl("reports_manage") !== "none"],
       ["audit", "#/audit", "ประวัติแก้ไข", lvl("audit_view") !== "none"],
       ["users", "#/users", "จัดการผู้ใช้", lvl("users_manage") !== "none"],
@@ -2136,6 +2137,159 @@ ${d.outbox.map((o) => `<tr><td>${fdt(o.created_at)}</td><td class="mono">${esc(o
     return false;
   }
 
+  // ------------------------------------------------------------ KPI per owner (monthly)
+  const KPI_PARTS = [
+    ["sla", "1. ปิดทัน SLA", 30],
+    ["resp", "2. ความเร็วตอบสนอง", 15],
+    ["work", "3. ปริมาณงานถ่วงน้ำหนัก", 15],
+    ["hard", "4. ความยากของเคส", 10],
+    ["div", "5. ความหลากหลาย / Skill", 10],
+    ["back", "6. งานค้างและการขยายเวลา", 10],
+    ["doc", "7. คุณภาพการบันทึก", 10],
+  ];
+  const TH_FULL = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
+  const ymLabel = (ym, full) => {
+    const [y, m] = ym.split("-").map(Number);
+    return `${full ? TH_FULL[m - 1] : TH_MONTHS[m - 1]} ${y + 543}`;
+  };
+  const kpiColor = (v, max) => (v == null ? "#9AA3AF" : v / max >= 0.8 ? "#1C6B45" : v / max >= 0.6 ? "#1764D8" : v / max >= 0.4 ? "#B07800" : "#9A1B30");
+  async function viewKpi(params) {
+    setNav("kpi");
+    const months = [];
+    for (let i = 0; i < 12; i++) {
+      const t = new Date();
+      t.setDate(1);
+      t.setMonth(t.getMonth() - i);
+      months.push(`${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}`);
+    }
+    const month = params.month || months[1];
+    const r = await api("/kpi?month=" + month);
+    const owners = r.owners;
+    const sel = owners.find((o) => String(o.id) === String(params.owner)) || owners.find((o) => o.id === ME.user.id) || owners[0];
+    const current = month === months[0];
+    const head = `<div class="head"><div><h1>KPI ราย Owner · ${ymLabel(month, true)}</h1><p>คำนวณจากข้อมูลเคสในระบบ${current ? " · <strong>เดือนนี้ยังไม่จบ ตัวเลขยังเปลี่ยนได้</strong>" : ""} · Manager ปรับคะแนนได้ ±10 พร้อมเหตุผล</p></div>
+<div class="actions" style="flex-direction:row;align-items:center">
+${r.canAll && owners.length ? `<select id="kp-owner" aria-label="Owner" style="width:auto">${owners.map((o) => `<option value="${o.id}" ${sel && o.id === sel.id ? "selected" : ""}>${esc(o.name)}</option>`).join("")}</select>` : ""}
+<select id="kp-month" aria-label="เดือน" style="width:auto">${months.map((m) => `<option value="${m}" ${m === month ? "selected" : ""}>${ymLabel(m)}</option>`).join("")}</select>
+<button class="btn" type="button" onclick="window.print()">พิมพ์ / PDF</button></div></div>`;
+    if (!sel) {
+      $app.innerHTML = head + `<div class="empty">ไม่มีเคสในเดือนนี้</div>`;
+      bindKpiNav();
+      return;
+    }
+    const m = sel.metrics;
+    const bars = KPI_PARTS.map(([k, label, max]) => {
+      const v = sel.parts[k];
+      return `<div class="kp-bar"><span>${label} (${max})</span><div class="t"><div style="width:${v == null ? 0 : Math.min(100, (v / max) * 100)}%;background:${kpiColor(v, max)}"></div></div><b>${v == null ? "-" : Math.round(v)} / ${max}</b></div>`;
+    }).join("");
+    const listBars = (obj, total) => {
+      const e = Object.entries(obj).sort((a, b) => b[1] - a[1]);
+      const mx = Math.max(1, ...e.map((x) => x[1]));
+      return e.length ? e.map(([k, v]) => `<div class="kp-mini"><span>${esc(k)}</span><div class="t"><div style="width:${(v / mx) * 100}%"></div></div><span>${v}</span></div>`).join("") : `<div class="hint">ไม่มีข้อมูล</div>`;
+    };
+    const tags = (obj, cls = "") => Object.entries(obj).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<span class="kp-tag ${cls}">${esc(k)} · ${v}</span>`).join("") || `<span class="hint">-</span>`;
+    const stat = (k, v) => `<div><div class="k">${k}</div><div class="v">${v}</div></div>`;
+    $app.innerHTML = `${head}
+${sel.insufficient ? `<div class="banner warn">${esc(sel.name)} ปิดเคสในเดือนนี้ ${m.closed} เคส น้อยกว่า 3 เคส คะแนนจึงยังไม่ให้เกรด ใช้ดูแนวโน้มเท่านั้น</div>` : ""}
+<div class="kp-g3">
+<section class="card"><h2>คะแนนรวม</h2>
+<div><span class="kp-score">${sel.score}</span>${sel.grade ? `<span class="kp-grade">${sel.grade}</span>` : `<span class="kp-grade na">ข้อมูลไม่พอ</span>`}</div>
+<p class="muted" style="margin:6px 0 0">จาก 100 (+ โบนัส 5)${r.team.avgScore != null ? ` · ทีมเฉลี่ย ${r.team.avgScore}` : ""}</p>
+<div class="kp-trend" id="kp-trend"><div class="hint">กำลังโหลดแนวโน้ม…</div></div></section>
+<section class="card"><h2>คะแนนแยกตามเกณฑ์</h2>${bars}
+<div class="kp-bar"><span>+ โบนัส รับเคสจากลูกค้า</span><div class="t"><div style="width:${(sel.parts.bonus / 5) * 100}%;background:#7A4FBF"></div></div><b>+${sel.parts.bonus}</b></div>
+<p class="hint" style="margin:6px 0 0">รวม ${Math.round(sel.base)} + โบนัส ${sel.parts.bonus}${sel.adjust ? ` ${sel.adjust.points > 0 ? "+" : ""}${sel.adjust.points} (ปรับโดย ${esc(sel.adjust.by || "-")}: ${esc(sel.adjust.reason)})` : ""} = ${sel.score}</p></section>
+<section class="card"><h2>ตัวเลขของเดือน</h2><div class="stat2" style="grid-template-columns:1fr 1fr">
+${stat("ดูแล / ปิดเคส", `${sel.handled} / ${m.closed}`)}
+${stat("ปิดทัน SLA เดิม", m.slaPct == null ? "-" : `${m.onTime} <span class="muted" style="font-size:14px">(${m.slaPct}%)</span>`)}
+${stat("ตอบสนองครั้งแรก (มัธยฐาน)", m.firstResponseHrs == null ? "-" : `${m.firstResponseHrs} ชม.`)}
+${stat("อัปเดตเคสทุก", m.updateEveryDays == null ? "-" : `${m.updateEveryDays} วัน`)}
+${stat("ขยายเวลา (อนุมัติ)", `${m.extensions} ครั้ง`)}
+${stat("เกิน Due สิ้นเดือน", `<span class="${m.overdueAtEnd ? "t-over" : ""}">${m.overdueAtEnd}</span>`)}
+${stat("Critical", m.critical)}
+${stat("รับเคสลูกค้าใน 1 ชม.", m.fastClaims)}</div></section></div>
+
+<div class="kp-g3" style="grid-template-columns:repeat(3,minmax(0,1fr))">
+<section class="card"><h2>ประเภทงานที่ทำ</h2><p class="hint" style="margin:0 0 6px">จัดกลุ่มจากหัวข้อเคสและ Activity ด้วยคำสำคัญ</p>${listBars(sel.types)}</section>
+<section class="card"><h2>Skill ที่ใช้</h2><div class="hint" style="margin-bottom:4px">Product</div><div>${tags(sel.products)}</div>
+<div class="hint" style="margin:10px 0 4px">ลักษณะงาน (จาก Activity)</div><div>${tags(sel.kinds, "lo")}</div>
+${m.newSkills.length ? `<p style="margin:10px 0 0;font-size:14px">Skill ใหม่เดือนนี้: <strong>${esc(m.newSkills.join(", "))}</strong></p>` : ""}</section>
+<section class="card"><h2>ความหลากหลายของงาน</h2>
+<div style="display:flex;align-items:baseline;gap:10px"><span style="font-size:44px;font-weight:700">${m.diversity.toFixed(2)}</span><span class="muted">${m.diversity >= 0.7 ? "สูง" : m.diversity >= 0.4 ? "ปานกลาง" : "ต่ำ"}${r.team.avgDiversity != null ? ` · ทีม ${r.team.avgDiversity.toFixed(2)}` : ""}</span></div>
+<div class="kp-mini"><span>ลูกค้า</span><div class="t"><div style="width:${Math.min(100, Object.keys(sel.sites).length * 10)}%"></div></div><span>${Object.keys(sel.sites).length} ราย</span></div>
+<div class="kp-mini"><span>Product</span><div class="t"><div style="width:${Math.min(100, Object.keys(sel.products).length * 16)}%"></div></div><span>${Object.keys(sel.products).length}</span></div>
+<div class="kp-mini"><span>ประเภทงาน</span><div class="t"><div style="width:${Math.min(100, Object.keys(sel.types).length * 10)}%"></div></div><span>${Object.keys(sel.types).length}</span></div>
+<p class="hint" style="margin:6px 0 0">0 = ทำงานแบบเดิมซ้ำๆ · 1 = กระจายเท่าๆ กันหลายแบบ</p></section></div>
+
+<section class="card"><h2>สรุปการทำงาน</h2><div class="kp-ai">${esc(sel.summary).replace(/\n/g, "<br>")}</div></section>
+
+${r.canAdjust ? `<section class="card noprint"><h2>ปรับคะแนนโดย Manager</h2><p class="hint" style="margin:0">ใช้กรณีที่ข้อมูลในระบบไม่สะท้อนงานจริง เช่น เคสช้าเพราะรอลูกค้าหรือ Vendor · บันทึกในประวัติการใช้งาน</p>
+<div class="formgrid" style="align-items:end"><label class="f">คะแนน (−10 ถึง +10)<input type="number" id="kp-pts" min="-10" max="10" value="${sel.adjust ? sel.adjust.points : 0}"></label>
+<label class="f" style="grid-column:span 2">เหตุผล<input id="kp-why" value="${esc(sel.adjust ? sel.adjust.reason : "")}" placeholder="เช่น CASE-2026-0012 ช้าเพราะรอ Vendor ไม่ใช่ความผิดของ Owner"></label>
+<div class="actions"><button class="btn primary" type="button" id="kp-save">บันทึก</button></div></div></section>` : ""}
+
+${r.canAll ? `<section class="card"><div class="title"><h2>เทียบทั้งทีม · ${ymLabel(month)}</h2><span>คลิกชื่อเพื่อดูรายละเอียด</span></div>
+<div class="tablewrap"><table style="min-width:900px"><thead><tr><th>Owner</th><th class="n">คะแนน</th><th class="n">ดูแล / ปิด</th><th class="n">ทัน SLA</th><th class="n">ตอบสนอง</th><th class="n">อัปเดตทุก</th><th class="n">หลากหลาย</th><th>Skill หลัก</th></tr></thead><tbody>
+${owners.map((o) => `<tr class="click" data-href="#/kpi?${qs({ month, owner: o.id })}"><td style="font-weight:600">${esc(o.name)}</td><td class="n" style="font-weight:700">${o.score} ${o.grade || `<span class="muted" style="font-weight:400">ข้อมูลไม่พอ</span>`}</td>
+<td class="n">${o.handled} / ${o.metrics.closed}</td><td class="n">${o.metrics.slaPct == null ? "-" : o.metrics.slaPct + "%"}</td><td class="n">${o.metrics.firstResponseHrs == null ? "-" : o.metrics.firstResponseHrs + " ชม."}</td>
+<td class="n">${o.metrics.updateEveryDays == null ? "-" : o.metrics.updateEveryDays + " วัน"}</td><td class="n">${o.metrics.diversity.toFixed(2)}</td><td>${esc(Object.entries(o.products).sort((a, b) => b[1] - a[1]).slice(0, 2).map((x) => x[0]).join(", ") || "-")}</td></tr>`).join("")}</tbody></table></div></section>` : ""}
+
+<section class="card noprint"><details><summary style="cursor:pointer;font-weight:600">เกณฑ์การให้คะแนน</summary>
+<div class="tablewrap" style="margin-top:10px"><table><thead><tr><th>เกณฑ์</th><th class="n">คะแนน</th><th>วิธีคิด</th></tr></thead><tbody>
+<tr><td>1. ปิดทัน SLA</td><td class="n">30</td><td>% เคสที่ปิดทัน Due เดิม (ก่อนขยาย) · ปิดทันเวลาที่ขยายได้ครึ่งหนึ่ง · Critical นับ 2 เท่า</td></tr>
+<tr><td>2. ความเร็วตอบสนอง</td><td class="n">15</td><td>Activity แรกหลังเปิดเคส ≤4 ชม. 8 · ≤8 ชม. 6 · ≤24 ชม. 4 · ≤48 ชม. 2 และอัปเดตเคสที่เปิดอยู่ทุก ≤2 วัน 7 · ≤3 วัน 5 · ≤5 วัน 3</td></tr>
+<tr><td>3. ปริมาณงานถ่วงน้ำหนัก</td><td class="n">15</td><td>เคสที่ปิด × น้ำหนัก Severity (Critical 3, High 2, Medium 1.5, Low 1, ขอข้อมูล 0.5) เทียบมัธยฐานทีม · เท่ามัธยฐาน 10 · 1.5 เท่าขึ้นไป 15</td></tr>
+<tr><td>4. ความยากของเคส</td><td class="n">10</td><td>สัดส่วนเคส Critical/High หรือที่ต้องเปิด Vendor / Remote / Onsite เทียบค่าเฉลี่ยทีม (เท่าทีม = 5)</td></tr>
+<tr><td>5. ความหลากหลาย / Skill</td><td class="n">10</td><td>ความกระจายของประเภทงาน Product และลูกค้า (0–1) × 7 + Product ที่ทำครั้งแรก 1.5 ต่อ Product (สูงสุด 3)</td></tr>
+<tr><td>6. งานค้างและการขยายเวลา</td><td class="n">10</td><td>เริ่ม 10 · หัก 2 ต่อเคสเกิน Due สิ้นเดือน · หัก 1 ต่อการขยายที่อนุมัติ (สูงสุด 3)</td></tr>
+<tr><td>7. คุณภาพการบันทึก</td><td class="n">10</td><td>เคสที่ปิดมีบันทึกสุดท้าย ≥20 ตัวอักษร 5 · Activity ที่มีเนื้อหาเฉลี่ย ≥3 ต่อเคส 5</td></tr>
+<tr><td>+ โบนัส</td><td class="n">5</td><td>รับเคสจากลูกค้าภายใน 1 ชม. ทุก 2 เคสได้ 1 (สูงสุด 5)</td></tr></tbody></table></div>
+<p class="hint">เกรด A ≥85 · A- 80–84 · B+ 75–79 · B 70–74 · C 60–69 · D ต่ำกว่า 60 · ปิดเคสน้อยกว่า 3 เคสไม่ให้เกรด</p></details></section>
+
+${r.canEditCategories ? `<section class="card noprint"><details><summary style="cursor:pointer;font-weight:600">ตั้งค่าประเภทงาน (คำสำคัญ)</summary>
+<p class="hint">1 บรรทัดต่อ 1 ประเภท รูปแบบ <span class="mono">ชื่อประเภท: คำ1, คำ2, คำ3</span> · ระบบเลือกประเภทที่เจอคำมากที่สุดในหัวข้อเคสและ Activity · ไม่เจอเลย = อื่นๆ</p>
+<textarea id="kp-cats" rows="12" style="width:100%;font-family:var(--mono, monospace);font-size:13px">${esc(r.categories.map((c) => `${c.name}: ${c.keywords}`).join("\n"))}</textarea>
+<div class="actions"><button class="btn primary" type="button" id="kp-cats-save">บันทึกประเภทงาน</button></div></details></section>` : ""}`;
+    bindKpiNav();
+    bindRowLinks();
+    const sv = document.getElementById("kp-save");
+    if (sv) sv.onclick = async () => {
+      try {
+        await post("/kpi/adjust", { month, userId: sel.id, points: Number(document.getElementById("kp-pts").value), reason: document.getElementById("kp-why").value }, "PUT");
+        toast("บันทึกการปรับคะแนนแล้ว");
+        viewKpi({ month, owner: sel.id });
+      } catch (e) {
+        toast(e.message, 6000);
+      }
+    };
+    const cs = document.getElementById("kp-cats-save");
+    if (cs) cs.onclick = async () => {
+      const categories = document.getElementById("kp-cats").value.split("\n").map((l) => {
+        const i = l.indexOf(":");
+        return i > 0 ? { name: l.slice(0, i).trim(), keywords: l.slice(i + 1).trim() } : null;
+      }).filter(Boolean);
+      try {
+        await post("/kpi/categories", { categories }, "PUT");
+        toast("บันทึกประเภทงานแล้ว คำนวณใหม่ทันที");
+        viewKpi({ month, owner: sel.id });
+      } catch (e) {
+        toast(e.message, 6000);
+      }
+    };
+    api(`/kpi/trend/${sel.id}?month=${month}`).then(({ trend }) => {
+      const el = document.getElementById("kp-trend");
+      if (!el) return;
+      el.innerHTML = trend.map((t) => `<div class="${t.month === month ? "now" : ""}"><span class="c" style="height:${t.score == null ? 2 : Math.max(4, t.score)}%;${t.insufficient ? "opacity:.45" : ""}"></span>${ymLabel(t.month).split(" ")[0]}<br>${t.score == null ? "-" : t.score}</div>`).join("");
+    }).catch(() => {});
+  }
+  function bindKpiNav() {
+    const o = document.getElementById("kp-owner");
+    const mo = document.getElementById("kp-month");
+    const go = () => (location.hash = "#/kpi?" + qs({ month: mo.value, owner: o ? o.value : "" }));
+    if (o) o.onchange = go;
+    if (mo) mo.onchange = go;
+  }
+
   // ------------------------------------------------------------ router
   async function route() {
     const { parts, params } = (() => {
@@ -2162,6 +2316,7 @@ ${d.outbox.map((o) => `<tr><td>${fdt(o.created_at)}</td><td class="mono">${esc(o
         case "password": return viewPassword();
         case "intake": return parts[1] ? await viewIntakeItem(parts[1]) : await viewIntake(params);
         case "intake-admin": return await viewIntakeAdmin();
+        case "kpi": return await viewKpi(params);
         default:
           if (ME.user.role === "engineer" && !location.hash && !sessionStorage.getItem("v3home")) {
             try { sessionStorage.setItem("v3home", "1"); } catch (e) {}

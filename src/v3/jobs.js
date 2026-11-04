@@ -444,6 +444,8 @@ function startJobs() {
   job("annual", "0 6 1 1 *", j.annual, () => runAnnual());
   job("cert", "15 9 * * *", true, () => checkCert());
   job("web-risk", "40 7 * * *", true, () => checkWebRisk());
+  // KPI of last month to managers and admins, 1st of every month 08:20.
+  job("kpi-monthly", "20 8 1 * *", j.reports, () => require("./kpi").sendMonthly());
   // Customer intake: hourly "nobody has claimed this yet" reminders (checked every 5 min), chatbot webhooks, cleanup.
   const intake = require("./intake");
   job("intake-reminders", "*/5 * * * *", j.intake, () => intake.runReminders());
