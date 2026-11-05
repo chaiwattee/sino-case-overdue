@@ -8,6 +8,7 @@ const ROLE_ALIASES = {
   admin: "admin", แอดมิน: "admin", ผู้ดูแลระบบ: "admin",
   manager: "manager", ผู้จัดการ: "manager",
   engineer: "engineer", วิศวกร: "engineer", owner: "engineer",
+  observer: "observer", ผู้บริหาร: "observer", ดูทั้งหมด: "observer",
   viewer: "viewer", ดูอย่างเดียว: "viewer",
 };
 const HEADERS = {

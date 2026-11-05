@@ -17,7 +17,11 @@ const PERMS = [
   { key: "settings_manage", label: "ตั้งค่าระบบ", hint: "รายการ dropdown, การเก็บข้อมูล, รายงานรายปี" },
 ];
 
-const ROLES = ["admin", "manager", "engineer", "viewer"];
+const ROLES = ["admin", "manager", "observer", "engineer", "viewer"];
+// Observer: sees all teams and all pages (KPI, reports, history) but can never change data.
+const OBSERVER_LOCKED = ["case_create", "case_edit", "case_close", "case_reassign", "case_edit_start", "case_delete", "reports_manage", "users_manage", "settings_manage"];
+/** Roles that see every team without being a member. */
+const seesAllTeams = (user) => !!user && (user.role === "admin" || user.role === "observer");
 
 const DEFAULTS = {
   admin: Object.fromEntries(PERMS.map((p) => [p.key, "all"])),
@@ -30,6 +34,11 @@ const DEFAULTS = {
     view: "all", case_create: "all", case_edit: "own", case_close: "own", case_reassign: "none",
     case_edit_start: "none", case_delete: "none", export: "own", reports_manage: "none",
     audit_view: "own", users_manage: "none", settings_manage: "none",
+  },
+  observer: {
+    view: "all", case_create: "none", case_edit: "none", case_close: "none", case_reassign: "none",
+    case_edit_start: "none", case_delete: "none", export: "all", reports_manage: "none",
+    audit_view: "all", users_manage: "none", settings_manage: "none",
   },
   viewer: {
     view: "all", case_create: "none", case_edit: "none", case_close: "none", case_reassign: "none",
@@ -49,6 +58,7 @@ async function matrix() {
   // Admin always keeps user and settings management, so the system can't lock itself out.
   m.admin.users_manage = "all";
   m.admin.settings_manage = "all";
+  for (const p of OBSERVER_LOCKED) m.observer[p] = "none";
   cache = m;
   cacheAt = Date.now();
   return m;
@@ -71,4 +81,4 @@ async function can(user, perm, kase) {
   return false;
 }
 
-module.exports = { PERMS, ROLES, DEFAULTS, matrix, level, can, invalidate };
+module.exports = { PERMS, ROLES, DEFAULTS, OBSERVER_LOCKED, seesAllTeams, matrix, level, can, invalidate };

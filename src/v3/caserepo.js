@@ -117,7 +117,7 @@ function toCase(r) {
 async function loadCases(user, { where = "", params = [] } = {}) {
   const cond = [];
   const p = [...params];
-  if (user && user.role !== "admin") {
+  if (user && user.role !== "admin" && user.role !== "observer") {
     p.push(user.teams || []);
     cond.push(`c.team = ANY($${p.length})`);
   }
@@ -132,7 +132,7 @@ async function getCase(id) {
 }
 
 function canSee(user, c) {
-  return user.role === "admin" || (user.teams || []).includes(c.team);
+  return user.role === "admin" || user.role === "observer" || (user.teams || []).includes(c.team);
 }
 
 async function activities(caseId) {

@@ -343,11 +343,12 @@ ${button(`${config3.baseUrl}/#/kpi?month=${ym}`, "เปิดหน้า KPI")
 
 // ------------------------------------------------------------ routes
 function mount(api, { wrap, need }) {
-  const canAll = (u) => ["admin", "manager"].includes(u.role);
+  const canAll = (u) => ["admin", "manager", "observer"].includes(u.role);
+  const canAdjust = (u) => ["admin", "manager"].includes(u.role);
   api.get("/kpi", wrap(async (req, res) => {
     const r = await compute(req.query.month);
     if (!canAll(req.user)) r.owners = r.owners.filter((o) => o.id === req.user.id);
-    res.json({ ...r, canAll: canAll(req.user), canAdjust: canAll(req.user), canEditCategories: req.user.role === "admin" });
+    res.json({ ...r, canAll: canAll(req.user), canAdjust: canAdjust(req.user), canEditCategories: req.user.role === "admin" });
   }));
   api.get("/kpi/trend/:id(\\d+)", wrap(async (req, res) => {
     const id = Number(req.params.id);
@@ -355,7 +356,7 @@ function mount(api, { wrap, need }) {
     res.json({ trend: await trend(id, req.query.month) });
   }));
   api.put("/kpi/adjust", wrap(async (req, res) => {
-    if (!canAll(req.user)) return res.status(403).json({ error: "เฉพาะ Manager หรือ Admin" });
+    if (!canAdjust(req.user)) return res.status(403).json({ error: "เฉพาะ Manager หรือ Admin" });
     const b = req.body || {};
     const month = monthRange(b.month).ym;
     const points = Math.round(Number(b.points) || 0);

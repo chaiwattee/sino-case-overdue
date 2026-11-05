@@ -22,6 +22,12 @@ const jsonSmall = express.json({ limit: "200kb" });
 const jsonFile = express.json({ limit: "4mb" });
 api.use((req, res, next) => (req.path === "/users/import" ? jsonFile : jsonSmall)(req, res, next));
 api.use(requireUser());
+// Observer: read-only everywhere (exporting search results is the only POST it may use).
+api.use((req, res, next) =>
+  req.user && req.user.role === "observer" && !["GET", "HEAD"].includes(req.method) && req.path !== "/export/cases"
+    ? res.status(403).json({ ok: false, error: "บัญชี Observer ดูได้อย่างเดียว แก้ไขข้อมูลไม่ได้" })
+    : next()
+);
 
 const wrap = (fn) => (req, res) =>
   Promise.resolve(fn(req, res)).catch((e) => {
@@ -263,7 +269,7 @@ api.post("/case", wrap(async (req, res) => {
   const b = req.body || {};
   const team = b.team || (u.teams.length === 1 ? u.teams[0] : null);
   if (!team) throw bad("กรุณาเลือกทีม");
-  if (u.role !== "admin" && !u.teams.includes(team)) throw bad("คุณไม่ได้อยู่ในทีมนี้", 403);
+  if (!perms.seesAllTeams(u) && !u.teams.includes(team)) throw bad("คุณไม่ได้อยู่ในทีมนี้", 403);
   if (!String(b.site || "").trim()) throw bad("กรุณาระบุ Site / ลูกค้า");
   if (!String(b.task || "").trim()) throw bad("กรุณาระบุ Task / Case");
   if (!repo.severityOf(b.severity)) throw bad("กรุณาเลือก Severity");
@@ -595,7 +601,7 @@ api.post("/users/:id/signout", need("users_manage"), wrap(async (req, res) => {
 }));
 
 api.get("/permissions", wrap(async (req, res) => {
-  res.json({ perms: perms.PERMS, roles: perms.ROLES, matrix: await perms.matrix(), counts: await all("SELECT role, count(*)::int AS n FROM users WHERE active GROUP BY role") });
+  res.json({ perms: perms.PERMS, roles: perms.ROLES, observerLocked: perms.OBSERVER_LOCKED, matrix: await perms.matrix(), counts: await all("SELECT role, count(*)::int AS n FROM users WHERE active GROUP BY role") });
 }));
 api.put("/permissions", need("users_manage"), wrap(async (req, res) => {
   const m = req.body?.matrix || {};

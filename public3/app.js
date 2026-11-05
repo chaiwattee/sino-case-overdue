@@ -26,8 +26,16 @@
   };
   const STAGE = { normal: "ปกติ", r1: "แจ้งรอบ 1", r2: "แจ้งรอบ 2", overdue: "เกิน Due", no_start: "ไม่มี Start date", closed: "ปิดแล้ว" };
   const ALERT = { r1: "แจ้งรอบ 1", r2: "แจ้งรอบ 2", overdue: "เกิน Due" };
-  const ROLE = { admin: "Admin", manager: "Manager", engineer: "Engineer", viewer: "Viewer" };
-  const ROLE_CHIP = { admin: "overdue", manager: "r1", engineer: "ok", viewer: "closed" };
+  const ROLE = { admin: "Admin", manager: "Manager", observer: "Observer", engineer: "Engineer", viewer: "Viewer" };
+  const ROLE_HINT = { admin: "ทำได้ทุกอย่าง รวมถึงจัดการผู้ใช้และตั้งค่าระบบ", manager: "ดูและแก้เคสของทีม อนุมัติขยายเวลา ส่ง Report ปรับคะแนน KPI", observer: "ดูได้ทุกทีมทุกหน้า (ภาพรวม เคส ราย Owner KPI Report ประวัติแก้ไข) แก้ไขอะไรไม่ได้", engineer: "เปิด แก้ และปิดเคสของตัวเอง เห็น KPI ของตัวเอง", viewer: "ดูภาพรวมและเคสของทีมตัวเองอย่างเดียว" };
+  document.addEventListener("change", (e) => {
+    const t = e.target;
+    if (t && t.name === "role" && t.tagName === "SELECT") {
+      const h = t.parentElement.querySelector("[data-role-hint]");
+      if (h) h.textContent = ROLE_HINT[t.value] || "";
+    }
+  });
+  const ROLE_CHIP = { admin: "overdue", manager: "r1", observer: "r2", engineer: "ok", viewer: "closed" };
   const KINDS = ["ดำเนินการ", "ติดต่อลูกค้า", "เปิดเคส Vendor", "Remote / Onsite", "รอข้อมูล"];
   const SEV_CHIP = { Critical: "overdue", High: "r2", Medium: "r1", Low: "normal", "Request information": "closed" };
   const SEV_SHORT = { "Request information": "Request info" };
@@ -177,7 +185,7 @@ ${edit ? "" : `<fieldset class="f" style="border:0;padding:0;margin:0"><legend s
     document.getElementById("me-av").textContent = (u.display_name || u.email).trim().charAt(0).toUpperCase();
     document.getElementById("me-name").innerHTML = `${esc(u.display_name.split(" ")[0])} <span class="muted">· ${ROLE[u.role]}</span>`;
     document.getElementById("me-head").innerHTML = `<strong>${esc(u.display_name)}</strong>${esc(u.email)}<br>${ROLE[u.role]} · ${
-      u.role === "admin" ? "ทุกทีม" : esc(u.teams.map((t) => teamLabel(t)).join(", ") || "ยังไม่มีทีม")
+      u.role === "admin" || u.role === "observer" ? "ทุกทีม" : esc(u.teams.map((t) => teamLabel(t)).join(", ") || "ยังไม่มีทีม")
     }`;
     document.getElementById("menu-pw").hidden = u.auth_type !== "local";
     const btn = document.getElementById("me-btn");
@@ -1226,7 +1234,7 @@ ${extTable(p.extensions || [], "การขอขยายเวลาในช
 <div style="display:flex;align-items:center;gap:12px"><div class="avatar" style="width:46px;height:46px;font-size:18px" aria-hidden="true">${esc(sel.display_name.charAt(0).toUpperCase())}</div>
 <div><h2>${esc(sel.display_name)}</h2><div class="muted" style="font-size:13px">${esc(sel.email)} · ${sel.auth_type === "sso" ? "บัญชี Microsoft" : "บัญชีรหัสผ่าน"}</div></div></div>
 <label class="f">ชื่อที่แสดง<input name="display_name" value="${esc(sel.display_name)}"></label>
-<label class="f">บทบาท<select name="role" ${sel.id === ME.user.id ? "disabled" : ""}>${Object.entries(ROLE).map(([k, l]) => `<option value="${k}" ${k === sel.role ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+<label class="f">บทบาท<select name="role" ${sel.id === ME.user.id ? "disabled" : ""}>${Object.entries(ROLE).map(([k, l]) => `<option value="${k}" ${k === sel.role ? "selected" : ""}>${l}</option>`).join("")}</select><span class="hint" data-role-hint>${esc(ROLE_HINT[sel.role] || "")}</span></label>
 <fieldset><legend>ทีมที่เห็นเคส</legend>${teamChecks(sel)}</fieldset>
 <label class="chk" style="justify-content:space-between"><span>เปิดใช้งานบัญชี<span class="hint" style="display:block">ปิดแล้วเข้าระบบไม่ได้ แต่เคสเดิมยังอยู่ครบ</span></span><input type="checkbox" name="active" ${sel.active ? "checked" : ""} ${sel.id === ME.user.id ? "disabled" : ""}></label>
 ${sel.auth_type === "local" ? `<div style="border-top:1px solid var(--line);padding-top:14px" class="stack"><h2 style="font-size:15px">รีเซ็ตรหัสผ่าน</h2>
@@ -1253,7 +1261,7 @@ ${sel.id !== ME.user.id ? `<button class="btn danger" type="button" id="u-del">�
 ${list.map((u) => `<tr class="click" data-href="#/users?id=${u.id}" style="${sel && sel.id === u.id ? "background:color-mix(in srgb, var(--accent) 8%, transparent)" : u.active ? "" : "opacity:.6"}">
 <td><a href="#/users?id=${u.id}" style="font-weight:600">${esc(u.display_name)}</a><div class="hint">${esc(u.email)}${u.auth_type === "local" ? " · รหัสผ่าน" : ""}</div></td>
 <td>${chip(ROLE_CHIP[u.role], ROLE[u.role])}</td>
-<td style="font-size:13px">${u.role === "admin" ? "ทุกทีม" : esc(u.teams.map(teamLabel).join(", ") || "-")}</td>
+<td style="font-size:13px">${u.role === "admin" || u.role === "observer" ? "ทุกทีม" : esc(u.teams.map(teamLabel).join(", ") || "-")}</td>
 <td>${u.active ? chip("ok", "ใช้งานอยู่") : chip("closed", "ปิดใช้งาน")}${u.must_change_password ? `<div class="hint">รอตั้งรหัสใหม่</div>` : ""}</td>
 <td class="n">${u.open_cases}</td>
 <td style="font-size:13px" class="muted">${u.last_login_at ? fdt(u.last_login_at) : "ยังไม่เคย"}</td></tr>`).join("")}</tbody></table></div>
@@ -1415,7 +1423,7 @@ ${temps.length ? `<div class="banner warn">รหัสผ่านชั่ว�
 <div class="formgrid">
 <label class="f"><span class="req">อีเมล</span><input type="email" name="email" required placeholder="name@sinostech.co.th"></label>
 <label class="f">ชื่อที่แสดง<input name="display_name" placeholder="ชื่อ นามสกุล"></label>
-<label class="f">บทบาท<select name="role">${Object.entries(ROLE).map(([k, l]) => `<option value="${k}" ${k === "engineer" ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+<label class="f">บทบาท<select name="role">${Object.entries(ROLE).map(([k, l]) => `<option value="${k}" ${k === "engineer" ? "selected" : ""}>${l}</option>`).join("")}</select><span class="hint" data-role-hint>${esc(ROLE_HINT.engineer)}</span></label>
 <label class="f">วิธีเข้าระบบ<select name="auth_type"><option value="sso">บัญชี Microsoft ของบริษัท</option><option value="local">อีเมลและรหัสผ่าน (คนนอกบริษัท)</option></select></label>
 </div>
 <fieldset><legend>ทีมที่เห็นเคส</legend>${ME.teams.map((t) => `<label class="chk"><input type="checkbox" name="teams" value="${t.key}">${esc(t.label)}</label>`).join("")}</fieldset>
@@ -1446,7 +1454,7 @@ ${temps.length ? `<div class="banner warn">รหัสผ่านชั่ว�
     const m = JSON.parse(JSON.stringify(data.matrix));
     const count = Object.fromEntries(data.counts.map((c) => [c.role, c.n]));
     const editable = lvl("users_manage") !== "none";
-    const locked = (r, p) => r === "admin" && (p === "users_manage" || p === "settings_manage");
+    const locked = (r, p) => (r === "admin" && (p === "users_manage" || p === "settings_manage")) || (r === "observer" && (data.observerLocked || []).includes(p));
     const cell = (r, p) => {
       const v = m[r][p];
       const label = v === "all" ? "✓" : v === "own" ? "เฉพาะของตัวเอง" : "–";
@@ -1468,7 +1476,7 @@ ${data.perms.map((p) => `<tr><td><div style="font-weight:500">${esc(p.label)}</d
 <div class="head"><div><h1>สิทธิ์ตามบทบาท</h1><p>ผู้ใช้แต่ละคนมี 1 บทบาท กดที่ช่องเพื่อสลับ ไม่มีสิทธิ์ → เฉพาะของตัวเอง → ทั้งหมด แล้วกดบันทึก</p></div>
 <div class="actions">${editable ? `<button class="btn primary" id="save" type="button" disabled>บันทึกสิทธิ์</button>` : ""}</div></div>
 <section class="card"><div class="tablewrap" id="pm"></div></section>
-<p class="hint">ทุกคนเห็นเฉพาะเคสของทีมที่ได้รับสิทธิ์ (Admin เห็นทุกทีม) Admin มีสิทธิ์จัดการผู้ใช้และตั้งค่าเสมอ เพื่อไม่ให้ระบบล็อกตัวเอง</p>`;
+<p class="hint">ทุกคนเห็นเฉพาะเคสของทีมที่ได้รับสิทธิ์ (Admin และ Observer เห็นทุกทีม) · Observer ดูได้ทุกหน้ารวมถึง KPI ของทุกคน แต่แก้ไขข้อมูลไม่ได้ ช่องที่ล็อกไว้เปิดไม่ได้ Admin มีสิทธิ์จัดการผู้ใช้และตั้งค่าเสมอ เพื่อไม่ให้ระบบล็อกตัวเอง</p>`;
     render();
     const sv = document.getElementById("save");
     if (sv)
