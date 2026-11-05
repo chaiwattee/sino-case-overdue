@@ -95,4 +95,4 @@ async function sendMail({ to, cc, subject, html, attachments = [] }) {
   return { sent: true };
 }
 
-module.exports = { getToken, readSheetValues, getFileMeta, listWorksheets, sendMail };
+module.exports = { getToken, graph, readSheetValues, getFileMeta, listWorksheets, sendMail };

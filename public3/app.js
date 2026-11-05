@@ -1581,7 +1581,7 @@ ${audit.map((r) => { const a = ACTION[r.action] || ["closed", r.action]; return 
     const lkChips = (k) => byKind(k).map((l) => `<span class="lk ${l.is_new ? "new" : ""} ${l.active ? "" : "off"}" title="${l.is_new ? `เพิ่มโดย ${esc(l.created_by || "-")} ${fdt(l.created_at)}` : ""}">${esc(l.value)}${l.is_new ? ` <span class="chip c-r1">ใหม่</span>` : ""}
 <button type="button" data-lk="${l.id}" aria-label="แก้ ${esc(l.value)}">แก้</button></span>`).join("");
     $app.innerHTML = `
-<div class="head"><div><h1>ตั้งค่าระบบ</h1><p>แทน tab Settings ในไฟล์ Excel เดิม แก้ได้เฉพาะ Admin</p></div><div class="actions"><a class="btn" href="#/intake-admin">รับแจ้งเคสจากลูกค้า: LINE OA และ API</a></div></div>
+<div class="head"><div><h1>ตั้งค่าระบบ</h1><p>แทน tab Settings ในไฟล์ Excel เดิม แก้ได้เฉพาะ Admin</p></div><div class="actions"><a class="btn" href="#/intake-admin">รับแจ้งเคสจากลูกค้า: LINE OA, Email และ API</a></div></div>
 ${s.cert && !s.cert.error ? `<div class="banner ${s.cert.daysLeft <= 21 ? "warn" : "ok"}">ใบรับรอง HTTPS ${esc(s.cert.issuer)} ใช้ได้ถึง ${fd(s.cert.validTo, true)} (อีก ${s.cert.daysLeft} วัน)${s.cert.daysLeft <= 21 ? " ต้องต่ออายุ ระบบแจ้งทาง Telegram และ email ทุกวันจนกว่าจะต่ออายุ" : ""}</div>` : ""}
 ${(() => {
       const w = s.webRisk || {};
@@ -1941,11 +1941,14 @@ ${live.map((e) => `<tr><td><a class="mono" href="#/case/${e.case_id}">${esc(e.ca
     if (m < 1440) return `${Math.floor(m / 60)} ชม. ${m % 60} นาที`;
     return `${Math.floor(m / 1440)} วัน ${Math.floor((m % 1440) / 60)} ชม.`;
   }
-  const ikCustomer = (i) => (i.site ? esc(i.site) : `${esc(i.customer_text || "ไม่ระบุ")} <span class="chip c-r1">ลูกค้าใหม่ รอยืนยัน</span>`);
+  const ikCustomer = (i) => (i.site ? esc(i.site) : `${esc(i.customer_text || "ไม่ระบุ")} <span class="chip c-r1">${i.channel === "email" ? "โดเมนยังไม่ผูกลูกค้า" : "ลูกค้าใหม่ รอยืนยัน"}</span>`);
+  const ikContact = (i) => (i.channel === "email" ? `${esc(i.contact_email || "")}${i.contact_phone ? " · " + esc(i.contact_phone) : ""}` : esc(i.contact_phone || "-"));
+  const IK_CHANNEL = { email: "Email", line: "LINE OA", link: "ลิงก์ฟอร์ม" };
   function ikTags(i) {
     const t = [];
     if (i.is_test) t.push(`<span class="chip c-closed">ทดสอบ</span>`);
-    if (i.held) t.push(`<span class="chip c-overdue">พักไว้ให้ Admin ตรวจ</span>`);
+    if (i.channel === "email") t.push(`<span class="chip c-normal">Email</span>`);
+    if (i.held) t.push(`<span class="chip c-overdue" title="${esc(i.hold_reason || "")}">พักไว้ให้ Admin ตรวจ</span>${i.hold_reason ? `<div class="hint" style="margin-top:4px">${esc(i.hold_reason)}</div>` : ""}`);
     if (i.new_line) t.push(`<span class="chip c-r1" title="เคสแรกจากบัญชี LINE นี้ โทรยืนยันกับลูกค้าตอนรับเคส">LINE ใหม่</span>`);
     return t.join(" ");
   }
@@ -1962,7 +1965,7 @@ ${live.map((e) => `<tr><td><a class="mono" href="#/case/${e.case_id}">${esc(e.ca
     return `<article class="ik-card ${mineSite ? "mine" : ""}">
 <div class="ik-top"><a class="mono" href="#/intake/${i.id}">${esc(i.req_no)}</a>${sevChip(i.severity)}</div>
 <div><div class="ik-cust">${ikCustomer(i)}</div><div class="ik-subj">${esc(i.subject)}</div></div>
-<div class="muted ik-meta">${esc(i.contact_name)} · ${esc(i.contact_phone)}<br>แจ้งเมื่อ ${fdt(i.created_at)} · <span class="${Date.now() - new Date(i.created_at).getTime() > 3600000 ? "t-over" : ""}">รอมาแล้ว ${waitedText(i.created_at)}</span>${i.files ? ` · ไฟล์แนบ ${i.files}` : ""}</div>
+<div class="muted ik-meta">${esc(i.contact_name)} · ${ikContact(i)}<br>แจ้งเมื่อ ${fdt(i.created_at)} · <span class="${Date.now() - new Date(i.created_at).getTime() > 3600000 ? "t-over" : ""}">รอมาแล้ว ${waitedText(i.created_at)}</span>${i.files ? ` · ไฟล์แนบ ${i.files}` : ""}</div>
 ${ikTags(i) ? `<div>${ikTags(i)}</div>` : ""}
 ${ikOwnerNote(i)}
 <div class="ik-actions">${canClaim ? `<button class="btn primary" type="button" data-claim="${i.id}">รับเคสเอง</button><button class="btn" type="button" data-transfer="${i.id}">โอนให้ Owner</button>` : ""}<a class="btn" href="#/intake/${i.id}">ดูรายละเอียด</a></div>
@@ -2077,7 +2080,7 @@ ${i.site ? "" : `<label class="f">ลูกค้า (Site)<select name="site" r
 <label class="f">ซ้ำกับ (เลข REQ หรือ CS)<input name="dup" placeholder="เช่น REQ-2026-0011 หรือ CS5056901"></label>
 <label class="chk"><input type="radio" name="kind" value="reject"> ไม่ใช่เคส / ข้อมูลไม่ถูกต้อง / สแปม</label>
 <label class="f">เหตุผล<textarea name="reason" rows="2" placeholder="เช่น ลูกค้าแจ้งผิดระบบ ไม่ใช่สินค้าที่เราดูแล"></textarea></label>
-<label class="chk"><input type="checkbox" name="tell"> แจ้งลูกค้าทาง LINE ด้วย</label>
+<label class="chk"><input type="checkbox" name="tell"> ${i.channel === "email" ? "ตอบ email แจ้งลูกค้าด้วย (ในเรื่องเดิม)" : "แจ้งลูกค้าทาง LINE ด้วย"}</label>
 <div class="right"><button class="btn" value="cancel" formnovalidate>ยกเลิก</button><button class="btn primary" value="ok">ปิดคำขอ</button></div></form>`;
     const f = dlg.querySelector("#rf");
     f.onsubmit = async (e) => {
@@ -2134,13 +2137,13 @@ ${i.site ? "" : `<label class="f">ลูกค้า (Site)<select name="site" r
     const tab = (k, l, n) => `<a class="btn ${status === k ? "primary" : ""}" href="#/intake?status=${k}">${l} (${n})</a>`;
     const rows = d.items.map((i) => `<tr class="click" data-href="#/intake/${i.id}"><td><a class="mono" href="#/intake/${i.id}">${esc(i.req_no)}</a></td><td>${sevChip(i.severity)}</td>
 <td><strong>${ikCustomer(i)}</strong><div class="muted" style="font-size:13px">${esc(i.subject)}</div>${ikTags(i) ? `<div style="margin-top:4px">${ikTags(i)}</div>` : ""}</td>
-<td>${esc(i.contact_name)}<div class="muted" style="font-size:13px">${esc(i.contact_phone)}</div></td>
+<td>${esc(i.contact_name)}<div class="muted" style="font-size:13px">${ikContact(i)}</div></td>
 ${status === "pending" || status === "held" ? `<td class="${Date.now() - new Date(i.created_at).getTime() > 3600000 ? "t-over" : ""}">${waitedText(i.created_at)}</td><td>${esc(i.recent_owner_name || "-")}</td>`
       : status === "claimed" ? `<td>${fdt(i.claimed_at)}</td><td>${esc(i.owner_name || "-")}${i.case_id ? `<div><a href="#/case/${i.case_id}">${esc(i.case_no || i.cs_number || "เคส #" + i.case_id)}</a></div>` : ""}</td>`
       : `<td>${fdt(i.claimed_at)}</td><td>${esc(i.duplicate_of ? "ซ้ำกับ " + i.duplicate_of : i.closed_reason || "-")}</td>`}</tr>`).join("");
     const heads = status === "pending" || status === "held" ? "<th>รอมาแล้ว</th><th>ดูแลเคสล่าสุด</th>" : status === "claimed" ? "<th>รับเมื่อ</th><th>Owner / เคส</th>" : "<th>ปิดเมื่อ</th><th>เหตุผล</th>";
-    $app.innerHTML = `<div class="head"><div><h1>เคสจากลูกค้า</h1><p>ลูกค้าแจ้งผ่าน LINE OA หรือลิงก์ ทุกคนในทีมรับได้ · SLA ${cfg.slaDays} วันเริ่มนับเมื่อรับเคส · ยังไม่มีคนรับเกิน 1 ชม. ระบบเตือนทีมทุกชั่วโมง 06:00–22:00</p></div>
-<div class="actions">${can("case_create") ? `<button class="btn" type="button" id="ml-btn">สร้างลิงก์ส่งให้ลูกค้าเอง</button>` : ""}${lvl("settings_manage") === "all" ? `<a class="btn" href="#/intake-admin">ตั้งค่า LINE OA และ API</a>` : ""}</div></div>
+    $app.innerHTML = `<div class="head"><div><h1>เคสจากลูกค้า</h1><p>ลูกค้าแจ้งผ่าน LINE OA, Email หรือลิงก์ ทุกคนในทีมรับได้ · SLA ${cfg.slaDays} วันเริ่มนับเมื่อรับเคส · ยังไม่มีคนรับเกิน 1 ชม. ระบบเตือนทีมทุกชั่วโมง 06:00–22:00</p></div>
+<div class="actions">${can("case_create") ? `<button class="btn" type="button" id="ml-btn">สร้างลิงก์ส่งให้ลูกค้าเอง</button>` : ""}${lvl("settings_manage") === "all" ? `<a class="btn" href="#/intake-admin">ตั้งค่า LINE OA, Email และ API</a>` : ""}</div></div>
 <div class="chips" style="gap:8px">${tab("pending", "รอรับเคส", d.counts.pending)}${d.counts.held ? tab("held", "พักไว้ตรวจ", d.counts.held) : ""}${tab("claimed", "รับแล้ว 30 วัน", d.counts.claimed)}${tab("closed", "ปฏิเสธ / ซ้ำ 90 วัน", d.counts.closed)}</div>
 ${status === "pending" && d.items.length ? `<div class="ik-grid">${d.items.map(ikCard).join("")}</div>` : `<section class="card">${d.items.length ? `<div class="tablewrap"><table style="min-width:820px"><thead><tr><th>เลขรับแจ้ง</th><th>Severity</th><th>ลูกค้า / หัวข้อ</th><th>ผู้ติดต่อ</th>${heads}</tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty">${status === "pending" ? "ไม่มีเคสรอรับ" : "ไม่มีรายการ"}</div>`}</section>`}
 <dialog id="dlg"></dialog>`;
@@ -2158,15 +2161,16 @@ ${status === "pending" && d.items.length ? `<div class="ik-grid">${d.items.map(i
     $app.innerHTML = `<div class="crumb"><a href="#/intake">เคสจากลูกค้า</a> / ${esc(i.req_no)}</div>
 <div class="head"><div><h1>${esc(i.req_no)} ${sevChip(i.severity)}</h1><p>${ikCustomer(i)} · ${esc(i.subject)}</p></div>
 <div class="actions">${i.status === "pending" && !i.held && can("case_create") ? `<button class="btn primary" type="button" data-claim="${i.id}">รับเคสเอง</button><button class="btn" type="button" data-transfer="${i.id}">โอนให้ Owner</button><button class="btn" type="button" id="rej">ปิดคำขอ (ซ้ำ / ไม่ใช่เคส)</button>` : ""}
-${i.held && lvl("settings_manage") === "all" ? `<button class="btn primary" type="button" id="rel">ปล่อยคำขอนี้ (แจ้งทีมตามปกติ)</button>` : ""}
+${i.held && lvl("settings_manage") === "all" ? `<button class="btn primary" type="button" id="rel">ปล่อยคำขอนี้ (แจ้งทีมตามปกติ)</button><button class="btn" type="button" id="rej">ปิดคำขอ (ไม่ใช่เคส)</button>` : ""}
 ${i.case_id ? `<a class="btn primary" href="#/case/${i.case_id}">เปิดเคส ${esc(i.case_no || i.cs_number || "#" + i.case_id)}</a>` : ""}</div></div>
 ${ikTags(i) ? `<div>${ikTags(i)}</div>` : ""}
+${i.held ? `<div class="banner warn">พักไว้ให้ Admin ตรวจ${i.hold_reason ? `: <strong>${esc(i.hold_reason)}</strong>` : ""} · ถ้าเป็นเคสจริง กด “ปล่อยคำขอนี้”${i.channel === "email" ? " ระบบจะส่ง email ตอบรับให้ลูกค้าตอนนั้น" : ""} ถ้าไม่ใช่ กด “ปิดคำขอ”</div>` : ""}
 <div class="grid2"><section class="card"><h2>ข้อมูลที่ลูกค้าแจ้ง</h2>
 <div class="stat2" style="grid-template-columns:1fr 1fr">
 ${row("สถานะ", `${chip(i.status === "pending" ? "r1" : i.status === "claimed" ? "ok" : "closed", IK_STATUS[i.status])}${i.status === "pending" ? ` · รอมาแล้ว ${waitedText(i.created_at)}` : ""}`)}
 ${row("แจ้งเมื่อ", fdt(i.created_at))}
 ${row("ผู้ติดต่อ", `${esc(i.contact_name)}${i.position ? ` (${esc(i.position)})` : ""}`)}
-${row("เบอร์ / อีเมล", `<a href="tel:${esc(i.contact_phone)}">${esc(i.contact_phone)}</a>${i.contact_email ? `<br><a href="mailto:${esc(i.contact_email)}">${esc(i.contact_email)}</a>` : ""}`)}
+${row("เบอร์ / อีเมล", `${i.contact_phone ? `<a href="tel:${esc(i.contact_phone)}">${esc(i.contact_phone)}</a>` : `<span class="muted">ไม่มีเบอร์</span>`}${i.contact_email ? `<br><a href="mailto:${esc(i.contact_email)}">${esc(i.contact_email)}</a>` : ""}`)}
 ${row("ระบบ", esc(i.product || "-"))}
 ${row("เริ่มพบปัญหา", esc([i.started_text, i.affected ? "กระทบ " + i.affected : ""].filter(Boolean).join(" · ") || "-"))}
 ${row("เลขอ้างอิงลูกค้า", esc(i.customer_ref || "-"))}
@@ -2175,7 +2179,8 @@ ${row("ดูแลเคสล่าสุดของลูกค้ารา�
 ${files.length ? `<div class="k">ไฟล์แนบ</div><div class="chips">${files.map((f) => `<a class="lk" href="api/intake/${i.id}/files/${f.id}" target="_blank" rel="noopener">${esc(f.file_name)} <span class="muted">${Math.ceil(f.size / 1024)} KB</span></a>`).join("")}</div>` : ""}
 </section>
 <section class="card"><h2>ที่มา</h2><div class="stat2" style="grid-template-columns:1fr">
-${row("ช่องทาง", i.line_user_id ? "LINE OA" : "ลิงก์ที่ทีมสร้างส่งให้")}
+${row("ช่องทาง", i.channel === "email" ? "Email ถึงกล่องรับแจ้งเคส · ตอบกลับลูกค้าในเรื่องเดิมอัตโนมัติ" : i.line_user_id ? "LINE OA" : "ลิงก์ที่ทีมสร้างส่งให้")}
+${i.channel === "email" ? row("ระบบเดา Severity / ระบบ", `${esc(i.severity)} / ${esc(i.product || "-")} · ตรวจและแก้ได้ตอนรับเคส`) : ""}
 ${row("ชื่อบริษัทที่ลูกค้าพิมพ์", esc(i.customer_text || "-"))}
 ${i.claimed_at ? row(i.status === "claimed" ? "รับเคสโดย" : "ปิดโดย", `${esc(i.claimed_by_name || "-")} · ${fdt(i.claimed_at)}${i.owner_name && i.owner_name !== i.claimed_by_name ? ` · Owner: ${esc(i.owner_name)}` : ""}`) : ""}
 ${i.closed_reason || i.duplicate_of ? row("เหตุผล", esc(i.duplicate_of ? "ซ้ำกับ " + i.duplicate_of : i.closed_reason)) : ""}
@@ -2200,9 +2205,50 @@ ${prior.length ? `<div class="k">คำขอก่อนหน้าจาก L
     const s = d.settings;
     const ST_OB = { pending: ["r1", "รอส่ง"], sent: ["ok", "ส่งแล้ว"], failed: ["fail", "ส่งไม่สำเร็จ"], no_url: ["closed", "ยังไม่ตั้ง URL"] };
     const pendingLine = d.lineUsers.filter((u) => !u.site && !u.blocked);
-    $app.innerHTML = `<div class="crumb"><a href="#/settings">ตั้งค่า</a> / LINE OA และ API</div>
-<div class="head"><div><h1>รับแจ้งเคสจากลูกค้า: LINE OA และ API</h1><p>แชทบอทของ LINE OA เรียก API เพื่อขอลิงก์ฟอร์มที่ใช้ได้ครั้งเดียว เมื่อมีคนรับเคส ระบบส่งเหตุการณ์กลับไปให้แชทบอทแจ้งลูกค้าทาง LINE</p></div>
+    const em = d.email;
+    const es = em.settings;
+    const est = em.status || {};
+    const MAIL_DEC = { created: ["ok", "สร้างคำขอ"], appended: ["normal", "เพิ่มในเรื่องเดิม"], held: ["r1", "พักให้ Admin ตรวจ"], ignored: ["closed", "ข้าม"], error: ["fail", "ผิดพลาด"] };
+    $app.innerHTML = `<div class="crumb"><a href="#/settings">ตั้งค่า</a> / LINE OA, Email และ API</div>
+<div class="head"><div><h1>รับแจ้งเคสจากลูกค้า: LINE OA, Email และ API</h1><p>ลูกค้าแจ้งได้ 3 ทาง: LINE OA (แชทบอทขอลิงก์ฟอร์มผ่าน API), ส่ง email ถึงกล่องรับแจ้งเคส และลิงก์ที่ทีมสร้างส่งให้ ทุกทางได้เลข REQ และเข้า “เคสจากลูกค้า” ให้ทีมรับเหมือนกัน</p></div>
 <div class="actions"><a class="btn" href="#/intake">เคสจากลูกค้า</a></div></div>
+
+<section class="card" id="em-card"><div class="title"><h2>รับแจ้งเคสทาง Email</h2><span>${es.enabled ? `เปิดใช้ · ${esc(es.mailbox)}` : "ยังไม่เปิดใช้"}</span></div>
+${em.mock ? `<div class="banner warn">โหมดข้อมูลจำลอง: ระบบไม่อ่านกล่องจริง ใช้ “จำลอง email เข้า” ด้านล่างทดสอบได้</div>` : es.enabled ? `<div class="banner ${est.error ? "err" : "ok"}">${est.error ? `อ่านกล่องไม่สำเร็จ (${fdt(est.at)}): ${esc(est.error)}` : est.okAt ? `อ่านกล่องล่าสุด ${fdt(est.okAt)} · รอบล่าสุดอ่าน ${est.last ? est.last.read : 0} ฉบับ` : "ยังไม่ได้อ่านรอบแรก (ระบบอ่านทุก 2 นาที)"}</div>` : ""}
+<div class="stat2" style="grid-template-columns:repeat(5,1fr)"><div><div class="k">สร้างคำขอ (30 วัน)</div><div class="v">${em.counts.created}</div></div><div><div class="k">เพิ่มในเรื่องเดิม</div><div class="v">${em.counts.appended}</div></div><div><div class="k">พักให้ Admin ตรวจ</div><div class="v">${em.counts.held}</div></div><div><div class="k">ข้าม</div><div class="v">${em.counts.ignored}</div></div><div><div class="k">ผิดพลาด</div><div class="v">${em.counts.errors}</div></div></div>
+<div class="formgrid">
+<label class="f">กล่องจดหมาย (shared mailbox)<input id="em-mb" value="${esc(es.mailbox)}" placeholder="service@sinostech.co.th"></label>
+<label class="f">email จากโดเมนที่ยังไม่ผูกกับลูกค้า<select id="em-unk"><option value="hold" ${es.unknownDomain === "hold" ? "selected" : ""}>สร้างคำขอแต่พักไว้ให้ Admin ตรวจ (ไม่ตอบลูกค้า)</option><option value="ignore" ${es.unknownDomain === "ignore" ? "selected" : ""}>ข้าม ไม่สร้างคำขอ</option></select></label>
+<label class="f">ข้าม email จากโดเมน (ภายในบริษัท)<input id="em-ign" value="${esc(es.ignoreDomains.join(", "))}" placeholder="sinostech.co.th"></label>
+<label class="f">ผู้ส่งรายเดียวส่งเรื่องใหม่ได้ต่อชั่วโมง (เกินนี้พักไว้)<input id="em-rate" type="number" min="1" max="100" value="${es.perSenderPerHour}"></label>
+<label class="f">ลบ email ที่ประมวลผลแล้วออกจากกล่องเมื่อเก่ากว่า (วัน)<input id="em-keep" type="number" min="30" max="3650" value="${es.keepDays}"></label></div>
+<label class="chk"><input type="checkbox" id="em-ack" ${es.autoReply ? "checked" : ""}> ตอบกลับลูกค้าอัตโนมัติในเรื่องเดิม พร้อมเลข REQ (และแจ้งอีกครั้งเมื่อมี Engineer รับเคส)</label>
+<label class="chk"><input type="checkbox" id="em-on" ${es.enabled ? "checked" : ""}> เปิดใช้ (อ่านกล่องทุก 2 นาที เฉพาะ email ที่เข้ามาหลังเปิดใช้)</label>
+<div class="actions"><button class="btn primary" type="button" id="em-save">บันทึก</button>${es.enabled && !em.mock ? `<button class="btn" type="button" id="em-poll">อ่านกล่องตอนนี้</button>` : ""}</div>
+<details><summary style="cursor:pointer;color:var(--accent)">กฎที่ระบบใช้ และการตั้งสิทธิ์กล่องจดหมาย</summary>
+<ul style="margin:8px 0 0;padding-left:18px;line-height:1.8;font-size:14px">
+<li>รู้จักลูกค้าจากโดเมนผู้ส่ง ตั้งโดเมนของแต่ละลูกค้าในตาราง “ลูกค้า” ด้านล่าง (email ส่วนตัวอย่าง gmail.com ผูกไม่ได้)</li>
+<li>ข้าม: โดเมนภายใน, ตอบกลับอัตโนมัติ / out-of-office, noreply / mailer-daemon, จดหมายข่าว, email ที่เข้ามาก่อนเปิดใช้</li>
+<li>หัวเรื่องมี [REQ-…] หรือหัวเรื่องเดิมจากผู้ส่งเดิมภายใน 3 วัน: เพิ่มเข้าเรื่องเดิม ถ้ารับเคสแล้วบันทึกเป็น Activity ของเคสและแจ้ง Owner</li>
+<li>พักให้ Admin ตรวจ: โดเมนที่ยังไม่ผูกลูกค้า, ตอบกลับ email เก่าที่ไม่มีเลข REQ, ผู้ส่งส่งถี่เกินกำหนด, คำขอเข้ามาผิดปกติ</li>
+<li>ระบบเดา Severity และระบบจากเนื้อหา ทีมแก้ได้ตอนรับเคส · เก็บไฟล์แนบตามชนิดและขนาดที่ตั้งไว้</li>
+<li>อ่านแล้วย้ายไปโฟลเดอร์ “${esc(es.folder)}” ในกล่อง · ลบออกจากกล่องเมื่อเก่ากว่าที่ตั้งไว้ (คำขอในระบบยังเก็บเนื้อหาและไฟล์)</li>
+<li>แอปของระบบต้องได้สิทธิ์ <span class="mono">Application Mail.ReadWrite</span> และ <span class="mono">Application Mail.Send</span> ผ่าน Exchange RBAC for Applications จำกัดเฉพาะกล่องนี้ ห้ามให้ Mail.Read ใน Entra ตรงๆ เพราะจะอ่านได้ทุกกล่อง</li></ul></details>
+<h3 style="margin:8px 0 0;font-size:15px">จำลอง email เข้า (ไม่อ่าน/ไม่ส่งถึงกล่องจริง)</h3>
+<div class="formgrid">
+<label class="f">จาก (email ผู้ส่ง)<input id="es-from" value="somying@${esc((d.sites.find((x) => (x.domains || []).length) || { domains: ["ktb.co.th"] }).domains[0])}"></label>
+<label class="f">ชื่อผู้ส่ง<input id="es-name" value="สมหญิง ใจดี"></label>
+<label class="f" style="grid-column:1/-1">หัวเรื่อง<input id="es-subj" value="Agent login ไม่ได้ ตั้งแต่เช้า"></label>
+<label class="f" style="grid-column:1/-1">เนื้อหา<textarea id="es-body" rows="3">Agent ประมาณ 20 คน login ไม่ได้ ขึ้น error 401 ตั้งแต่ 8:30 รบกวนตรวจสอบด่วนค่ะ</textarea></label></div>
+<div style="display:flex;gap:16px;flex-wrap:wrap"><label class="chk"><input type="checkbox" id="es-test" checked> เคสทดสอบ</label><label class="chk"><input type="checkbox" id="es-file"> มีไฟล์แนบ</label><label class="chk"><input type="checkbox" id="es-reply"> เป็นการตอบกลับ email เก่า</label><label class="chk"><input type="checkbox" id="es-auto"> เป็น out-of-office</label></div>
+<div class="actions"><button class="btn primary" type="button" id="es-go">จำลอง email เข้า</button></div><div id="es-out"></div>
+<h3 style="margin:8px 0 0;font-size:15px">email ล่าสุดที่ระบบอ่าน</h3>
+${em.recent.length ? `<div class="tablewrap"><table style="min-width:900px"><thead><tr><th>เวลา</th><th>จาก</th><th>หัวเรื่อง</th><th>ผล</th><th>รายละเอียด</th><th></th></tr></thead><tbody>
+${em.recent.map((m) => `<tr><td>${fdt(m.created_at)}</td><td>${esc(m.from_name || "")}<div class="muted" style="font-size:12px">${esc(m.from_email || "")}</div></td><td style="font-size:13px">${esc(m.subject || "")}${m.is_test ? ` <span class="chip c-closed">ทดสอบ</span>` : ""}</td>
+<td>${chip(MAIL_DEC[m.decision][0], MAIL_DEC[m.decision][1])}${m.replied ? `<div class="muted" style="font-size:12px">ตอบลูกค้าแล้ว</div>` : ""}</td>
+<td style="font-size:13px">${m.req_no ? `<a href="#/intake/${m.intake_id}">${esc(m.req_no)}</a>` : ""}${m.case_no ? ` · <a href="#/case/${m.case_id}">${esc(m.case_no)}</a>` : ""}${m.reason ? `<div class="muted">${esc(m.reason)}</div>` : ""}</td>
+<td>${m.decision === "error" ? `<button class="btn" type="button" data-emretry="${m.id}" style="min-height:34px">ลองใหม่</button>` : ""}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">ยังไม่มี email</div>`}
+</section>
 
 <section class="card"><div class="title"><h2>ทดสอบแบบไม่ต้องมี LINE OA</h2><span>เรียก API เดียวกับที่แชทบอทจะเรียก</span></div>
 <div class="formgrid">
@@ -2223,10 +2269,11 @@ ${d.keys.map((k) => `<tr class="${k.revoked_at ? "muted" : ""}"><td style="font-
 <label class="chk"><input type="checkbox" id="k-test"> key ทดสอบ (เคสที่สร้างติดป้าย “ทดสอบ”)</label>
 <div class="actions"><button class="btn primary" type="button" id="k-new">สร้าง API key</button></div><div id="k-out"></div></section>
 
-<section class="card"><div class="title"><h2>ลูกค้า: ชื่อเรียก ทีม และไฟล์แนบ</h2><span>ชื่อที่ลูกค้าพิมพ์ใน LINE ตรงกับชื่อเหล่านี้ เคสเข้าลูกค้ารายนั้นทันที</span></div>
-<div class="tablewrap"><table style="min-width:900px"><thead><tr><th>Site</th><th>ชื่อเรียกอื่น (คั่นด้วย ,)</th><th>ทีมของเคส</th><th>แนบไฟล์</th><th class="n">เคสเปิด</th><th></th></tr></thead><tbody>
+<section class="card"><div class="title"><h2>ลูกค้า: ชื่อเรียก โดเมน email ทีม และไฟล์แนบ</h2><span>ชื่อที่ลูกค้าพิมพ์ใน LINE หรือโดเมนของผู้ส่ง email ตรงกับลูกค้ารายไหน เคสเข้าลูกค้ารายนั้นทันที</span></div>
+<div class="tablewrap"><table style="min-width:1100px"><thead><tr><th>Site</th><th>ชื่อเรียกอื่น (คั่นด้วย ,)</th><th>โดเมน email (คั่นด้วย ,)</th><th>ทีมของเคส</th><th>แนบไฟล์</th><th class="n">เคสเปิด</th><th></th></tr></thead><tbody>
 ${d.sites.map((x, n) => `<tr data-site="${n}"><td style="font-weight:600">${esc(x.site)}</td>
 <td><input class="sx-al" value="${esc(x.aliases.join(", "))}" placeholder="เช่น กรุงไทย, Krungthai" style="width:100%"></td>
+<td><input class="sx-dom" value="${esc((x.domains || []).join(", "))}" placeholder="เช่น ktb.co.th" style="width:100%"></td>
 
 <td><select class="sx-team"><option value="">ตามทีมของผู้รับ</option>${ME.teams.map((t) => `<option value="${esc(t.key)}" ${t.key === x.team ? "selected" : ""}>${esc(t.label)}</option>`).join("")}</select></td>
 <td><label class="chk" style="min-height:0"><input type="checkbox" class="sx-att" ${x.attachments ? "checked" : ""}><span class="sr">แนบไฟล์</span></label></td><td class="n">${x.open}</td>
@@ -2279,6 +2326,28 @@ ${d.outbox.map((o) => `<tr><td>${fdt(o.created_at)}</td><td class="mono">${esc(o
       }
       b.disabled = false;
     };
+    $("em-save").onclick = act(async () => {
+      await post("/intake-admin/email", { enabled: $("em-on").checked, mailbox: $("em-mb").value.trim(), autoReply: $("em-ack").checked, unknownDomain: $("em-unk").value, ignoreDomains: $("em-ign").value, perSenderPerHour: $("em-rate").value, keepDays: $("em-keep").value }, "PUT");
+      toast($("em-on").checked ? "บันทึกแล้ว ระบบเริ่มอ่านกล่องภายใน 2 นาที" : "บันทึกแล้ว", 5000);
+      reload();
+    });
+    if ($("em-poll"))
+      $("em-poll").onclick = act(async () => {
+        const r = await post("/intake-admin/email/poll");
+        toast(r.skipped ? `ไม่ได้อ่าน: ${r.skipped}` : r.busy ? "กำลังอ่านอยู่" : `อ่าน ${r.read || 0} ฉบับ · สร้าง ${r.created || 0} · เพิ่มในเรื่องเดิม ${r.appended || 0} · พัก ${r.held || 0} · ข้าม ${r.ignored || 0}${r.errors ? ` · ผิดพลาด ${r.errors}` : ""}`, 6000);
+        reload();
+      });
+    $("es-go").onclick = act(async () => {
+      const r = await post("/intake-admin/email/simulate", { from: $("es-from").value, name: $("es-name").value, subject: $("es-subj").value, body: $("es-body").value, test: $("es-test").checked, withFile: $("es-file").checked, inReplyTo: $("es-reply").checked, auto: $("es-auto").checked });
+      const MSG = { created: ["ok", "สร้างคำขอ"], appended: ["ok", "เพิ่มเข้าเรื่องเดิม"], held: ["warn", "สร้างคำขอแต่พักไว้ให้ Admin ตรวจ"], ignored: ["", "ข้าม ไม่สร้างคำขอ"] };
+      const [cls, label] = MSG[r.decision] || ["", r.decision];
+      $("es-out").innerHTML = `<div class="banner ${cls}">${label}${r.reqNo ? ` <a href="#/intake/${r.intakeId}">${esc(r.reqNo)}</a>` : ""}${r.reason ? ` · ${esc(r.reason)}` : ""}${r.decision === "created" ? " · ลูกค้าจะได้ email ตอบกลับพร้อมเลข REQ (ในโหมดจำลองไม่ได้ส่งจริง)" : ""}</div>`;
+    });
+    $app.querySelectorAll("[data-emretry]").forEach((b) => (b.onclick = act(async () => {
+      await post(`/intake-admin/email/${b.dataset.emretry}/retry`);
+      toast("อ่านใหม่แล้ว");
+      reload();
+    })));
     $("sim-go").onclick = act(async () => {
       const r = await post("/intake-admin/simulate", { customer: $("sim-cust").value, lineUserId: $("sim-line").value, contactName: $("sim-name").value, contactPhone: $("sim-phone").value, test: $("sim-test").checked });
       $("sim-out").innerHTML = `<div class="banner ${r.customer.matched ? "ok" : "warn"}" style="display:flex;flex-direction:column;gap:8px">
@@ -2326,7 +2395,7 @@ ${d.outbox.map((o) => `<tr><td>${fdt(o.created_at)}</td><td class="mono">${esc(o
     $app.querySelectorAll("[data-sxsave]").forEach((b) => (b.onclick = act(async () => {
       const tr = b.closest("tr");
       const x = d.sites[Number(b.dataset.sxsave)];
-      await post("/intake-admin/sites", { site: x.site, aliases: tr.querySelector(".sx-al").value, team: tr.querySelector(".sx-team").value, attachments: tr.querySelector(".sx-att").checked }, "PUT");
+      await post("/intake-admin/sites", { site: x.site, aliases: tr.querySelector(".sx-al").value, domains: tr.querySelector(".sx-dom").value, team: tr.querySelector(".sx-team").value, attachments: tr.querySelector(".sx-att").checked }, "PUT");
       toast(`บันทึก ${x.site} แล้ว`);
     })));
     $app.querySelectorAll("[data-lsite]").forEach((sel) => (sel.onchange = async () => {

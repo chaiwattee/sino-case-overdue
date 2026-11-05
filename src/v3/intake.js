@@ -18,6 +18,9 @@ const { splitList } = require("../alertRecipients");
 const d = require("../dates");
 const { q, one, all, tx, getSetting, setSetting, audit, requestContext } = require("./db");
 const repo = require("./caserepo");
+const mail = () => require("./mailintake");
+const phoneOf = (i) => i.contact_phone || "-";
+const contactLine = (i) => [i.contact_phone, i.contact_email].filter(Boolean).join(" · ") || "-";
 
 // ------------------------------------------------------------ settings
 const DEFAULTS = {
@@ -231,6 +234,24 @@ async function saveFile(link, name, mime, buf) {
   );
   return r;
 }
+/** Store a file that arrived by email (no form link). Returns null when the type or size is not accepted. */
+async function storeIntakeFile(intakeId, name, mime, buf) {
+  const s = await settings();
+  const fileName = clean(name, 150).replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_") || "file";
+  const ext = (fileName.split(".").pop() || "").toLowerCase();
+  if (!FILE_EXT.includes(ext)) return { skipped: fileName, why: `ชนิด .${ext} ไม่รองรับ` };
+  if (!buf || !buf.length) return { skipped: fileName, why: "ไฟล์ว่าง" };
+  if (buf.length > s.attachMaxMb * 1024 * 1024) return { skipped: fileName, why: `ใหญ่เกิน ${s.attachMaxMb} MB` };
+  const count = await one("SELECT count(*)::int AS n FROM intake_files WHERE intake_id = $1", [intakeId]);
+  if (count.n >= s.attachMaxFiles * 4) return { skipped: fileName, why: "ไฟล์แนบเกินจำนวนที่เก็บได้" };
+  const dir = path.join(FILE_DIR, new Date().toISOString().slice(0, 7));
+  fs.mkdirSync(dir, { recursive: true, mode: 0o750 });
+  const stored = path.join(dir, crypto.randomBytes(16).toString("hex") + "." + ext);
+  fs.writeFileSync(stored, buf, { mode: 0o640 });
+  return one("INSERT INTO intake_files (intake_id, file_name, mime, size, path) VALUES ($1,$2,$3,$4,$5) RETURNING id, file_name, size", [
+    intakeId, fileName, clean(mime, 100) || "application/octet-stream", buf.length, stored,
+  ]);
+}
 function removeStored(p) {
   try {
     if (p && p.startsWith(FILE_DIR)) fs.unlinkSync(p);
@@ -340,7 +361,8 @@ function intakeFields(i) {
   return fieldTable([
     ["เลขรับแจ้ง", i.req_no],
     ["ลูกค้า", customerName(i)],
-    ["ผู้ติดต่อ", `${i.contact_name}${i.position ? ` (${i.position})` : ""} · ${i.contact_phone}${i.contact_email ? ` · ${i.contact_email}` : ""}`],
+    ["ผู้ติดต่อ", `${i.contact_name}${i.position ? ` (${i.position})` : ""} · ${contactLine(i)}`],
+    ["ช่องทาง", i.channel === "email" ? "Email" : i.line_user_id ? "LINE OA" : "ลิงก์ฟอร์ม"],
     ["ระบบ / Severity", `${i.product || "-"} · ${i.severity}`],
     ["เริ่มพบปัญหา", [i.started_text, i.affected ? `กระทบ ${i.affected}` : ""].filter(Boolean).join(" · ") || "-"],
     ["เลขอ้างอิงลูกค้า", i.customer_ref || "-"],
@@ -366,7 +388,7 @@ ${button(intakeUrl(i), "รับเคส / โอนให้ Owner")}`
   if (s.telegram && !i.is_test) {
     await telegram
       .sendText(
-        `🆕 ${tag(i)}เคสใหม่จากลูกค้า · ${i.req_no}\n${SEV_ICON[i.severity] || ""} ${i.severity} · ${i.product || "-"}\n🏢 ${customerName(i)}\n👤 ${i.contact_name} · ${i.contact_phone}\n\n${i.subject}\n${ro ? `ดูแลเคสล่าสุด: ${ro.display_name}\n` : ""}รับเคส: ${intakeUrl(i)}`
+        `🆕 ${tag(i)}เคสใหม่จากลูกค้า · ${i.req_no}\n${SEV_ICON[i.severity] || ""} ${i.severity} · ${i.product || "-"}\n🏢 ${customerName(i)}\n👤 ${i.contact_name} · ${i.channel === "email" ? i.contact_email : phoneOf(i)}${i.channel === "email" ? " (email)" : ""}\n\n${i.subject}\n${ro ? `ดูแลเคสล่าสุด: ${ro.display_name}\n` : ""}รับเคส: ${intakeUrl(i)}`
       )
       .catch((e) => console.error("[intake] telegram:", e.message));
   }
@@ -449,16 +471,16 @@ async function claim(user, id, b) {
     const team = clean(b.team, 40) || (ss && ss.team) || (owner.teams || [])[0];
     if (!team) throw bad("กรุณาเลือกทีม");
     const files = await all("SELECT id, file_name FROM intake_files WHERE intake_id = $1", [i.id]);
-    const detail = [
+    const head = [
       `เคสจากลูกค้า ${i.req_no}`,
-      `ผู้ติดต่อ: ${i.contact_name}${i.position ? ` (${i.position})` : ""} · ${i.contact_phone}${i.contact_email ? ` · ${i.contact_email}` : ""}`,
+      `ผู้ติดต่อ: ${i.contact_name}${i.position ? ` (${i.position})` : ""} · ${contactLine(i)}`,
+      i.channel === "email" ? "ช่องทาง: Email (ลูกค้าตอบกลับ email เรื่องนี้ ระบบบันทึกเป็น Activity ให้)" : "",
       i.started_text ? `เริ่มพบปัญหา: ${i.started_text}` : "",
       i.affected ? `ผลกระทบ: ${i.affected}` : "",
       i.customer_ref ? `เลขอ้างอิงลูกค้า: ${i.customer_ref}` : "",
-      "",
-      i.detail,
-      files.length ? `\nไฟล์แนบ ${files.length} ไฟล์: ${files.map((f) => f.file_name).join(", ")} (ดูที่ ${config3.baseUrl}/#/intake/${i.id})` : "",
-    ].filter((x) => x !== null).join("\n").trim();
+    ].filter(Boolean);
+    const tail = files.length ? `ไฟล์แนบ ${files.length} ไฟล์: ${files.map((f) => f.file_name).join(", ")} (ดูที่ ${config3.baseUrl}/#/intake/${i.id})` : "";
+    const detail = [head.join("\n"), i.detail, tail].filter(Boolean).join("\n\n").trim();
     const { id: caseId } = await repo.createCase(
       user,
       {
@@ -506,8 +528,11 @@ async function notifyClaimed(i, kase, by, owner) {
       .sendText(`✅ รับเคสแล้ว ${i.req_no} → ${kase.caseNo}${kase.csNumber ? ` (${kase.csNumber})` : ""}\n${i.site} · ${i.severity} · Owner: ${owner.display_name}\nโดย ${by.display_name} · รอรับ ${mins < 60 ? mins + " นาที" : Math.floor(mins / 60) + " ชม. " + (mins % 60) + " นาที"}`)
       .catch(() => {});
   }
+  // Requests that came by email: reply in the customer's own thread from the shared mailbox.
+  let threaded = false;
+  if (i.channel === "email") threaded = await mail().onClaimed(i, kase, owner).catch((e) => (console.error("[intake] email thread reply:", e.message), false));
   // Customers who came through an emailed link (not LINE) get the "case accepted" message by email instead.
-  if (!i.line_user_id && i.contact_email) {
+  if (!threaded && !i.line_user_id && i.contact_email) {
     await graph
       .sendMail({
         to: [i.contact_email],
@@ -518,7 +543,7 @@ async function notifyClaimed(i, kase, by, owner) {
 <tr><td style="height:6px;background:#1C6B45;font-size:0;line-height:0">&nbsp;</td></tr><tr><td style="padding:28px 30px;font-size:15px;line-height:1.7">
 <p style="margin:0 0 16px"><img src="${esc(config3.baseUrl)}/sinostech-logo.png" alt="SINO S-TECH LIMITED" width="185" height="60" style="display:block;border:0"></p><p style="margin:0 0 14px">เรียน ${esc(i.contact_name)}</p>
 <p style="margin:0 0 14px">มี Engineer รับเคสของคุณแล้ว</p>
-${fieldTable([["เลขรับแจ้ง", `${i.req_no} → ${kase.caseNo}${kase.csNumber ? ` (${kase.csNumber})` : ""}`], ["หัวข้อ", i.subject], ["ผู้รับผิดชอบ", owner.display_name], ["ติดต่อกลับที่", i.contact_phone]])}
+${fieldTable([["เลขรับแจ้ง", `${i.req_no} → ${kase.caseNo}${kase.csNumber ? ` (${kase.csNumber})` : ""}`], ["หัวข้อ", i.subject], ["ผู้รับผิดชอบ", owner.display_name], ["ติดต่อกลับที่", i.contact_phone || i.contact_email]])}
 <p style="margin:16px 0 0">หากต้องการเพิ่มข้อมูล ตอบกลับอีเมลนี้ได้</p></td></tr></table></body></html>`,
       })
       .catch((e) => console.error("[intake] customer claim mail:", e.message));
@@ -538,7 +563,7 @@ ${fieldTable([["เลขรับแจ้ง", `${i.req_no} → ${kase.caseNo}
     lineUserId: i.line_user_id,
     externalRef: i.external_ref,
     contact: { name: i.contact_name, phone: i.contact_phone },
-    message: `มี Engineer รับเคสแล้ว\n${i.req_no} → ${kase.caseNo}\n${i.subject}\n\nผู้รับผิดชอบ: ${owner.display_name}\nจะติดต่อกลับที่ ${i.contact_phone}`,
+    message: `มี Engineer รับเคสแล้ว\n${i.req_no} → ${kase.caseNo}\n${i.subject}\n\nผู้รับผิดชอบ: ${owner.display_name}\nจะติดต่อกลับที่ ${i.contact_phone || i.contact_email}`,
   });
 }
 
@@ -553,6 +578,10 @@ async function reject(user, id, b) {
   );
   if (!r) throw bad("คำขอนี้ไม่ได้อยู่ในสถานะรอรับเคส", 409);
   await audit(user, "intake_reject", r.req_no, { status, reason, duplicateOf: r.duplicate_of });
+  if (r.channel === "email" && b.notifyCustomer) {
+    const msg = status === "duplicate" ? `เรื่องนี้ (${r.req_no}) เป็นเรื่องเดียวกับ ${r.duplicate_of} ที่แจ้งไว้แล้ว ทีมงานจะติดตามในเรื่องเดิม` : reason;
+    await mail().onClosed(r, msg).catch((e) => console.error("[intake] email close reply:", e.message));
+  }
   await enqueue("intake.closed", r, {
     event: "intake.closed",
     test: r.is_test,
@@ -791,6 +820,7 @@ function mountInternal(api, { need, wrap: w }) {
     if (r) {
       await audit(req.user, "intake_release", r.req_no);
       notifyNew(r).catch(() => {});
+      mail().onReleased(r).catch((e) => console.error("[intake] email ack on release:", e.message));
     }
     res.json({ ok: true });
   }));
@@ -834,13 +864,14 @@ function mountInternal(api, { need, wrap: w }) {
       settings: { ...s, webhookSecret: s.webhookSecret },
       sites: sites.map((name) => {
         const x = ss.find((r) => r.site === name) || {};
-        return { site: name, owner_id: x.owner_id || null, owner_name: x.owner_name || null, team: x.team || null, attachments: !!x.attachments, aliases: aliases.filter((a) => a.site === name).map((a) => a.alias), open: (open.find((o) => o.site === name) || {}).n || 0 };
+        return { site: name, owner_id: x.owner_id || null, owner_name: x.owner_name || null, team: x.team || null, attachments: !!x.attachments, domains: x.domains || [], aliases: aliases.filter((a) => a.site === name).map((a) => a.alias), open: (open.find((o) => o.site === name) || {}).n || 0 };
       }),
       keys,
       lineUsers,
       outbox,
       apiBase: `${config3.baseUrl}/api/v1`,
       fileExt: FILE_EXT,
+      email: await mail().status(),
     });
   }));
   api.put("/intake-admin/settings", admin, w(async (req, res) => {
@@ -872,10 +903,17 @@ function mountInternal(api, { need, wrap: w }) {
     const b = req.body || {};
     const site = clean(b.site, 120);
     if (!(await siteList()).includes(site)) throw bad("ไม่พบ Site นี้");
+    const domains = [...new Set(splitText(b.domains).map((x) => clean(x, 120).toLowerCase().replace(/^.*@/, "")).filter(Boolean))];
+    const badDom = domains.find((x) => !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(x));
+    if (badDom) throw bad(`โดเมน “${badDom}” ไม่ถูกต้อง ใส่แบบ ktb.co.th`);
+    const pub = domains.find((x) => mail().PUBLIC_DOMAINS.includes(x));
+    if (pub) throw bad(`ใส่ ${pub} ไม่ได้ เพราะเป็น email ส่วนตัวที่ใครก็สมัครได้`);
+    const taken = domains.length ? await one("SELECT site, x FROM intake_sites, unnest(domains) x WHERE site <> $1 AND x = ANY($2) LIMIT 1", [site, domains]) : null;
+    if (taken) throw bad(`โดเมน ${taken.x} ผูกกับลูกค้า ${taken.site} อยู่แล้ว`);
     await q(
-      `INSERT INTO intake_sites (site, owner_id, team, attachments, updated_at) VALUES ($1,$2,$3,$4, now())
-       ON CONFLICT (site) DO UPDATE SET team = EXCLUDED.team, attachments = EXCLUDED.attachments, updated_at = now()`,
-      [site, null, clean(b.team, 40) || null, !!b.attachments]
+      `INSERT INTO intake_sites (site, owner_id, team, attachments, domains, updated_at) VALUES ($1,$2,$3,$4,$5, now())
+       ON CONFLICT (site) DO UPDATE SET team = EXCLUDED.team, attachments = EXCLUDED.attachments, domains = EXCLUDED.domains, updated_at = now()`,
+      [site, null, clean(b.team, 40) || null, !!b.attachments, domains]
     );
     const aliases = [...new Set(splitText(b.aliases).map((a) => clean(a, 120)).filter(Boolean))];
     await tx(async (c) => {
@@ -887,9 +925,13 @@ function mountInternal(api, { need, wrap: w }) {
         if (!r.rowCount) throw bad(`ชื่อเรียก “${a}” ถูกใช้กับลูกค้ารายอื่นแล้ว`);
       }
     });
-    await audit(req.user, "intake_site", site, { team: b.team, attachments: !!b.attachments, aliases });
+    await audit(req.user, "intake_site", site, { team: b.team, attachments: !!b.attachments, aliases, domains });
     res.json({ ok: true });
   }));
+  api.put("/intake-admin/email", admin, w(async (req, res) => res.json({ ok: true, settings: await mail().saveEmailSettings(req.user, req.body || {}) })));
+  api.post("/intake-admin/email/poll", admin, w(async (req, res) => res.json({ ok: true, ...(await mail().poll({ manual: true })) })));
+  api.post("/intake-admin/email/simulate", admin, w(async (req, res) => res.json({ ok: true, ...(await mail().simulate(req.user, req.body || {})) })));
+  api.post("/intake-admin/email/:id(\\d+)/retry", admin, w(async (req, res) => res.json({ ok: true, ...(await mail().retry(req.user, Number(req.params.id))) })));
   api.post("/intake-admin/keys", admin, w(async (req, res) => res.json({ ok: true, ...(await createKey(req.user, req.body || {})) })));
   api.delete("/intake-admin/keys/:id(\\d+)", admin, w(async (req, res) => {
     const r = await one("UPDATE intake_api_keys SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL RETURNING name", [req.params.id]);
@@ -928,6 +970,7 @@ function mountInternal(api, { need, wrap: w }) {
     files.forEach((f) => removeStored(f.path));
     const n = (await q("DELETE FROM intakes WHERE is_test AND status <> 'claimed'")).rowCount;
     await q("DELETE FROM intake_outbox WHERE is_test");
+    await q("DELETE FROM intake_emails WHERE is_test");
     await audit(req.user, "intake_test_cleanup", null, { removed: n });
     res.json({ ok: true, removed: n });
   }));
@@ -935,4 +978,5 @@ function mountInternal(api, { need, wrap: w }) {
 
 module.exports = {
   apiV1, publicApi, mountInternal, createLink, submit, claim, reject, runReminders, deliver, runRetention, matchCustomer, norm, settings, nextReqNo,
+  storeIntakeFile, removeStored, notifyNew, teamRecipients, customerName, intakeUrl, SEV_COLOR, siteList,
 };

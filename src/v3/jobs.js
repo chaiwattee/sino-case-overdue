@@ -451,6 +451,10 @@ function startJobs() {
   job("intake-reminders", "*/5 * * * *", j.intake, () => intake.runReminders());
   job("intake-webhook", "* * * * *", j.intake, () => intake.deliver());
   job("intake-retention", "20 2 * * *", j.intake, () => intake.runRetention());
+  // Customer requests by email (shared mailbox): read every 2 minutes, old processed mail removed nightly.
+  const mailIntake = require("./mailintake");
+  job("intake-email", "*/2 * * * *", j.intake, () => mailIntake.poll());
+  job("intake-email-cleanup", "50 2 * * *", j.intake, () => mailIntake.cleanup());
   console.log("[v3 jobs]", Object.entries(j).map(([k, v]) => `${k}=${v ? "on" : "off"}`).join(" "));
 }
 
