@@ -93,13 +93,19 @@ app.get("/run-retention", ops(() => jobs.runRetention()));
 app.use(auth.router);
 // Customer case intake: chatbot API (API key) and the customer form (one-time link), no login.
 app.use("/api/v1", intake.apiV1);
+app.use("/api/public", require("./src/v3/intakeupdate").router);
 app.use("/api/public", intake.publicApi);
 app.use("/api", api);
 
 const pub = path.join(__dirname, "public3");
 const noCache = { setHeaders: (res) => res.setHeader("Cache-Control", "no-cache") };
 // Login page and its assets are public; everything else needs a session.
-app.get(["/login.html", "/style.css", "/login.js", "/intake-form.js", "/sinostech-logo.png"], express.static(pub, noCache));
+app.get(["/login.html", "/style.css", "/login.js", "/intake-form.js", "/update-form.js", "/sinostech-logo.png"], express.static(pub, noCache));
+app.get("/u/:token", (req, res) => {
+  res.set("Cache-Control", "no-store");
+  res.set("X-Robots-Tag", "noindex, nofollow");
+  res.sendFile(path.join(pub, "update.html"));
+});
 app.get("/r/:token", (req, res) => {
   res.set("Cache-Control", "no-store");
   res.set("X-Robots-Tag", "noindex, nofollow");

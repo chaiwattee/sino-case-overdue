@@ -15,11 +15,12 @@ const PERMS = [
   { key: "audit_view", label: "ดูประวัติแก้ไข", hint: "การแก้วันที่และการแก้เคสทั้งหมด" },
   { key: "users_manage", label: "จัดการผู้ใช้และรีเซ็ตรหัสผ่าน", hint: "เพิ่ม ปิดใช้งาน กำหนดบทบาท" },
   { key: "settings_manage", label: "ตั้งค่าระบบ", hint: "รายการ dropdown, การเก็บข้อมูล, รายงานรายปี" },
+  { key: "hotline_edit", label: "แก้เบอร์ Hotline", hint: "เบอร์ใน email ตอบลูกค้าที่แจ้งเคสนอกเวลาทำการ" },
 ];
 
 const ROLES = ["admin", "manager", "observer", "engineer", "viewer"];
 // Observer: sees all teams and all pages (KPI, reports, history) but can never change data.
-const OBSERVER_LOCKED = ["case_create", "case_edit", "case_close", "case_reassign", "case_edit_start", "case_delete", "reports_manage", "users_manage", "settings_manage"];
+const OBSERVER_LOCKED = ["case_create", "case_edit", "case_close", "case_reassign", "case_edit_start", "case_delete", "reports_manage", "users_manage", "settings_manage", "hotline_edit"];
 /** Roles that see every team without being a member. */
 const seesAllTeams = (user) => !!user && (user.role === "admin" || user.role === "observer");
 
@@ -28,7 +29,7 @@ const DEFAULTS = {
   manager: {
     view: "all", case_create: "all", case_edit: "all", case_close: "all", case_reassign: "all",
     case_edit_start: "none", case_delete: "none", export: "all", reports_manage: "all",
-    audit_view: "all", users_manage: "none", settings_manage: "none",
+    audit_view: "all", users_manage: "none", settings_manage: "none", hotline_edit: "all",
   },
   engineer: {
     view: "all", case_create: "all", case_edit: "own", case_close: "own", case_reassign: "none",

@@ -304,6 +304,11 @@ api.put("/case/:id", wrap(async (req, res) => {
   res.json({ ok: true, ...r });
 }));
 
+api.get("/case/:id/customer-files", wrap(async (req, res) => {
+  const c = await loadVisible(req);
+  res.json({ files: await require("./intakeupdate").filesForCase(c.id) });
+}));
+
 api.post("/case/:id/activity", wrap(async (req, res) => {
   const c = await loadVisible(req);
   if (!(await perms.can(req.user, "case_edit", c))) throw bad("ไม่มีสิทธิ์เพิ่ม Activity ในเคสนี้", 403);

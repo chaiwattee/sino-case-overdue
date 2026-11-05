@@ -19,6 +19,8 @@ const d = require("../dates");
 const { q, one, all, tx, getSetting, setSetting, audit, requestContext } = require("./db");
 const repo = require("./caserepo");
 const mail = () => require("./mailintake");
+const cm = require("./customermail");
+const updateUrl = (id) => require("./intakeupdate").updateUrl(id);
 const phoneOf = (i) => i.contact_phone || "-";
 const contactLine = (i) => [i.contact_phone, i.contact_email].filter(Boolean).join(" · ") || "-";
 
@@ -106,13 +108,13 @@ async function createLink(input, { apiKey = null, user = null, source = "api", i
   let lineUser = null;
   if (lineUserId) {
     lineUser = await one("SELECT * FROM intake_line_users WHERE line_user_id = $1", [lineUserId]);
-    if (lineUser && lineUser.blocked) throw bad("บัญชี LINE นี้ถูกระงับการแจ้งเคส", 403, { code: "LINE_BLOCKED" });
+    if (lineUser && lineUser.blocked) throw bad("This LINE account cannot report cases. Please contact Sinostech Support.", 403, { code: "LINE_BLOCKED" });
     const recent = await one("SELECT count(*)::int AS n FROM intake_links WHERE line_user_id = $1 AND created_at > now() - interval '1 hour'", [lineUserId]);
-    if (recent.n >= s.linksPerLinePerHour) throw bad(`ขอลิงก์ได้ไม่เกิน ${s.linksPerLinePerHour} ครั้งต่อชั่วโมง กรุณาลองใหม่ภายหลัง`, 429, { code: "RATE_LIMIT_LINE" });
+    if (recent.n >= s.linksPerLinePerHour) throw bad(`You can request up to ${s.linksPerLinePerHour} links per hour. Please try again later.`, 429, { code: "RATE_LIMIT_LINE" });
   }
   if (apiKey) {
     const recent = await one("SELECT count(*)::int AS n FROM intake_links WHERE api_key_id = $1 AND created_at > now() - interval '1 hour'", [apiKey.id]);
-    if (recent.n >= s.linksPerKeyPerHour) throw bad("API key นี้สร้างลิงก์เกินจำนวนที่กำหนดต่อชั่วโมง", 429, { code: "RATE_LIMIT_KEY" });
+    if (recent.n >= s.linksPerKeyPerHour) throw bad("This API key has reached its hourly link limit.", 429, { code: "RATE_LIMIT_KEY" });
   }
 
   const customerText = clean(input.customer, 200);
@@ -158,9 +160,9 @@ async function linkByToken(token) {
   return one("SELECT * FROM intake_links WHERE token_hash = $1", [sha(token)]);
 }
 function linkState(l) {
-  if (!l) return { error: "ไม่พบลิงก์นี้ กรุณาขอลิงก์ใหม่จาก LINE OA", status: 404, code: "NOT_FOUND" };
-  if (l.used_at) return { error: "ลิงก์นี้ใช้แจ้งเคสไปแล้ว ถ้าต้องการแจ้งเรื่องใหม่ กด “แจ้งเคส” ใน LINE หรือขอลิงก์ใหม่จากทีมงาน", status: 410, code: "USED" };
-  if (new Date(l.expires_at) < new Date()) return { error: "ลิงก์หมดอายุแล้ว กด “แจ้งเคส” ใน LINE อีกครั้ง หรือขอลิงก์ใหม่จากทีมงาน", status: 410, code: "EXPIRED" };
+  if (!l) return { error: "This link was not found. Please request a new link in LINE.", status: 404, code: "NOT_FOUND" };
+  if (l.used_at) return { error: "This link has already been used. To report something new, tap “Report a case” in LINE or ask our team for a new link.", status: 410, code: "USED" };
+  if (new Date(l.expires_at) < new Date()) return { error: "This link has expired. Tap “Report a case” in LINE again, or ask our team for a new link.", status: 410, code: "EXPIRED" };
   return null;
 }
 
@@ -183,23 +185,41 @@ async function recentOwner(site) {
   );
 }
 
-/** Email to a customer with a one-time form link (sent by an engineer). Customer-facing: no internal links. */
-function customerLinkEmail({ name, customer, url, expiresAt, sender, note }) {
-  const t = new Date(expiresAt);
-  const fmt = new Intl.DateTimeFormat("th-TH", { timeZone: config.tz, day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(t);
-  return `<!doctype html><html><body style="margin:0;padding:24px;background:#F3F5F9;font-family:'Segoe UI',Tahoma,sans-serif;color:#18212F">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;background:#FFFFFF;border:1px solid #D9DFE8;border-radius:12px;overflow:hidden">
-<tr><td style="height:6px;background:#1F5FBF;font-size:0;line-height:0">&nbsp;</td></tr>
-<tr><td style="padding:28px 30px;font-size:15px;line-height:1.7">
-<p style="margin:0 0 16px"><img src="${esc(config3.baseUrl)}/sinostech-logo.png" alt="SINO S-TECH LIMITED" width="185" height="60" style="display:block;border:0"></p>
-<p style="margin:0 0 14px">เรียน ${esc(name || "ลูกค้า")}${customer ? ` (${esc(customer)})` : ""}</p>
-<p style="margin:0 0 14px">กรุณาแจ้งรายละเอียดปัญหาผ่านแบบฟอร์มด้านล่าง ทุกช่องมีตัวอย่างและคำอธิบาย เมื่อส่งแล้วคุณจะได้เลขรับแจ้งทันที และทีมงานจะติดต่อกลับ</p>
-${note ? `<p style="margin:0 0 14px;padding:12px 14px;background:#F6F7F9;border-radius:8px;white-space:pre-wrap">${esc(note)}</p>` : ""}
-<p style="margin:18px 0"><a href="${esc(url)}" style="display:inline-block;padding:12px 22px;border-radius:8px;background:#1F5FBF;color:#FFFFFF;text-decoration:none;font-weight:700">กรอกแบบฟอร์มแจ้งเคส</a></p>
-<p style="margin:0 0 6px;font-size:13px;color:#5B6675">ลิงก์ใช้ได้ 1 ครั้ง ภายใน ${esc(fmt)} น. ถ้าลิงก์หมดอายุ กรุณาติดต่อทีมงานเพื่อขอลิงก์ใหม่</p>
-<p style="margin:0;font-size:13px;color:#5B6675;word-break:break-all">ถ้ากดปุ่มไม่ได้ คัดลอกลิงก์นี้ไปเปิด: ${esc(url)}</p>
-<p style="margin:22px 0 0;padding-top:14px;border-top:1px solid #E2E5EA;font-size:13px;color:#5B6675">ส่งโดย ${esc(sender || "ทีม Support")} · ฝ่าย Support, SINO S-TECH LIMITED (บริษัท ซีโน เอส-เทค จำกัด)</p>
-</td></tr></table></body></html>`;
+// ------------------------------------------------------------ business hours and hotline
+/** Outside business hours = outside the reminder window (default 22:00–06:00). */
+async function isAfterHours(at = new Date()) {
+  const s = await settings();
+  const hm = new Intl.DateTimeFormat("en-GB", { timeZone: config.tz, hour: "2-digit", minute: "2-digit", hour12: false }).format(at);
+  return !(hm >= s.reminder.start && hm < s.reminder.end);
+}
+async function businessHours() {
+  const s = await settings();
+  return { start: s.reminder.start, end: s.reminder.end };
+}
+const HOTLINE_DEFAULT = { lines: [{ phone: "", label: "On-duty engineer" }, { phone: "", label: "Team lead" }, { phone: "", label: "Manager" }], waitMinutes: 10, note: "" };
+async function hotline() {
+  const h = (await getSetting("hotline", null)) || {};
+  const lines = [0, 1, 2].map((n) => ({ ...HOTLINE_DEFAULT.lines[n], ...((h.lines || [])[n] || {}) }));
+  return { ...HOTLINE_DEFAULT, ...h, lines };
+}
+/** Numbers customers see (rows without a phone are hidden). */
+async function hotlineForCustomers() {
+  const h = await hotline();
+  return { lines: h.lines.filter((l) => l.phone), waitMinutes: h.waitMinutes };
+}
+async function saveHotline(user, b) {
+  const cur = await hotline();
+  const lines = [0, 1, 2].map((n) => {
+    const x = (Array.isArray(b.lines) ? b.lines[n] : null) || {};
+    const phone = clean(x.phone, 40);
+    if (phone && !/^[+0-9][0-9 ()\-]{5,}$/.test(phone)) throw bad(`เบอร์ลำดับที่ ${n + 1} ไม่ถูกต้อง`);
+    return { phone, label: clean(x.label, 60) || HOTLINE_DEFAULT.lines[n].label };
+  });
+  const wait = Math.min(120, Math.max(1, Math.round(Number(b.waitMinutes) || 10)));
+  const next = { lines, waitMinutes: wait, note: clean(b.note, 300), updatedBy: user.display_name, updatedAt: new Date().toISOString() };
+  await setSetting("hotline", next);
+  await audit(user, "hotline_update", null, { from: cur.lines.map((l) => l.phone), to: lines.map((l) => l.phone), labels: lines.map((l) => l.label), waitMinutes: wait });
+  return next;
 }
 
 // ------------------------------------------------------------ request numbers
@@ -216,14 +236,14 @@ async function nextReqNo(client) {
 async function saveFile(link, name, mime, buf) {
   const s = await settings();
   const ss = await siteSettings(link.site);
-  if (!ss || !ss.attachments) throw bad("ลูกค้ารายนี้ยังไม่เปิดให้แนบไฟล์", 403);
+  if (!ss || !ss.attachments) throw bad("Attachments are not enabled for your company.", 403);
   const fileName = clean(name, 150).replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_") || "file";
   const ext = (fileName.split(".").pop() || "").toLowerCase();
-  if (!FILE_EXT.includes(ext)) throw bad(`ไม่รับไฟล์ชนิด .${ext} รับได้: ${FILE_EXT.join(", ")}`);
-  if (!buf || !buf.length) throw bad("ไฟล์ว่าง");
-  if (buf.length > s.attachMaxMb * 1024 * 1024) throw bad(`ไฟล์ใหญ่เกิน ${s.attachMaxMb} MB`);
+  if (!FILE_EXT.includes(ext)) throw bad(`.${ext} files are not accepted. Accepted: ${FILE_EXT.join(", ")}`);
+  if (!buf || !buf.length) throw bad("The file is empty.");
+  if (buf.length > s.attachMaxMb * 1024 * 1024) throw bad(`The file is larger than ${s.attachMaxMb} MB.`);
   const count = await one("SELECT count(*)::int AS n FROM intake_files WHERE link_id = $1", [link.id]);
-  if (count.n >= s.attachMaxFiles) throw bad(`แนบได้ไม่เกิน ${s.attachMaxFiles} ไฟล์`);
+  if (count.n >= s.attachMaxFiles) throw bad(`You can attach up to ${s.attachMaxFiles} files.`);
   const dir = path.join(FILE_DIR, new Date().toISOString().slice(0, 7));
   fs.mkdirSync(dir, { recursive: true, mode: 0o750 });
   const stored = path.join(dir, crypto.randomBytes(16).toString("hex") + "." + ext);
@@ -243,7 +263,7 @@ async function storeIntakeFile(intakeId, name, mime, buf) {
   if (!buf || !buf.length) return { skipped: fileName, why: "ไฟล์ว่าง" };
   if (buf.length > s.attachMaxMb * 1024 * 1024) return { skipped: fileName, why: `ใหญ่เกิน ${s.attachMaxMb} MB` };
   const count = await one("SELECT count(*)::int AS n FROM intake_files WHERE intake_id = $1", [intakeId]);
-  if (count.n >= s.attachMaxFiles * 4) return { skipped: fileName, why: "ไฟล์แนบเกินจำนวนที่เก็บได้" };
+  if (count.n >= 60) return { skipped: fileName, why: "ไฟล์แนบของเรื่องนี้เกิน 60 ไฟล์" };
   const dir = path.join(FILE_DIR, new Date().toISOString().slice(0, 7));
   fs.mkdirSync(dir, { recursive: true, mode: 0o750 });
   const stored = path.join(dir, crypto.randomBytes(16).toString("hex") + "." + ext);
@@ -263,8 +283,8 @@ async function submit(token, b) {
   const link = await linkByToken(token);
   const st = linkState(link);
   if (st) throw bad(st.error, st.status, { code: st.code });
-  if (clean(b.website)) throw bad("ส่งไม่สำเร็จ กรุณาลองใหม่"); // honeypot
-  if (b.openedAt && Date.now() - Number(b.openedAt) < 4000) throw bad("ส่งเร็วเกินไป กรุณาตรวจข้อมูลแล้วกดส่งอีกครั้ง");
+  if (clean(b.website)) throw bad("Could not send. Please try again."); // honeypot
+  if (b.openedAt && Date.now() - Number(b.openedAt) < 4000) throw bad("Sent too quickly. Please check the form and send again.");
 
   const f = {
     contact_name: clean(b.contactName, 120),
@@ -280,15 +300,15 @@ async function submit(token, b) {
     customer_ref: clean(b.customerRef, 120),
   };
   const miss = [];
-  if (!f.contact_name) miss.push("ชื่อผู้ติดต่อ");
-  if (!f.contact_phone) miss.push("เบอร์โทร");
-  if (!f.product) miss.push("ระบบที่มีปัญหา");
-  if (!f.severity) miss.push("ความรุนแรง");
-  if (!f.subject) miss.push("หัวข้อปัญหา");
-  if (!f.detail) miss.push("รายละเอียด");
-  if (miss.length) throw bad("กรุณากรอก: " + miss.join(", "));
-  if (f.contact_email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(f.contact_email)) throw bad("อีเมลไม่ถูกต้อง");
-  if (!b.consent) throw bad("กรุณายืนยันการให้ข้อมูลติดต่อ");
+  if (!f.contact_name) miss.push("contact name");
+  if (!f.contact_phone) miss.push("call-back number");
+  if (!f.product) miss.push("affected system");
+  if (!f.severity) miss.push("urgency");
+  if (!f.subject) miss.push("subject");
+  if (!f.detail) miss.push("details");
+  if (miss.length) throw bad("Please fill in: " + miss.join(", "));
+  if (f.contact_email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(f.contact_email)) throw bad("Please check the email address.");
+  if (!b.consent) throw bad("Please tick the consent box.");
 
   // Same subject from the same customer still open -> ask before creating a second request.
   if (!b.confirmDuplicate && link.site) {
@@ -297,14 +317,15 @@ async function submit(token, b) {
          AND created_at > now() - interval '7 days' ORDER BY id DESC LIMIT 1`,
       [link.site, f.subject]
     );
-    if (dup) throw bad(`เรื่องนี้อาจซ้ำกับ ${dup.req_no} ที่แจ้งไว้แล้ว ถ้าเป็นเรื่องใหม่ กด “ส่งเป็นเรื่องใหม่”`, 409, { code: "DUPLICATE", reqNo: dup.req_no });
+    if (dup) throw bad(`This may be the same issue as ${dup.req_no}, which you already reported. If it is a different problem, choose “Send as a new case”.`, 409, { code: "DUPLICATE", reqNo: dup.req_no });
   }
 
   const s = await settings();
+  const afterHours = await isAfterHours();
   const fileIds = (Array.isArray(b.files) ? b.files : []).map(Number).filter(Boolean).slice(0, s.attachMaxFiles);
   const created = await tx(async (c) => {
     const used = await c.query("UPDATE intake_links SET used_at = now() WHERE id = $1 AND used_at IS NULL AND expires_at > now() RETURNING id", [link.id]);
-    if (!used.rowCount) throw bad("ลิงก์นี้ใช้ไปแล้วหรือหมดอายุ", 410, { code: "USED" });
+    if (!used.rowCount) throw bad("This link has already been used or has expired.", 410, { code: "USED" });
     const prior = link.line_user_id
       ? (await c.query("SELECT 1 FROM intakes WHERE line_user_id = $1 LIMIT 1", [link.line_user_id])).rowCount
       : 1;
@@ -313,11 +334,11 @@ async function submit(token, b) {
     const reqNo = await nextReqNo(c);
     const r = await c.query(
       `INSERT INTO intakes (req_no, link_id, is_test, held, site, customer_text, line_user_id, new_line, external_ref,
-         contact_name, position, contact_email, contact_phone, product, severity, started_text, affected, customer_ref, subject, detail, ip)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21) RETURNING *`,
+         contact_name, position, contact_email, contact_phone, product, severity, started_text, affected, customer_ref, subject, detail, ip, channel, after_hours)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23) RETURNING *`,
       [reqNo, link.id, link.is_test, held, link.site, link.customer_text, link.line_user_id, !prior, link.external_ref,
         f.contact_name, f.position || null, f.contact_email || null, f.contact_phone, f.product, f.severity, f.started_text || null,
-        f.affected || null, f.customer_ref || null, f.subject, f.detail, clientIp() || null]
+        f.affected || null, f.customer_ref || null, f.subject, f.detail, clientIp() || null, link.line_user_id ? "line" : "link", afterHours]
     );
     if (fileIds.length) await c.query("UPDATE intake_files SET intake_id = $1 WHERE link_id = $2 AND id = ANY($3)", [r.rows[0].id, link.id, fileIds]);
     if (link.line_user_id) {
@@ -332,7 +353,8 @@ async function submit(token, b) {
 
   await audit(null, "intake_submit", created.req_no, { site: created.site, customer: created.customer_text, line: !!created.line_user_id, test: created.is_test, held: created.held });
   notifyNew(created).catch((e) => console.error("[intake] notify:", e.message));
-  return { ok: true, channel: created.line_user_id ? "line" : "link", contactEmail: created.contact_email, reqNo: created.req_no, createdAt: created.created_at, site: created.site, customerText: created.customer_text, subject: created.subject, severity: created.severity, product: created.product, contactName: created.contact_name, contactPhone: created.contact_phone };
+  return { ok: true, afterHours, hours: afterHours ? await businessHours() : null, hotline: afterHours ? await hotlineForCustomers() : null, updateUrl: updateUrl(created.id),
+    channel: created.line_user_id ? "line" : "link", contactEmail: created.contact_email, reqNo: created.req_no, createdAt: created.created_at, site: created.site, customerText: created.customer_text, subject: created.subject, severity: created.severity, product: created.product, contactName: created.contact_name, contactPhone: created.contact_phone };
 }
 
 // ------------------------------------------------------------ notifications
@@ -537,14 +559,8 @@ async function notifyClaimed(i, kase, by, owner) {
       .sendMail({
         to: [i.contact_email],
         cc: owner.email ? [owner.email] : [],
-        subject: `${i.is_test ? "[ทดสอบ] " : ""}[${i.req_no}] มี Engineer รับเคสของคุณแล้ว: ${i.subject}`,
-        html: `<!doctype html><html><body style="margin:0;padding:24px;background:#F3F5F9;font-family:'Segoe UI',Tahoma,sans-serif;color:#18212F">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;background:#FFFFFF;border:1px solid #D9DFE8;border-radius:12px;overflow:hidden">
-<tr><td style="height:6px;background:#1C6B45;font-size:0;line-height:0">&nbsp;</td></tr><tr><td style="padding:28px 30px;font-size:15px;line-height:1.7">
-<p style="margin:0 0 16px"><img src="${esc(config3.baseUrl)}/sinostech-logo.png" alt="SINO S-TECH LIMITED" width="185" height="60" style="display:block;border:0"></p><p style="margin:0 0 14px">เรียน ${esc(i.contact_name)}</p>
-<p style="margin:0 0 14px">มี Engineer รับเคสของคุณแล้ว</p>
-${fieldTable([["เลขรับแจ้ง", `${i.req_no} → ${kase.caseNo}${kase.csNumber ? ` (${kase.csNumber})` : ""}`], ["หัวข้อ", i.subject], ["ผู้รับผิดชอบ", owner.display_name], ["ติดต่อกลับที่", i.contact_phone || i.contact_email]])}
-<p style="margin:16px 0 0">หากต้องการเพิ่มข้อมูล ตอบกลับอีเมลนี้ได้</p></td></tr></table></body></html>`,
+        subject: cm.claimedSubject(i, kase, `An engineer has taken your case: ${i.subject}`),
+        html: cm.claimedHtml(i, kase, owner, { updateUrl: updateUrl(i.id) }),
       })
       .catch((e) => console.error("[intake] customer claim mail:", e.message));
   }
@@ -563,7 +579,8 @@ ${fieldTable([["เลขรับแจ้ง", `${i.req_no} → ${kase.caseNo}
     lineUserId: i.line_user_id,
     externalRef: i.external_ref,
     contact: { name: i.contact_name, phone: i.contact_phone },
-    message: `มี Engineer รับเคสแล้ว\n${i.req_no} → ${kase.caseNo}\n${i.subject}\n\nผู้รับผิดชอบ: ${owner.display_name}\nจะติดต่อกลับที่ ${i.contact_phone || i.contact_email}`,
+    updateUrl: updateUrl(i.id),
+    message: `An engineer has taken your case.\n${i.req_no} → ${kase.caseNo}\n${i.subject}\n\nEngineer: ${owner.display_name}\nWe will contact you at ${i.contact_phone || i.contact_email}\n\nAdd details or screenshots: ${updateUrl(i.id)}`,
   });
 }
 
@@ -579,8 +596,7 @@ async function reject(user, id, b) {
   if (!r) throw bad("คำขอนี้ไม่ได้อยู่ในสถานะรอรับเคส", 409);
   await audit(user, "intake_reject", r.req_no, { status, reason, duplicateOf: r.duplicate_of });
   if (r.channel === "email" && b.notifyCustomer) {
-    const msg = status === "duplicate" ? `เรื่องนี้ (${r.req_no}) เป็นเรื่องเดียวกับ ${r.duplicate_of} ที่แจ้งไว้แล้ว ทีมงานจะติดตามในเรื่องเดิม` : reason;
-    await mail().onClosed(r, msg).catch((e) => console.error("[intake] email close reply:", e.message));
+    await mail().onClosed(r, cm.closedMessage(r, status, reason)).catch((e) => console.error("[intake] email close reply:", e.message));
   }
   await enqueue("intake.closed", r, {
     event: "intake.closed",
@@ -590,7 +606,7 @@ async function reject(user, id, b) {
     lineUserId: r.line_user_id,
     externalRef: r.external_ref,
     notifyCustomer: !!b.notifyCustomer,
-    message: status === "duplicate" ? `${r.req_no} เป็นเรื่องเดียวกับ ${r.duplicate_of} ที่แจ้งไว้แล้ว ทีมงานจะติดตามในเคสเดิม` : `${r.req_no}: ${reason}`,
+    message: cm.closedMessage(r, status, reason),
   });
   return { ok: true };
 }
@@ -681,9 +697,9 @@ async function createKey(user, { name, isTest, allowedIps }) {
 }
 async function keyFromRequest(req) {
   const raw = String(req.get("X-Api-Key") || (req.get("Authorization") || "").replace(/^Bearer\s+/i, "")).trim();
-  if (!raw) throw bad("ต้องส่ง API key ใน header X-Api-Key", 401, { code: "NO_KEY" });
+  if (!raw) throw bad("Send the API key in the X-Api-Key header", 401, { code: "NO_KEY" });
   const k = await one("SELECT * FROM intake_api_keys WHERE key_hash = $1 AND revoked_at IS NULL", [sha(raw)]);
-  if (!k) throw bad("API key ไม่ถูกต้องหรือถูกยกเลิกแล้ว", 401, { code: "BAD_KEY" });
+  if (!k) throw bad("Invalid or revoked API key", 401, { code: "BAD_KEY" });
   const ip = clientIp();
   if (k.allowed_ips.length && !k.allowed_ips.includes(ip)) throw bad(`IP ${ip} ไม่อยู่ในรายการที่อนุญาตของ API key นี้`, 403, { code: "IP_NOT_ALLOWED" });
   q("UPDATE intake_api_keys SET last_used_at = now() WHERE id = $1", [k.id]).catch(() => {});
@@ -746,12 +762,12 @@ publicApi.get("/intake/:token", wrap(async (req, res) => {
     channel: link.line_user_id ? "line" : "link",
     company: config3.company,
     products,
-    severities: Object.entries(SEV).map(([value, hint]) => ({ value, hint })),
+    severities: require("./intakeupdate").SEV_EN.map(([value, , hint]) => ({ value, hint })),
     attachments: ss && ss.attachments ? { maxFiles: s.attachMaxFiles, maxMb: s.attachMaxMb, ext: FILE_EXT } : null,
   });
 }));
 publicApi.post("/intake/:token/files", express.raw({ type: () => true, limit: "25mb" }), wrap(async (req, res) => {
-  if (req.get("X-Requested-With") !== "fetch") throw bad("คำขอไม่ถูกต้อง", 403);
+  if (req.get("X-Requested-With") !== "fetch") throw bad("Invalid request", 403);
   const link = await linkByToken(req.params.token);
   const st = linkState(link);
   if (st) throw bad(st.error, st.status, { code: st.code });
@@ -766,7 +782,7 @@ publicApi.delete("/intake/:token/files/:id", wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 publicApi.post("/intake/:token", express.json({ limit: "64kb" }), wrap(async (req, res) => {
-  if (req.get("X-Requested-With") !== "fetch") throw bad("คำขอไม่ถูกต้อง", 403);
+  if (req.get("X-Requested-With") !== "fetch") throw bad("Invalid request", 403);
   res.json(await submit(req.params.token, req.body || {}));
 }));
 publicApi.use((req, res) => res.status(404).json({ ok: false, error: "not found" }));
@@ -836,14 +852,18 @@ function mountInternal(api, { need, wrap: w }) {
       const r = await graph.sendMail({
         to: [email],
         cc: req.user.email ? [req.user.email] : [],
-        subject: `${b.test ? "[ทดสอบ] " : ""}ลิงก์แจ้งเคสถึงทีม Sinostech Support`,
-        html: customerLinkEmail({ name: clean(b.contactName, 120), customer: out.customer.site || b.customer, url: out.url, expiresAt: out.expiresAt, sender: req.user.display_name, note: clean(b.message, 1000) }),
+        subject: `${b.test ? "[TEST] " : ""}Sinostech Support: case form link`,
+        html: cm.linkEmailHtml({ name: clean(b.contactName, 120), customer: out.customer.site || b.customer, url: out.url, expiresAt: out.expiresAt, sender: req.user.display_name, note: clean(b.message, 1000) }),
       });
       out.emailed = { to: email, cc: req.user.email || null, dryRun: !!r.dryRun };
     }
     await audit(req.user, "intake_link_manual", b.customer, { linkId: out.linkId, test: !!b.test, emailedTo: b.sendEmail ? email : null });
     res.json(out);
   }));
+
+  // ---------- hotline (shown to everyone, editable with its own permission)
+  api.get("/hotline", w(async (req, res) => res.json({ hotline: await hotline(), hours: await businessHours() })));
+  api.put("/hotline", need("hotline_edit"), w(async (req, res) => res.json({ ok: true, hotline: await saveHotline(req.user, req.body || {}) })));
 
   // ---------- admin
   const admin = need("settings_manage");
@@ -978,5 +998,5 @@ function mountInternal(api, { need, wrap: w }) {
 
 module.exports = {
   apiV1, publicApi, mountInternal, createLink, submit, claim, reject, runReminders, deliver, runRetention, matchCustomer, norm, settings, nextReqNo,
-  storeIntakeFile, removeStored, notifyNew, teamRecipients, customerName, intakeUrl, SEV_COLOR, siteList,
+  FILE_EXT, storeIntakeFile, removeStored, notifyNew, isAfterHours, businessHours, hotline, hotlineForCustomers, teamRecipients, customerName, intakeUrl, SEV_COLOR, siteList,
 };

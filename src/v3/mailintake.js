@@ -275,6 +275,7 @@ async function processMessage(e, m) {
     if (recent.n >= e.perSenderPerHour) holdReason = `ผู้ส่งรายนี้ส่งเกิน ${e.perSenderPerHour} เรื่องใน 1 ชั่วโมง`;
   }
   const s = await intake().settings();
+  const afterHours = await intake().isAfterHours(m.receivedDateTime ? new Date(m.receivedDateTime) : new Date());
   const all4 = `${subject}\n${text}`;
   const severity = guessSeverity(all4);
   const product = await guessProduct(all4);
@@ -285,10 +286,10 @@ async function processMessage(e, m) {
     }
     const reqNo = await intake().nextReqNo(c);
     const r = await c.query(
-      `INSERT INTO intakes (req_no, is_test, held, hold_reason, channel, site, customer_text, contact_name, contact_email, contact_phone, product, severity, subject, detail)
-       VALUES ($1,$2,$3,$4,'email',$5,$6,$7,$8,NULL,$9,$10,$11,$12) RETURNING *`,
+      `INSERT INTO intakes (req_no, is_test, held, hold_reason, channel, site, customer_text, contact_name, contact_email, contact_phone, product, severity, subject, detail, after_hours)
+       VALUES ($1,$2,$3,$4,'email',$5,$6,$7,$8,NULL,$9,$10,$11,$12,$13) RETURNING *`,
       [reqNo, !!m.isTest, !!holdReason, holdReason, site, site ? null : domain, fromName || from.split("@")[0], from, product, severity,
-        clean(baseSubject(subject) || subject, 150), text || "(ไม่มีเนื้อหา ดูไฟล์แนบ)"]
+        clean(baseSubject(subject) || subject, 150), text || "(ไม่มีเนื้อหา ดูไฟล์แนบ)", afterHours]
     );
     return r.rows[0];
   });
@@ -297,7 +298,7 @@ async function processMessage(e, m) {
   if (note) await q("UPDATE intakes SET detail = detail || $2 WHERE id = $1", [created.id, `\n\n${note}`]);
   const i = await one("SELECT * FROM intakes WHERE id = $1", [created.id]);
   let replied = false;
-  if (!i.held && e.autoReply) replied = await ack(e, i, m.internetMessageId, subject).then(() => true, (err) => (console.error("[mail-intake] ack:", err.message), false));
+  if (!i.held && e.autoReply) replied = await ack(e, i, m.internetMessageId, subject, files.kept).then(() => true, (err) => (console.error("[mail-intake] ack:", err.message), false));
   await record(m, from, fromName, i.held ? "held" : "created", i.held ? holdReason : null, { intakeId: i.id, replied });
   await audit(null, "intake_email", i.req_no, { from, site, held: i.held, reason: holdReason, test: i.is_test });
   if (i.held) notifyHeld(i).catch((err) => console.error("[mail-intake] held notify:", err.message));
@@ -305,7 +306,25 @@ async function processMessage(e, m) {
   return { decision: i.held ? "held" : "created", reason: holdReason, intakeId: i.id, reqNo: i.req_no };
 }
 
+/** Thai / international phone numbers in free text, in the order they appear. */
+function phonesIn(text) {
+  const re = /(?:\+?66[\s-]?|0)(?:\d[\s-]?){8,9}\d?/g;
+  const out = [];
+  for (const m of String(text || "").matchAll(re)) {
+    const digits = m[0].replace(/[^0-9+]/g, "");
+    if (digits.replace("+", "").length >= 9 && digits.replace("+", "").length <= 11 && !out.includes(m[0].trim())) out.push(m[0].trim().replace(/[\s-]+$/, ""));
+  }
+  return out;
+}
+
 async function appendTo(e, m, i, { from, fromName, subject, text }) {
+  // A reply with a call-back number fills in the request's phone when it has none (the rest stay visible in the text).
+  const phones = phonesIn(text);
+  if (phones.length && !i.contact_phone) {
+    await q("UPDATE intakes SET contact_phone = $2 WHERE id = $1 AND contact_phone IS NULL", [i.id, phones[0]]);
+    i.contact_phone = phones[0];
+  }
+  if (phones.length) await q("INSERT INTO intake_updates (intake_id, source, data) VALUES ($1,'email',$2)", [i.id, JSON.stringify({ phones, from })]);
   const files = await saveAttachments(e, m, i.id);
   const note = filesNote(files);
   const stamp = new Intl.DateTimeFormat("th-TH", { timeZone: config.tz, day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(m.receivedDateTime || Date.now()));
@@ -321,31 +340,24 @@ async function appendTo(e, m, i, { from, fromName, subject, text }) {
   } else {
     await q("UPDATE intakes SET detail = left(detail || $2, 20000) WHERE id = $1", [i.id, `\n\n--- email เพิ่มเติมจาก ${from} · ${stamp} ---\n${body}`]);
   }
-  await record(m, from, fromName, "appended", `เพิ่มใน ${i.req_no}${caseId ? " (บันทึกใน Activity ของเคส)" : ""}`, { intakeId: i.id, caseId });
+  await record(m, from, fromName, "appended", `เพิ่มใน ${i.req_no}${caseId ? " (บันทึกใน Activity ของเคส)" : ""}${phones.length ? ` · พบเบอร์ ${phones.join(", ")}` : ""}`, { intakeId: i.id, caseId });
   return { decision: "appended", intakeId: i.id, reqNo: i.req_no, caseId };
 }
 
-// ------------------------------------------------------------ customer-facing mail
-function customerMail(color, inner) {
-  return `<!doctype html><html><body style="margin:0;padding:24px;background:#F3F5F9;font-family:'Segoe UI',Tahoma,sans-serif;color:#18212F">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;background:#FFFFFF;border:1px solid #D9DFE8;border-radius:12px;overflow:hidden">
-<tr><td style="height:6px;background:${color};font-size:0;line-height:0">&nbsp;</td></tr><tr><td style="padding:28px 30px;font-size:15px;line-height:1.7">
-<p style="margin:0 0 16px"><img src="${esc(config3.baseUrl)}/sinostech-logo.png" alt="SINO S-TECH LIMITED" width="185" height="60" style="display:block;border:0"></p>
-${inner}
-<p style="margin:22px 0 0;padding-top:14px;border-top:1px solid #E2E5EA;font-size:13px;color:#5B6675">ฝ่าย Support, SINO S-TECH LIMITED (บริษัท ซีโน เอส-เทค จำกัด) · ตอบกลับ email นี้โดยคงเลข [REQ] ในหัวเรื่องไว้ ข้อมูลจะเข้าเรื่องเดิม</p>
-</td></tr></table></body></html>`;
-}
-const threadSubject = (tag, subject) => `[${tag}] ${baseSubject(subject) || subject}`;
+// ------------------------------------------------------------ customer-facing mail (English, see customermail.js)
+const cm = require("./customermail");
+const upd = () => require("./intakeupdate");
 
-async function ack(e, i, messageId, subject) {
-  const html = customerMail(
-    "#1F5FBF",
-    `<p style="margin:0 0 14px">เรียน ${esc(i.contact_name)}</p>
-<p style="margin:0 0 14px">ได้รับเรื่องของคุณแล้ว เลขรับแจ้ง <strong style="font-family:Consolas,monospace;color:#1F5FBF">${esc(i.req_no)}</strong></p>
-${fieldTable([["ลูกค้า", i.site || "-"], ["หัวข้อ", i.subject]])}
-<p style="margin:16px 0 0">ทีมจะแจ้งกลับทาง email นี้เมื่อมี Engineer รับเคส หากเป็นเรื่องด่วน กรุณาโทรแจ้งทีม Support พร้อมเลขรับแจ้ง</p>`
-  );
-  const r = await replyInThread(e, messageId, { subject: `${i.is_test ? "[ทดสอบ] " : ""}${threadSubject(i.req_no, subject)}`, html });
+async function ack(e, i, messageId, subject, files = []) {
+  const afterHours = i.after_hours;
+  const html = cm.ackHtml(i, {
+    updateUrl: upd().updateUrl(i.id),
+    afterHours,
+    hours: await intake().businessHours(),
+    hotline: afterHours ? await intake().hotlineForCustomers() : null,
+    files,
+  });
+  const r = await replyInThread(e, messageId, { subject: cm.ackSubject(i, baseSubject(subject) || i.subject), html });
   await q("UPDATE intake_emails SET replied = true WHERE intake_id = $1 AND decision IN ('created','held')", [i.id]);
   return r;
 }
@@ -372,13 +384,8 @@ async function onClaimed(i, kase, owner) {
   const e = await emailSettings();
   const o = await originOf(i);
   if (!o || !e.mailbox) return false;
-  const html = customerMail(
-    "#1C6B45",
-    `<p style="margin:0 0 14px">เรียน ${esc(i.contact_name)}</p><p style="margin:0 0 14px">มี Engineer รับเคสของคุณแล้ว</p>
-${fieldTable([["เลขรับแจ้ง", `${i.req_no} → ${kase.caseNo}${kase.csNumber ? ` (${kase.csNumber})` : ""}`], ["หัวข้อ", i.subject], ["ผู้รับผิดชอบ", owner.display_name]])}
-<p style="margin:16px 0 0">หากต้องการเพิ่มข้อมูล ตอบกลับ email นี้ได้เลย ข้อมูลจะถูกบันทึกในเคสให้ผู้รับผิดชอบเห็น</p>`
-  );
-  await replyInThread(e, o.message_id, { subject: `${i.is_test ? "[ทดสอบ] " : ""}${threadSubject(`${i.req_no} → ${kase.caseNo}`, o.subject)}`, html, cc: owner.email ? [owner.email] : [] });
+  const html = cm.claimedHtml(i, kase, owner, { updateUrl: upd().updateUrl(i.id) });
+  await replyInThread(e, o.message_id, { subject: cm.claimedSubject(i, kase, baseSubject(o.subject) || i.subject), html, cc: owner.email ? [owner.email] : [] });
   return true;
 }
 
@@ -388,8 +395,7 @@ async function onClosed(i, message) {
   const e = await emailSettings();
   const o = await originOf(i);
   if (!o || !e.mailbox) return false;
-  const html = customerMail("#5B6675", `<p style="margin:0 0 14px">เรียน ${esc(i.contact_name)}</p><p style="margin:0 0 14px;white-space:pre-wrap">${esc(message)}</p>`);
-  await replyInThread(e, o.message_id, { subject: `${i.is_test ? "[ทดสอบ] " : ""}${threadSubject(i.req_no, o.subject)}`, html });
+  await replyInThread(e, o.message_id, { subject: cm.ackSubject(i, baseSubject(o.subject) || i.subject), html: cm.closedHtml(i, message) });
   return true;
 }
 
@@ -512,7 +518,11 @@ async function simulate(user, b) {
     internetMessageId: `sim-${crypto.randomBytes(8).toString("hex")}@test`,
     subject: clean(b.subject, 300),
     from: { emailAddress: { address: from, name: clean(b.name, 120) } },
-    receivedDateTime: new Date().toISOString(),
+    receivedDateTime: (() => {
+      if (!/^\d{2}:\d{2}$/.test(String(b.at || ""))) return new Date().toISOString();
+      const day = new Intl.DateTimeFormat("en-CA", { timeZone: config.tz }).format(new Date());
+      return new Date(`${day}T${b.at}:00+07:00`).toISOString();
+    })(),
     body: { contentType: "text", content: clean(b.body, 8000) },
     internetMessageHeaders: [
       ...(b.inReplyTo ? [{ name: "In-Reply-To", value: "<earlier@customer>" }] : []),
@@ -551,5 +561,5 @@ async function retry(user, id) {
 
 module.exports = {
   emailSettings, saveEmailSettings, poll, cleanup, simulate, status, retry, onReleased, onClaimed, onClosed,
-  processMessage, bodyText, guessSeverity, siteForDomain, PUBLIC_DOMAINS, baseSubject,
+  processMessage, bodyText, guessSeverity, siteForDomain, PUBLIC_DOMAINS, baseSubject, phonesIn,
 };

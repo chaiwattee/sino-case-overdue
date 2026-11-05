@@ -440,3 +440,12 @@ tr.ext-row td:first-child { border-left: 4px solid var(--accent); }
 .ofilters .btn { min-height: 44px; }
 @media (max-width: 900px) { .ofilters { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 560px) { .ofilters { grid-template-columns: 1fr; } }
+.hl-view { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; font-size: 14px; }
+.hl-grid { display: grid; grid-template-columns: 48px minmax(0, 1fr) minmax(0, 1fr); gap: 8px; align-items: center; font-size: 14px; }
+.hl-grid input { font: inherit; min-height: 40px; border: 1px solid var(--line); border-radius: 10px; padding: 0 12px; background: transparent; color: var(--ink); }
+.cf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 10px; }
+.cf { display: flex; flex-direction: column; gap: 3px; text-decoration: none; color: var(--ink); min-width: 0; }
+.cf img, .cf .cf-ext { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); background: var(--surface-2); display: flex; align-items: center; justify-content: center; font-weight: 700; color: var(--muted); }
+.cf:hover img { outline: 2px solid var(--accent); }
+.cf-n { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cf-d { font-size: 11px; color: var(--muted); }

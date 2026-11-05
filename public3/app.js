@@ -664,7 +664,9 @@ ${allowNew ? `<span class="hint">พิมพ์ชื่อใหม่ได�
       can("case_reassign") ? api("/users/options") : Promise.resolve({ users: [] }),
       isNew ? Promise.resolve(null) : api("/case/" + id),
     ]);
-    const extData = isNew ? { extensions: [] } : await api(`/case/${Number(id)}/extensions`).catch(() => ({ extensions: [] }));
+    const [extData, custFiles] = isNew
+      ? [{ extensions: [] }, { files: [] }]
+      : await Promise.all([api(`/case/${Number(id)}/extensions`).catch(() => ({ extensions: [] })), api(`/case/${Number(id)}/customer-files`).catch(() => ({ files: [] }))]);
     const c = data ? data.case : { team: ME.user.teams[0] || (ME.teams[0] || {}).key, status: "In Progress", ownerUserId: ME.user.id, owner: ME.user.display_name, ownerEmail: ME.user.email };
     const permsC = data ? data.can : { edit: true, close: can("case_close"), reassign: can("case_reassign"), editStart: false, delete: false };
     const ro = !permsC.edit;
@@ -736,6 +738,12 @@ ${slaCard}
 ${closed ? `<section class="card"><div class="title"><h2>Resolution</h2>${permsC.edit && c.resolution ? `<button class="btn" type="button" id="btn-res" style="min-height:34px">แก้ไข</button>` : ""}</div>
 ${c.resolution ? `<div class="resol">${esc(c.resolution)}</div>
 <p class="muted" style="margin:0;font-size:13px">ปิดโดย ${esc(c.resolvedBy || "-")}${c.resolvedAt ? " · " + fdt(c.resolvedAt) : ""} · Status ${esc(c.status)}${c.rootCause ? " · สาเหตุ: " + esc(c.rootCause) : ""}</p>` : `<div class="resol none">ไม่มี Resolution (ปิดก่อนเริ่มบังคับ)</div>${permsC.edit ? `<button class="btn" type="button" id="btn-res" style="align-self:flex-start">เพิ่ม Resolution</button>` : ""}`}</section>` : ""}
+${custFiles.files.length ? `<section class="card"><div class="title"><h2>รูปและไฟล์จากลูกค้า (${custFiles.files.length})</h2><span>จาก email และฟอร์มเพิ่มข้อมูล</span></div>
+<div class="cf-grid">${custFiles.files.map((f) => {
+      const u = `api/intake/${f.intake_id}/files/${f.id}`;
+      const img = /^image\/(png|jpe?g|gif|webp)$/.test(f.mime);
+      return `<a class="cf" href="${u}" target="_blank" rel="noopener" title="${esc(f.file_name)}">${img ? `<img src="${u}" alt="${esc(f.file_name)}" loading="lazy">` : `<span class="cf-ext">${esc((f.file_name.split(".").pop() || "").toUpperCase())}</span>`}<span class="cf-n">${esc(f.file_name)}</span><span class="cf-d">${fdt(f.created_at)} · ${f.source === "form" ? "ฟอร์ม" : "email"}</span></a>`;
+    }).join("")}</div></section>` : ""}
 ${isNew ? "" : extCard(c, extData.extensions, closed, permsC)}
 ${isNew ? `<section class="card"><h2>ก่อนเปิดเคส</h2><p class="muted" style="margin:0;font-size:14px">กรอก Site, Task และ Status ให้ครบ ระบบจะส่ง email เตือน Owner ในวันที่ ${cfg.alert1Day}, ${cfg.alert2Day} และทุกวันหลังเกิน Due ถ้ายังไม่ปิดเคส</p></section>` : `
 <section class="card"><div><h2>Activity / Detail</h2><div class="hint" style="margin-top:4px">ทุกบันทึกมีวันที่และชื่อผู้บันทึก แก้หรือลบย้อนหลังไม่ได้</div></div>
@@ -1948,6 +1956,7 @@ ${live.map((e) => `<tr><td><a class="mono" href="#/case/${e.case_id}">${esc(e.ca
     const t = [];
     if (i.is_test) t.push(`<span class="chip c-closed">ทดสอบ</span>`);
     if (i.channel === "email") t.push(`<span class="chip c-normal">Email</span>`);
+    if (i.after_hours) t.push(`<span class="chip c-closed" title="แจ้งเข้ามานอกเวลาทำการ ลูกค้าได้เบอร์ Hotline ใน email ตอบรับ">นอกเวลา</span>`);
     if (i.held) t.push(`<span class="chip c-overdue" title="${esc(i.hold_reason || "")}">พักไว้ให้ Admin ตรวจ</span>${i.hold_reason ? `<div class="hint" style="margin-top:4px">${esc(i.hold_reason)}</div>` : ""}`);
     if (i.new_line) t.push(`<span class="chip c-r1" title="เคสแรกจากบัญชี LINE นี้ โทรยืนยันกับลูกค้าตอนรับเคส">LINE ใหม่</span>`);
     return t.join(" ");
@@ -2131,7 +2140,7 @@ ${i.site ? "" : `<label class="f">ลูกค้า (Site)<select name="site" r
   async function viewIntake(params) {
     setNav("intake");
     const status = params.status || "pending";
-    const d = await api("/intake?status=" + status);
+    const [d, hl] = await Promise.all([api("/intake?status=" + status), api("/hotline").catch(() => null)]);
     setIntakeBadge(d.counts.pending);
     INTAKE_CACHE = Object.fromEntries(d.items.map((i) => [i.id, i]));
     const tab = (k, l, n) => `<a class="btn ${status === k ? "primary" : ""}" href="#/intake?status=${k}">${l} (${n})</a>`;
@@ -2144,6 +2153,7 @@ ${status === "pending" || status === "held" ? `<td class="${Date.now() - new Dat
     const heads = status === "pending" || status === "held" ? "<th>รอมาแล้ว</th><th>ดูแลเคสล่าสุด</th>" : status === "claimed" ? "<th>รับเมื่อ</th><th>Owner / เคส</th>" : "<th>ปิดเมื่อ</th><th>เหตุผล</th>";
     $app.innerHTML = `<div class="head"><div><h1>เคสจากลูกค้า</h1><p>ลูกค้าแจ้งผ่าน LINE OA, Email หรือลิงก์ ทุกคนในทีมรับได้ · SLA ${cfg.slaDays} วันเริ่มนับเมื่อรับเคส · ยังไม่มีคนรับเกิน 1 ชม. ระบบเตือนทีมทุกชั่วโมง 06:00–22:00</p></div>
 <div class="actions">${can("case_create") ? `<button class="btn" type="button" id="ml-btn">สร้างลิงก์ส่งให้ลูกค้าเอง</button>` : ""}${lvl("settings_manage") === "all" ? `<a class="btn" href="#/intake-admin">ตั้งค่า LINE OA, Email และ API</a>` : ""}</div></div>
+${hl ? hotlineCard(hl) : ""}
 <div class="chips" style="gap:8px">${tab("pending", "รอรับเคส", d.counts.pending)}${d.counts.held ? tab("held", "พักไว้ตรวจ", d.counts.held) : ""}${tab("claimed", "รับแล้ว 30 วัน", d.counts.claimed)}${tab("closed", "ปฏิเสธ / ซ้ำ 90 วัน", d.counts.closed)}</div>
 ${status === "pending" && d.items.length ? `<div class="ik-grid">${d.items.map(ikCard).join("")}</div>` : `<section class="card">${d.items.length ? `<div class="tablewrap"><table style="min-width:820px"><thead><tr><th>เลขรับแจ้ง</th><th>Severity</th><th>ลูกค้า / หัวข้อ</th><th>ผู้ติดต่อ</th>${heads}</tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty">${status === "pending" ? "ไม่มีเคสรอรับ" : "ไม่มีรายการ"}</div>`}</section>`}
 <dialog id="dlg"></dialog>`;
@@ -2151,6 +2161,47 @@ ${status === "pending" && d.items.length ? `<div class="ik-grid">${d.items.map(i
     bindIntakeActions($app);
     const mb = document.getElementById("ml-btn");
     if (mb) mb.onclick = openManualLinkDialog;
+    bindHotline(() => viewIntake(params));
+  }
+
+  /** After-hours hotline: everyone sees the numbers; people with "แก้เบอร์ Hotline" edit them here. */
+  function hotlineCard({ hotline: h, hours }) {
+    const set = h.lines.filter((l) => l.phone);
+    const edit = can("hotline_edit");
+    return `<section class="card hl-card"><div class="title"><h2>Hotline นอกเวลาทำการ</h2><span>ใส่ใน email ตอบลูกค้าที่แจ้งเคส ${esc(hours.end)}–${esc(hours.start)} · โทรตามลำดับ รอสาย ${h.waitMinutes} นาทีก่อนโทรเบอร์ถัดไป</span></div>
+<div class="hl-view">${set.length ? set.map((l, n) => `<span><b>${n + 1})</b> <span class="mono">${esc(l.phone)}</span> <span class="muted">${esc(l.label)}</span></span>`).join("") : `<span class="muted">ยังไม่ตั้งเบอร์ · email นอกเวลาจะบอกลูกค้าเพียงว่า Engineer จะติดต่อกลับในวันถัดไป</span>`}
+${h.note ? `<span class="muted">· ${esc(h.note)}</span>` : ""}${edit ? `<button class="btn" type="button" id="hl-edit" style="min-height:34px;margin-left:auto">แก้เบอร์</button>` : ""}</div>
+${h.updatedBy ? `<div class="hint">แก้ล่าสุด: ${esc(h.updatedBy)} · ${fdt(h.updatedAt)}</div>` : ""}
+${edit ? `<form id="hl-form" class="stack" hidden>
+<div class="hl-grid"><b>ลำดับ</b><b>เบอร์</b><b>ชื่อที่ลูกค้าเห็น (ภาษาอังกฤษ)</b>
+${h.lines.map((l, n) => `<span>${n + 1}</span><input name="p${n}" value="${esc(l.phone)}" placeholder="เช่น 08-1234-5678" inputmode="tel"><input name="l${n}" value="${esc(l.label)}">`).join("")}</div>
+<div class="formgrid"><label class="f">รอสายก่อนโทรเบอร์ถัดไป (นาที)<input name="wait" type="number" min="1" max="120" value="${h.waitMinutes}"></label>
+<label class="f">หมายเหตุสำหรับทีม (ไม่ส่งถึงลูกค้า)<input name="note" value="${esc(h.note || "")}" placeholder="เช่น สัปดาห์นี้: ภาณุวัฒน์"></label></div>
+<p class="hint" style="margin:0">เว้นเบอร์ว่าง = ไม่แสดงลำดับนั้น · ทุกการแก้บันทึกในประวัติการใช้งาน (ใคร เมื่อไร เบอร์เดิม → เบอร์ใหม่)</p>
+<div class="right"><button class="btn" type="button" id="hl-cancel">ยกเลิก</button><button class="btn primary" type="submit">บันทึก</button></div></form>` : ""}</section>`;
+  }
+  function bindHotline(after) {
+    const b = document.getElementById("hl-edit");
+    const f = document.getElementById("hl-form");
+    if (!b || !f) return;
+    b.onclick = () => {
+      f.hidden = false;
+      b.hidden = true;
+    };
+    document.getElementById("hl-cancel").onclick = () => {
+      f.hidden = true;
+      b.hidden = false;
+    };
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      try {
+        await post("/hotline", { lines: [0, 1, 2].map((n) => ({ phone: f["p" + n].value.trim(), label: f["l" + n].value.trim() })), waitMinutes: f.wait.value, note: f.note.value }, "PUT");
+        toast("บันทึกเบอร์ Hotline แล้ว");
+        after();
+      } catch (err) {
+        toast(err.message, 6000);
+      }
+    };
   }
 
   async function viewIntakeItem(id) {
@@ -2238,6 +2289,7 @@ ${em.mock ? `<div class="banner warn">โหมดข้อมูลจำลอ
 <div class="formgrid">
 <label class="f">จาก (email ผู้ส่ง)<input id="es-from" value="somying@${esc((d.sites.find((x) => (x.domains || []).length) || { domains: ["ktb.co.th"] }).domains[0])}"></label>
 <label class="f">ชื่อผู้ส่ง<input id="es-name" value="สมหญิง ใจดี"></label>
+<label class="f">เวลาที่ได้รับ (ว่าง = ตอนนี้ · ใส่ 23:30 เพื่อลองนอกเวลา)<input id="es-at" type="time"></label>
 <label class="f" style="grid-column:1/-1">หัวเรื่อง<input id="es-subj" value="Agent login ไม่ได้ ตั้งแต่เช้า"></label>
 <label class="f" style="grid-column:1/-1">เนื้อหา<textarea id="es-body" rows="3">Agent ประมาณ 20 คน login ไม่ได้ ขึ้น error 401 ตั้งแต่ 8:30 รบกวนตรวจสอบด่วนค่ะ</textarea></label></div>
 <div style="display:flex;gap:16px;flex-wrap:wrap"><label class="chk"><input type="checkbox" id="es-test" checked> เคสทดสอบ</label><label class="chk"><input type="checkbox" id="es-file"> มีไฟล์แนบ</label><label class="chk"><input type="checkbox" id="es-reply"> เป็นการตอบกลับ email เก่า</label><label class="chk"><input type="checkbox" id="es-auto"> เป็น out-of-office</label></div>
@@ -2338,7 +2390,7 @@ ${d.outbox.map((o) => `<tr><td>${fdt(o.created_at)}</td><td class="mono">${esc(o
         reload();
       });
     $("es-go").onclick = act(async () => {
-      const r = await post("/intake-admin/email/simulate", { from: $("es-from").value, name: $("es-name").value, subject: $("es-subj").value, body: $("es-body").value, test: $("es-test").checked, withFile: $("es-file").checked, inReplyTo: $("es-reply").checked, auto: $("es-auto").checked });
+      const r = await post("/intake-admin/email/simulate", { from: $("es-from").value, name: $("es-name").value, subject: $("es-subj").value, body: $("es-body").value, at: $("es-at").value, test: $("es-test").checked, withFile: $("es-file").checked, inReplyTo: $("es-reply").checked, auto: $("es-auto").checked });
       const MSG = { created: ["ok", "สร้างคำขอ"], appended: ["ok", "เพิ่มเข้าเรื่องเดิม"], held: ["warn", "สร้างคำขอแต่พักไว้ให้ Admin ตรวจ"], ignored: ["", "ข้าม ไม่สร้างคำขอ"] };
       const [cls, label] = MSG[r.decision] || ["", r.decision];
       $("es-out").innerHTML = `<div class="banner ${cls}">${label}${r.reqNo ? ` <a href="#/intake/${r.intakeId}">${esc(r.reqNo)}</a>` : ""}${r.reason ? ` · ${esc(r.reason)}` : ""}${r.decision === "created" ? " · ลูกค้าจะได้ email ตอบกลับพร้อมเลข REQ (ในโหมดจำลองไม่ได้ส่งจริง)" : ""}</div>`;
