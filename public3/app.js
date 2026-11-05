@@ -284,7 +284,7 @@ ${showOwner ? `<td><a href="#/owner/${encodeURIComponent(c.ownerId)}">${esc(c.ow
   // ------------------------------------------------------------ overview
   async function viewOverview(params) {
     setNav("overview");
-    const [data, ikHtml, extHtml] = await Promise.all([api("/overview?" + qs({ source: params.source })), intakeSection(), extPendingSection()]);
+    const [data, ikHtml, extHtml, lk] = await Promise.all([api("/overview?" + qs({ source: params.source })), intakeSection(), extPendingSection(), lookups()]);
     cfg = data.config;
     const k = data.kpis;
     const openTotal = k.open || 0;
@@ -314,9 +314,13 @@ ${lvl("export") === "all" ? `<a class="btn" href="api/export?${qs({ from: daysAg
 ${can("case_create") ? `<a class="btn primary" href="#/case/new">เปิดเคสใหม่</a>` : ""}</div></div>
 ${extHtml}
 ${ikHtml}
-<form class="filters" id="flt" onsubmit="return false">
+<form class="ofilters" id="flt" onsubmit="return false">
 <label class="f">ทีม<select name="source"><option value="">ทุกทีมที่เห็นได้ (${data.sources.length})</option>${teamOpts}</select></label>
-<label class="f" style="flex:2 1 260px">ค้นหาเคส<input type="search" name="q" placeholder="เลขเคส, CS, ลูกค้า, Owner, งาน · Enter เพื่อค้นหาแบบละเอียด"></label>
+<label class="f">ค้นหาเคส<input type="search" name="q" placeholder="เลขเคส, CS, งาน, Owner, Resolution"></label>
+<div class="site-pick">${comboBox("site", "", lk.site, { allowNew: false, required: false, label: "ลูกค้า" })}</div>
+<label class="f">สถานะเคส<select name="st"><option value="open">ยังไม่ปิด</option><option value="closed">ปิดแล้ว</option><option value="all">ทั้งหมด</option>
+<optgroup label="ทีละ Status">${lk.status.map((x) => `<option value="s:${esc(x)}" title="${esc(statusHelp(x))}">${esc(x)}</option>`).join("")}</optgroup></select></label>
+<button class="btn primary" type="submit" id="flt-go">ค้นหา</button>
 </form>
 <div class="kpis">
 ${kpi("all", "เคสที่ยังไม่ปิด", openTotal, params.source ? esc(teamLabel(params.source)) : "ทุกทีมที่เห็นได้")}
@@ -347,8 +351,16 @@ ${lvl("audit_view") !== "none" ? `<section class="card"><div class="title"><h2>�
 
     const f = document.getElementById("flt");
     f.source.onchange = () => (location.hash = "#/?" + qs({ source: f.source.value }));
-    f.q.onkeydown = (e) => {
-      if (e.key === "Enter") location.hash = "#/cases?" + qs({ q: f.q.value, source: f.source.value });
+    const go = () => {
+      const v = f.st.value;
+      const st = v === "all" ? "" : v === "open" ? lk.status.filter((x) => !isClosedStatus(x)).join("|") : v === "closed" ? lk.status.filter(isClosedStatus).join("|") : v.slice(2);
+      location.hash = "#/cases?" + qs({ q: f.q.value.trim(), site: f.site.value.trim(), source: f.source.value, st: st || (v === "all" ? "" : undefined) }) + (v === "all" ? "&st=" : "");
+    };
+    f.site.placeholder = "ทุกลูกค้า · พิมพ์เพื่อค้นหา";
+    bindCombo(f, "site", lk.site, { allowNew: false });
+    f.onsubmit = (e) => {
+      e.preventDefault();
+      go();
     };
     bindRowLinks();
     bindIntakeActions($app, () => route());
