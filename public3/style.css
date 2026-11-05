@@ -449,3 +449,4 @@ tr.ext-row td:first-child { border-left: 4px solid var(--accent); }
 .cf:hover img { outline: 2px solid var(--accent); }
 .cf-n { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cf-d { font-size: 11px; color: var(--muted); }
+.banner.unconf { display: flex; gap: 14px; align-items: center; justify-content: space-between; flex-wrap: wrap; line-height: 1.6; } .banner.unconf a { color: inherit; font-weight: 700; }

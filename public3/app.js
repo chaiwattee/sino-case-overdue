@@ -247,7 +247,7 @@ ${edit ? "" : `<fieldset class="f" style="border:0;padding:0;margin:0"><legend s
       .map(
         (c) => `<tr class="click" data-href="#/case/${c.id}">
 <td>${caseCell(c, `#/case/${c.id}`)}</td>
-<td style="font-weight:600">${esc(c.site || "-")}</td>
+<td style="font-weight:600">${c.customerUnconfirmed ? `<span class="chip c-r1">ยังไม่ยืนยัน</span> <span class="muted" style="font-weight:500">${esc(c.customerUnconfirmed)}</span>` : esc(c.site || "-")}</td>
 <td>${sevChip(c.severity)}</td>
 <td style="font-size:13px">${esc(c.task || "")}${resLine(c, { missing: missingRes })}</td>
 ${showOwner ? `<td><a href="#/owner/${encodeURIComponent(c.ownerId)}">${esc(c.owner || "-")}</a></td>` : ""}
@@ -408,7 +408,7 @@ ${lvl("audit_view") !== "none" ? `<section class="card"><div class="title"><h2>�
     );
     const stSet = new Set(st);
     const byStatus = base.filter((c) => !st.length || stSet.has(c.status));
-    const isFlag = { overdue: (c) => c.stage === "overdue", ext: (c) => (c.extCount || 0) > 0 };
+    const isFlag = { overdue: (c) => c.stage === "overdue", ext: (c) => (c.extCount || 0) > 0, unconf: (c) => !!c.customerUnconfirmed };
     const cases = flag && isFlag[flag] ? byStatus.filter(isFlag[flag]) : byStatus;
     cases.sort((x, y) => (x.stage === "closed") - (y.stage === "closed") || (x.stage === "closed" ? String(y.endDate || "").localeCompare(String(x.endDate || "")) : (y.totalAge ?? y.age ?? 0) - (x.totalAge ?? x.age ?? 0)));
 
@@ -421,7 +421,7 @@ ${lvl("audit_view") !== "none" ? `<section class="card"><div class="title"><h2>�
 
     const owners = [...new Map(allCases.map((c) => [c.ownerId, c.owner])).entries()].filter(([id]) => id).sort((x, y) => String(x[1]).localeCompare(String(y[1]), "th"));
     const teams = [...new Map(allCases.map((c) => [c.source, c.sourceLabel])).entries()];
-    const sites = [...new Set(allCases.map((c) => c.site).filter(Boolean))].sort((x, y) => x.localeCompare(y, "th"));
+    const sites = [...new Set(allCases.filter((c) => !c.customerUnconfirmed).map((c) => c.site).filter(Boolean))].sort((x, y) => x.localeCompare(y, "th"));
     const siteCount = params.site ? allCases.filter((c) => c.site === params.site).length : 0;
 
     const parts = [];
@@ -432,6 +432,7 @@ ${lvl("audit_view") !== "none" ? `<section class="card"><div class="title"><h2>�
     if (stage) parts.push(STAGE[stage]);
     if (flag === "overdue") parts.push("เกิน Due");
     if (flag === "ext") parts.push("มีการขยายเวลา");
+    if (flag === "unconf") parts.push("ลูกค้ายังไม่ยืนยัน");
     if (params.q) parts.push(`“${params.q}”`);
     const showRes = cases.some((c) => c.stage === "closed");
 
@@ -456,6 +457,7 @@ ${statuses.map((x) => pill(stSet.has(x) && grp !== "all", link({ st: grp === "al
 <span class="psep" aria-hidden="true"></span>
 ${pill(flag === "overdue", link({ flag: flag === "overdue" ? "" : "overdue" }), "เกิน Due", byStatus.filter(isFlag.overdue).length)}
 ${pill(flag === "ext", link({ flag: flag === "ext" ? "" : "ext" }), "มีการขยายเวลา", byStatus.filter(isFlag.ext).length)}
+${flag === "unconf" || byStatus.some(isFlag.unconf) ? pill(flag === "unconf", link({ flag: flag === "unconf" ? "" : "unconf" }), "ลูกค้ายังไม่ยืนยัน", byStatus.filter(isFlag.unconf).length, "เคสจาก email ที่โดเมนยังไม่ผูกกับลูกค้า รอ Owner ยืนยันว่าเป็นลูกค้ารายไหน") : ""}
 </div>
 <span class="hint">“ยังไม่ปิด” = ${esc(openSt.join(", "))} · “ปิดแล้ว” = ${esc(closedSt.join(", "))} · กด Status ทีละตัวเพื่อเลือกหลายตัว · ตัวเลข = จำนวนเคสตามคำค้น ลูกค้า ทีม Owner และช่วงวันที่ที่เลือก</span>
 <details class="st-all"><summary>ความหมายของแต่ละ Status</summary>${statusTable(statuses)}</details></div>
@@ -704,11 +706,12 @@ ${allowNew ? `<span class="hint">พิมพ์ชื่อใหม่ได�
 <div class="head"><div><h1>${isNew ? "เปิดเคสใหม่" : `เคส <span class="mono" style="font-size:26px">${esc(caseRef(c))}</span> <span class="muted" style="font-size:16px;font-weight:500">${esc(c.site || "")}${csOf(c) ? " · " + esc(csOf(c)) : ""}</span>`}</h1>
 <p>${isNew ? "Start date จะบันทึกเป็นวันนี้อัตโนมัติ และ Due = Start date + " + cfg.slaDays + " วัน" : `${esc(c.sourceLabel)} · Owner ${esc(c.owner || "-")} · ${chip(c.stage)} ${sevChip(c.severity)}`}</p></div>
 <div class="actions">
-${!isNew && c.site && lvl("export") === "all" ? `<a class="btn" href="#/reports?site=${encodeURIComponent(c.site)}">Export เคสของ ${esc(c.site)}</a>` : ""}
+${!isNew && c.site && !c.customerUnconfirmed && lvl("export") === "all" ? `<a class="btn" href="#/reports?site=${encodeURIComponent(c.site)}">Export เคสของ ${esc(c.site)}</a>` : ""}
 ${!isNew && permsC.delete ? `<button class="btn danger" type="button" id="btn-del">ลบเคส</button>` : ""}
 ${!isNew && !closed && permsC.close ? `<button class="btn" type="button" id="btn-close" style="color:var(--normal-fg)">ปิดเคส</button>` : ""}
 ${!ro ? `<button class="btn primary" type="submit" form="cf">${isNew ? "เปิดเคส" : "บันทึก"}</button>` : ""}</div></div>
 ${ro ? `<div class="banner warn">คุณดูเคสนี้ได้อย่างเดียว ไม่มีสิทธิ์แก้ไข</div>` : ""}
+${!isNew && c.customerUnconfirmed ? `<div class="banner warn unconf"><div><strong>ลูกค้ายังไม่ยืนยัน</strong> · ${esc(c.customerUnconfirmed)}${data.intake ? `<br><span style="font-size:14px">ผู้แจ้ง ${esc(data.intake.contact_name || "-")}${data.intake.contact_phone ? ` · <a href="tel:${esc(data.intake.contact_phone.replace(/[^+0-9]/g, ""))}">${esc(data.intake.contact_phone)}</a>` : ""}${data.intake.contact_email ? ` · ${esc(data.intake.contact_email)}` : ""} · ${esc(data.intake.req_no)}</span>` : ""}<br><span style="font-size:13px">โทรถามลูกค้าว่าเป็นบริษัทไหน แล้วกด “ยืนยันลูกค้า” เคสนี้จะเข้ารายงานและ KPI ของลูกค้ารายนั้น</span></div>${permsC.edit ? `<button class="btn primary" type="button" id="btn-confirm-cust">ยืนยันลูกค้า</button>` : ""}</div>` : ""}
 <div class="cols">
 <form id="cf" class="main" novalidate>
 <fieldset class="card" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px" ${ro ? "disabled" : ""}>
@@ -827,6 +830,8 @@ ${actsHtml(data.activities)}</section>`}
           toast(err.message, 6000);
         }
       };
+    const bcc = document.getElementById("btn-confirm-cust");
+    if (bcc) bcc.onclick = () => openConfirmCustomer(c, data.intake, lk, () => viewCase(id));
     const br = document.getElementById("btn-res");
     if (br)
       br.onclick = async () => {
@@ -1949,7 +1954,7 @@ ${live.map((e) => `<tr><td><a class="mono" href="#/case/${e.case_id}">${esc(e.ca
     if (m < 1440) return `${Math.floor(m / 60)} ชม. ${m % 60} นาที`;
     return `${Math.floor(m / 1440)} วัน ${Math.floor((m % 1440) / 60)} ชม.`;
   }
-  const ikCustomer = (i) => (i.site ? esc(i.site) : `${esc(i.customer_text || "ไม่ระบุ")} <span class="chip c-r1">${i.channel === "email" ? "โดเมนยังไม่ผูกลูกค้า" : "ลูกค้าใหม่ รอยืนยัน"}</span>`);
+  const ikCustomer = (i) => (i.site ? esc(i.site) : `${esc(i.customer_text || "ไม่ระบุ")} <span class="chip c-r1">ลูกค้ายังไม่ยืนยัน</span>`);
   const ikContact = (i) => (i.channel === "email" ? `${esc(i.contact_email || "")}${i.contact_phone ? " · " + esc(i.contact_phone) : ""}` : esc(i.contact_phone || "-"));
   const IK_CHANNEL = { email: "Email", line: "LINE OA", link: "ลิงก์ฟอร์ม" };
   function ikTags(i) {
@@ -2024,6 +2029,41 @@ ${ikOwnerNote(i)}
     return USERS_CACHE;
   }
 
+  function openConfirmCustomer(c, ik, lk, after) {
+    const dlg = document.getElementById("dlg") || document.body.appendChild(Object.assign(document.createElement("dialog"), { id: "dlg" }));
+    const email = (ik && ik.contact_email) || "";
+    const dom = (email.split("@")[1] || "").toLowerCase();
+    const canRemember = dom && !(ME.config.publicDomains || []).includes(dom) && ["admin", "manager"].includes(ME.user.role);
+    dlg.innerHTML = `<form class="card" method="dialog" id="ccf" style="min-width:min(520px,90vw)">
+<h2>ยืนยันลูกค้า ${esc(caseRef(c))}</h2>
+<p class="muted" style="margin:0">ผู้แจ้ง ${esc((ik && ik.contact_name) || "-")}${email ? ` · ${esc(email)}` : ""}</p>
+${canRemember ? `<label class="chk"><input type="checkbox" name="remember" checked> <span>จำโดเมน <strong>@${esc(dom)}</strong> ไว้กับลูกค้ารายนี้<br><span class="muted" style="font-size:13px">email ครั้งต่อไปจากโดเมนนี้จะเข้าลูกค้ารายนี้ทันที</span></span></label>`
+      : dom && !(ME.config.publicDomains || []).includes(dom) ? `<p class="hint" style="margin:0">ถ้าโดเมน @${esc(dom)} เป็นของลูกค้ารายนี้ แจ้ง Manager หรือ Admin ให้ผูกโดเมนในหน้าตั้งค่า</p>`
+      : dom ? `<p class="hint" style="margin:0">@${esc(dom)} เป็น email ส่วนตัว ผูกโดเมนกับลูกค้าไม่ได้</p>` : ""}
+${comboBox("site", "", lk.site, { label: "ลูกค้า (Site)", allowNew: true })}
+<div class="right"><button class="btn" value="cancel" formnovalidate>ยกเลิก</button><button class="btn primary" value="ok">ยืนยัน</button></div></form>`;
+    const f = dlg.querySelector("#ccf");
+    bindCombo(f, "site", lk.site);
+    f.onsubmit = async (e) => {
+      if (e.submitter && e.submitter.value === "cancel") return;
+      e.preventDefault();
+      const site = f.site.value.trim();
+      if (!site) return toast("เลือกหรือพิมพ์ชื่อลูกค้า");
+      const btn = f.querySelector("button[value=ok]");
+      btn.disabled = true;
+      try {
+        const r = await post(`/case/${c.id}/confirm-customer`, { site, rememberDomain: f.remember && f.remember.checked ? dom : "" });
+        dlg.close();
+        toast(`ยืนยันลูกค้า ${r.site} แล้ว${r.remembered ? ` · จำโดเมน @${r.remembered} แล้ว` : ""}`, 5000);
+        after();
+      } catch (err) {
+        btn.disabled = false;
+        toast(err.message, 6000);
+      }
+    };
+    dlg.showModal();
+  }
+
   async function openClaimDialog(i, mode, after) {
     if (!i) return;
     const [users, lk] = await Promise.all([userOptions(), lookups()]);
@@ -2041,12 +2081,12 @@ ${i.new_line ? `<div class="banner warn">เคสแรกจากบัญช
 ${others.length ? `<select name="owner" aria-label="เลือก Owner" style="margin-top:6px">${others.map((u) => `<option value="${u.id}" ${u.id === i.recent_owner_id ? "selected" : ""}>${esc(u.display_name)}${u.teams && u.teams.length ? " · " + esc(u.teams.map(teamLabel).join(", ")) : ""}</option>`).join("")}</select>` : `<span class="hint">ยังไม่มีผู้ใช้อื่นในระบบ</span><input type="hidden" name="owner" value="">`}</span></label>
 </fieldset>
 <div class="formgrid">
-${i.site ? "" : `<label class="f">ลูกค้า (Site)<select name="site" required><option value="">เลือกลูกค้า</option>${lk.site.map((s) => `<option>${esc(s)}</option>`).join("")}</select><span class="hint">ลูกค้าพิมพ์ว่า “${esc(i.customer_text || "-")}”</span></label>`}
+${i.site ? "" : `<label class="f">ลูกค้า (Site)<select name="site"><option value="">ยังไม่ทราบ ยืนยันภายหลังบนหน้าเคส</option>${lk.site.map((s) => `<option>${esc(s)}</option>`).join("")}</select><span class="hint">${i.channel === "email" ? `ส่งจาก ${esc(i.contact_email || "-")}` : `ลูกค้าพิมพ์ว่า “${esc(i.customer_text || "-")}”`} · ไม่เลือกก็ได้ โทรถามลูกค้าแล้วกด “ยืนยันลูกค้า” บนหน้าเคส</span></label>`}
 <label class="f">ทีม<select name="team">${ME.teams.map((t) => `<option value="${esc(t.key)}" ${t.key === defTeam ? "selected" : ""}>${esc(t.label)}</option>`).join("")}</select></label>
 <label class="f">CS Number (ถ้ามี)<input name="cs" placeholder="เช่น CS5056901"></label>
 <label class="f">Severity<select name="sev">${lk.severity.map((s) => `<option ${s === i.severity ? "selected" : ""}>${esc(s)}</option>`).join("")}</select></label></div>
 <label class="f">ข้อความถึง Owner / บันทึกแรก (ไม่บังคับ)<textarea name="note" rows="2" placeholder="เช่น ลูกค้าเคยเจออาการเดียวกันเมื่อเดือนก่อน ดูเคส CS5056401 ประกอบ"></textarea></label>
-<p class="hint" style="margin:0">เมื่อยืนยัน คำขอนี้กลายเป็นเคสปกติ เริ่มนับ SLA ${cfg.slaDays} วันวันนี้ และระบบแจ้งลูกค้าทาง LINE ว่าใครรับเคส</p>
+<p class="hint" style="margin:0">เมื่อยืนยัน คำขอนี้กลายเป็นเคสปกติ เริ่มนับ SLA ${cfg.slaDays} วันวันนี้ และระบบแจ้งลูกค้า${i.channel === "email" ? "ทาง email " : i.channel === "line" ? "ทาง LINE " : ""}ว่าใครรับเคส</p>
 <div class="right"><button class="btn" value="cancel" formnovalidate>ยกเลิก</button><button class="btn primary" value="ok">ยืนยันรับเคส</button></div></form>`;
     const f = dlg.querySelector("#cf");
     const sync = () => {
@@ -2272,7 +2312,7 @@ ${em.mock ? `<div class="banner warn">โหมดข้อมูลจำลอ
 <div class="stat2" style="grid-template-columns:repeat(5,1fr)"><div><div class="k">สร้างคำขอ (30 วัน)</div><div class="v">${em.counts.created}</div></div><div><div class="k">เพิ่มในเรื่องเดิม</div><div class="v">${em.counts.appended}</div></div><div><div class="k">พักให้ Admin ตรวจ</div><div class="v">${em.counts.held}</div></div><div><div class="k">ข้าม</div><div class="v">${em.counts.ignored}</div></div><div><div class="k">ผิดพลาด</div><div class="v">${em.counts.errors}</div></div></div>
 <div class="formgrid">
 <label class="f">กล่องจดหมาย (shared mailbox)<input id="em-mb" value="${esc(es.mailbox)}" placeholder="service@sinostech.co.th"></label>
-<label class="f">email จากโดเมนที่ยังไม่ผูกกับลูกค้า<select id="em-unk"><option value="hold" ${es.unknownDomain === "hold" ? "selected" : ""}>สร้างคำขอแต่พักไว้ให้ Admin / Manager ตรวจ (ไม่ตอบลูกค้า)</option><option value="ignore" ${es.unknownDomain === "ignore" ? "selected" : ""}>ข้าม ไม่สร้างคำขอ</option></select></label>
+<label class="f">email จากโดเมนที่ยังไม่ผูกกับลูกค้า<select id="em-unk"><option value="accept" ${es.unknownDomain === "accept" ? "selected" : ""}>รับเป็นคำขอปกติ ตอบลูกค้าทันที ยืนยันลูกค้าบนหน้าเคสภายหลัง (แนะนำ)</option><option value="hold" ${es.unknownDomain === "hold" ? "selected" : ""}>สร้างคำขอแต่พักไว้ให้ Admin / Manager ตรวจ (ไม่ตอบลูกค้า)</option><option value="ignore" ${es.unknownDomain === "ignore" ? "selected" : ""}>ข้าม ไม่สร้างคำขอ</option></select></label>
 <label class="f">ข้าม email จากโดเมน (ภายในบริษัท)<input id="em-ign" value="${esc(es.ignoreDomains.join(", "))}" placeholder="sinostech.co.th"></label>
 <label class="f">ผู้ส่งรายเดียวส่งเรื่องใหม่ได้ต่อชั่วโมง (เกินนี้พักไว้)<input id="em-rate" type="number" min="1" max="100" value="${es.perSenderPerHour}"></label>
 <label class="f">ลบ email ที่ประมวลผลแล้วออกจากกล่องเมื่อเก่ากว่า (วัน)<input id="em-keep" type="number" min="30" max="3650" value="${es.keepDays}"></label></div>

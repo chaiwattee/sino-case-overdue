@@ -60,6 +60,7 @@ api.get("/me", wrap(async (req, res) => {
     config: {
       slaDays: config.slaDays, alert1Day: config.alert1Day, alert2Day: config.alert2Day, alertCc: config.alertCc,
       dryRunEmail: config.dryRunEmail, sso: ssoReady(), jobs: config3.jobs,
+      publicDomains: require("./mailintake").PUBLIC_DOMAINS,
     },
   });
 }));
@@ -132,6 +133,7 @@ function ser3(c) {
   const iso = (x) => (x instanceof Date ? d.toISODate(x) : x || null);
   return { ...ser(c), caseNo: c.caseNo, extCount: c.extCount || 0, origDueDate: iso(c.origDueDate), periodStart: iso(c.periodStart), totalAge: c.totalAge,
     pendingExtId: c.pendingExtId, lastExt: c.lastExt, closedInExtension: c.closedInExtension ?? null, severity: c.severity, id: c.id, team: c.team,
+    customerUnconfirmed: c.customerUnconfirmed || "",
     resolution: c.resolution || "", rootCause: c.rootCause || "", resolvedAt: c.resolvedAt || null, resolvedBy: c.resolvedBy || "", ownerUserId: c.owner_id, updatedAt: c.updatedAt, startAt: c.startAt };
 }
 
@@ -248,8 +250,12 @@ api.get("/case/:id", wrap(async (req, res) => {
     all("SELECT alert_type, sent_at, to_list, ok FROM alert_log WHERE case_id = $1 ORDER BY sent_at DESC", [c.id]),
     (await perms.can(u, "audit_view", c)) ? jobs.listChanges({ caseIds: [c.id], limit: 200 }) : [],
   ]);
+  const intakeRow = c.customerUnconfirmed
+    ? await one("SELECT req_no, channel, contact_name, contact_email, contact_phone FROM intakes WHERE case_id = $1 ORDER BY id LIMIT 1", [c.id])
+    : null;
   res.json({
     case: ser3(c),
+    intake: intakeRow,
     activities: acts,
     alerts,
     changes,
@@ -302,6 +308,44 @@ api.put("/case/:id", wrap(async (req, res) => {
   const other = (r.changed || []).filter((f) => !["status", "owner", "owner_id", "end_date", "closed_at", "resolved_by"].includes(f));
   if (other.length) await audit(u, "case_update", `${c.caseNo || c.csNumber || "#" + c.id} · ${c.site || ""}`, { case_id: c.id, fields: other });
   res.json({ ok: true, ...r });
+}));
+
+// Case opened from a request whose customer was not known yet (email from an unmapped / personal domain).
+// The engineer calls back, then confirms the customer here. Admins and managers can also remember the domain.
+api.post("/case/:id/confirm-customer", wrap(async (req, res) => {
+  const c = await loadVisible(req);
+  const u = req.user;
+  const b = req.body || {};
+  if (!(await perms.can(u, "case_edit", c))) throw bad("ไม่มีสิทธิ์แก้ไขเคสนี้", 403);
+  const site = String(b.site || "").trim().slice(0, 120);
+  if (!site) throw bad("เลือกหรือพิมพ์ชื่อลูกค้า");
+  let remembered = null;
+  const dom = String(b.rememberDomain || "").trim().toLowerCase().replace(/^.*@/, "");
+  if (dom) {
+    if (!["admin", "manager"].includes(u.role)) throw bad("จำโดเมนได้เฉพาะ Admin และ Manager", 403);
+    if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(dom)) throw bad(`โดเมน ${dom} ไม่ถูกต้อง`);
+    if (require("./mailintake").PUBLIC_DOMAINS.includes(dom)) throw bad(`@${dom} เป็น email ส่วนตัว ผูกกับลูกค้าไม่ได้`);
+    const taken = await one("SELECT site FROM intake_sites, unnest(domains) x WHERE x = $1 AND site <> $2 LIMIT 1", [dom, site]);
+    if (taken) throw bad(`โดเมน @${dom} ผูกกับลูกค้า ${taken.site} อยู่แล้ว`);
+  }
+  const was = c.customerUnconfirmed;
+  const r = await repo.updateCase(u, c, { site }, { allowReassign: false });
+  if (was && !(r.changed || []).includes("customer_unconfirmed")) await q("UPDATE cases SET customer_unconfirmed = NULL WHERE id = $1", [c.id]);
+  await q("UPDATE intakes SET site = $2 WHERE case_id = $1 AND site IS NULL", [c.id, site]);
+  if (dom) {
+    await q(
+      `INSERT INTO intake_sites (site, domains, updated_at) VALUES ($1, ARRAY[$2]::text[], now())
+       ON CONFLICT (site) DO UPDATE SET domains = (SELECT array_agg(DISTINCT x) FROM unnest(intake_sites.domains || ARRAY[$2]::text[]) x), updated_at = now()`,
+      [site, dom]
+    );
+    remembered = dom;
+    await audit(u, "intake_site", site, { domainAdded: dom, from: c.caseNo || c.id });
+  }
+  await q("INSERT INTO case_activities (case_id, activity_date, kind, detail, created_by, is_system) VALUES ($1, $4, 'ติดต่อลูกค้า', $2, $3, true)", [
+    c.id, `ยืนยันลูกค้า: ${site}${was ? ` (เดิม: ${was})` : ""}${remembered ? ` · จำโดเมน @${remembered} ไว้กับลูกค้านี้` : ""}`, u.id, d.toISODate(d.today()),
+  ]);
+  await audit(u, "case_update", `${c.caseNo || "#" + c.id} · ${site}`, { case_id: c.id, fields: ["site"], confirmed: true, domain: remembered });
+  res.json({ ok: true, site, remembered });
 }));
 
 api.get("/case/:id/customer-files", wrap(async (req, res) => {

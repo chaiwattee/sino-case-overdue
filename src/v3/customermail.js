@@ -48,7 +48,7 @@ function ackHtml(i, { updateUrl, afterHours, hours, hotline, files = [] }) {
   return layout(
     BLUE,
     `${greet(i)}<p style="margin:0 0 14px">We have received your case. Reference number ${ref(i.req_no)}</p>
-${fieldTable([["Customer", i.site || "-"], ["Subject", i.subject], ...(files.length ? [["Files received", files.join(", ")]] : [])])}
+${fieldTable([["Customer", i.site || "To be confirmed by our engineer"], ["Subject", i.subject], ...(files.length ? [["Files received", files.join(", ")]] : [])])}
 ${afterHours ? afterHoursBox(i, { hours, hotline }) : ""}
 ${addDetailsBox(updateUrl)}
 ${replyHint}

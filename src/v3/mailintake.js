@@ -4,7 +4,8 @@
 //     the customer gets a reply in the same thread with the number;
 //   - a reply that carries [REQ-YYYY-NNNN] in the subject is added to that request (or to its case);
 //   - internal (@sinostech.co.th), automatic and bulk mail is ignored;
-//   - unknown domains and replies without a REQ number wait for an admin ("พักไว้ให้ Admin ตรวจ").
+//   - unknown / personal domains open as normal requests (customer confirmed on the case later);
+//     replies without a REQ number, floods and SPF/DMARC failures wait for an admin.
 // Every processed message is moved to a folder so the inbox shows only what the system has not handled.
 // The app's Graph permission must be limited to this one mailbox (Exchange RBAC for Applications).
 const crypto = require("crypto");
@@ -23,7 +24,7 @@ const DEFAULTS = {
   enabled: false,
   mailbox: "",
   autoReply: true,
-  unknownDomain: "hold", // hold | ignore
+  unknownDomain: "accept", // accept (normal request; customer confirmed on the case) | hold | ignore
   ignoreDomains: ["sinostech.co.th"],
   perSenderPerHour: 5,
   keepDays: 365,
@@ -61,7 +62,7 @@ async function saveEmailSettings(user, b) {
     enabled: !!b.enabled,
     mailbox,
     autoReply: b.autoReply !== false,
-    unknownDomain: b.unknownDomain === "ignore" ? "ignore" : "hold",
+    unknownDomain: ["accept", "hold", "ignore"].includes(b.unknownDomain) ? b.unknownDomain : "accept",
     ignoreDomains: [...new Set(String(Array.isArray(b.ignoreDomains) ? b.ignoreDomains.join(",") : b.ignoreDomains || "").split(/[,;\s]+/).map((x) => lower(x).replace(/^@/, "")).filter(Boolean))],
     perSenderPerHour: num(b.perSenderPerHour, 1, 100, 5),
     keepDays: num(b.keepDays, 30, 3650, 365),
@@ -265,8 +266,8 @@ async function processMessage(e, m) {
   // 2) New request — or held for an admin.
   let holdReason = null;
   if (authFail) holdReason = "ผู้ส่งไม่ผ่านการตรวจ SPF/DMARC อาจเป็น email ปลอม ตรวจกับลูกค้าก่อน";
-  else if (!site) {
-    if (e.unknownDomain === "ignore") return ignore(`โดเมน @${domain} ยังไม่ผูกกับลูกค้า`);
+  else if (!site && e.unknownDomain === "ignore") return ignore(`โดเมน @${domain} ยังไม่ผูกกับลูกค้า`);
+  else if (!site && e.unknownDomain === "hold") {
     holdReason = PUBLIC_DOMAINS.includes(domain) ? `ส่งจาก email ส่วนตัว (@${domain}) ระบุบริษัทไม่ได้` : `โดเมน @${domain} ยังไม่ผูกกับลูกค้า`;
   } else if (h["in-reply-to"] || /^\s*(re|aw|sv|ตอบกลับ)\s*:/i.test(subject)) {
     holdReason = "ตอบกลับ email เดิมที่ไม่มีเลข REQ";
@@ -287,9 +288,9 @@ async function processMessage(e, m) {
     const reqNo = await intake().nextReqNo(c);
     const r = await c.query(
       `INSERT INTO intakes (req_no, is_test, held, hold_reason, channel, site, customer_text, contact_name, contact_email, contact_phone, product, severity, subject, detail, after_hours)
-       VALUES ($1,$2,$3,$4,'email',$5,$6,$7,$8,NULL,$9,$10,$11,$12,$13) RETURNING *`,
-      [reqNo, !!m.isTest, !!holdReason, holdReason, site, site ? null : domain, fromName || from.split("@")[0], from, product, severity,
-        clean(baseSubject(subject) || subject, 150), text || "(ไม่มีเนื้อหา ดูไฟล์แนบ)", afterHours]
+       VALUES ($1,$2,$3,$4,'email',$5,$6,$7,$8,$14,$9,$10,$11,$12,$13) RETURNING *`,
+      [reqNo, !!m.isTest, !!holdReason, holdReason, site, site ? null : (PUBLIC_DOMAINS.includes(domain) ? from : domain), fromName || from.split("@")[0], from, product, severity,
+        clean(baseSubject(subject) || subject, 150), text || "(ไม่มีเนื้อหา ดูไฟล์แนบ)", afterHours, phonesIn(text || "")[0] || null]
     );
     return r.rows[0];
   });

@@ -70,6 +70,7 @@ function toCase(r) {
     updatedAt: r.last_activity_at && r.last_activity_at > r.updated_at ? r.last_activity_at : r.updated_at,
     caseUrl: `${config3.baseUrl}/#/case/${r.id}`,
     fileUrl: `${config3.baseUrl}/#/case/${r.id}`,
+    customerUnconfirmed: r.customer_unconfirmed || "",
     resolution: r.resolution || "",
     rootCause: r.root_cause || "",
     resolvedAt: r.resolved_at || null,
@@ -185,7 +186,8 @@ async function createCase(user, body, { ownerId, startDate } = {}) {
   const start = startDate ? d.fromISODate(startDate) : today;
   const due = d.addDays(start, config.slaDays);
   return tx(async (c) => {
-    const site = await ensureLookup(c, "site", body.site, user);
+    // Customer not known yet: keep a placeholder name out of the customer dropdown.
+    const site = body.customer_unconfirmed ? { value: clean(body.site, 120), created: false } : await ensureLookup(c, "site", body.site, user);
     if (body.product) await ensureLookup(c, "product", body.product, user);
     const status = clean(body.status, 40) || "In Progress";
     const closed = config.closedStatuses.includes(status.toLowerCase());
@@ -200,6 +202,7 @@ async function createCase(user, body, { ownerId, startDate } = {}) {
         user?.id || null, body.legacy_key || null, body.start_at || null, severityOf(body.severity)]
     );
     const id = r.rows[0].id;
+    if (body.customer_unconfirmed) await c.query("UPDATE cases SET customer_unconfirmed = $2 WHERE id = $1", [id, clean(body.customer_unconfirmed, 200)]);
     await addActivity(c, id, user, { date: d.toISODate(start), kind: "เปิดเคส", detail: clean(body.detail) || "เปิดเคส", system: !body.detail });
     if (resolution) {
       await c.query("UPDATE cases SET resolution = $2, root_cause = $3, resolved_by = $4, resolved_at = now() WHERE id = $1", [id, resolution, rootCauseOf(body.root_cause), user?.id || null]);
@@ -225,6 +228,7 @@ async function updateCase(user, kase, body, { allowReassign }) {
       const s = await ensureLookup(c, "site", body.site, user);
       if (s.created) newSite = s.value;
       set("site", s.value);
+      if (kase.customerUnconfirmed) set("customer_unconfirmed", null);
     }
     if (body.product !== undefined && clean(body.product) !== (kase.product || null)) {
       if (body.product) await ensureLookup(c, "product", body.product, user);

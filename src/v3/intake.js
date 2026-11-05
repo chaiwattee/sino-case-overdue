@@ -185,6 +185,15 @@ async function recentOwner(site) {
   );
 }
 
+/** What we know about a customer that matched no site: sender domain (or the whole personal email), or the name typed in LINE. */
+function unknownCustomerLabel(i) {
+  if (i.channel === "email" && i.contact_email) {
+    const dom = String(i.contact_email).split("@")[1] || "";
+    return require("./mailintake").PUBLIC_DOMAINS.includes(dom) ? i.contact_email : dom;
+  }
+  return i.customer_text || i.contact_name || "ไม่ระบุ";
+}
+
 // ------------------------------------------------------------ business hours and hotline
 /** Outside business hours = outside the reminder window (default 22:00–06:00). */
 async function isAfterHours(at = new Date()) {
@@ -487,8 +496,10 @@ async function claim(user, id, b) {
   }
   const i = locked;
   try {
-    const site = clean(b.site, 120) || i.site;
-    if (!site) throw bad("กรุณาเลือกลูกค้า (Site) เพราะชื่อที่ลูกค้าพิมพ์ยังไม่ตรงกับรายการ");
+    const chosen = clean(b.site, 120) || i.site;
+    // Customer not known yet: take the case now, confirm the customer on the case page after calling back.
+    const unknownWho = chosen ? null : unknownCustomerLabel(i);
+    const site = chosen || `ยังไม่ยืนยัน (${unknownWho})`;
     const ss = await siteSettings(site);
     const team = clean(b.team, 40) || (ss && ss.team) || (owner.teams || [])[0];
     if (!team) throw bad("กรุณาเลือกทีม");
@@ -507,7 +518,7 @@ async function claim(user, id, b) {
       user,
       {
         team, site, product: i.product, severity: repo.severityOf(b.severity) || i.severity, cs_number: clean(b.csNumber, 60) || null,
-        task: i.subject, detail, note: `จากลูกค้า ${i.req_no}`, status: "In Progress",
+        task: i.subject, detail, note: `จากลูกค้า ${i.req_no}`, status: "In Progress", customer_unconfirmed: unknownWho,
       },
       { ownerId: owner.id }
     );
@@ -517,9 +528,9 @@ async function claim(user, id, b) {
     const done = await one(
       `UPDATE intakes SET status = 'claimed', claimed_at = now(), claimed_by = $2, owner_id = $3, case_id = $4, site = $5
        WHERE id = $1 RETURNING *`,
-      [i.id, user.id, owner.id, caseId, site]
+      [i.id, user.id, owner.id, caseId, chosen || null]
     );
-    if (i.line_user_id && site && !i.site) await q("UPDATE intake_line_users SET site = $2 WHERE line_user_id = $1 AND site IS NULL", [i.line_user_id, site]);
+    if (i.line_user_id && chosen && !i.site) await q("UPDATE intake_line_users SET site = $2 WHERE line_user_id = $1 AND site IS NULL", [i.line_user_id, site]);
     await audit(user, "intake_claim", i.req_no, { caseId, owner: owner.display_name, transfer: owner.id !== user.id });
     const kase = await repo.getCase(caseId);
     notifyClaimed(done, kase, user, owner).catch((e) => console.error("[intake] claim notify:", e.message));
@@ -538,8 +549,8 @@ async function notifyClaimed(i, kase, by, owner) {
       .sendMail({
         to: [owner.email],
         cc: [],
-        subject: `${i.is_test ? "[ทดสอบ] " : ""}[โอนเคสให้คุณ] ${i.severity} · ${i.site} · ${i.subject}`,
-        html: shell(SEV_COLOR[i.severity] || "#1F4FD1", `<p style="margin:0 0 14px">${esc(by.display_name)} โอนเคสจากลูกค้า ${esc(i.site)} ให้คุณเป็น Owner SLA 7 วันเริ่มนับวันนี้</p>${intakeFields(i)}
+        subject: `${i.is_test ? "[ทดสอบ] " : ""}[โอนเคสให้คุณ] ${i.severity} · ${kase.site} · ${i.subject}`,
+        html: shell(SEV_COLOR[i.severity] || "#1F4FD1", `<p style="margin:0 0 14px">${esc(by.display_name)} โอนเคสจากลูกค้า ${esc(kase.site)} ให้คุณเป็น Owner SLA 7 วันเริ่มนับวันนี้</p>${intakeFields(i)}
 <p style="margin:14px 0;white-space:pre-wrap;background:#F6F7F9;padding:12px 14px;border-radius:8px">${esc(i.detail)}</p>${button(kase.caseUrl, "เปิดเคสเพื่ออัปเดต")}`),
       })
       .catch((e) => console.error("[intake] owner mail:", e.message));
@@ -547,7 +558,7 @@ async function notifyClaimed(i, kase, by, owner) {
   if (s.telegram && !i.is_test) {
     const mins = Math.round((new Date(i.claimed_at) - new Date(i.created_at)) / 60000);
     await telegram
-      .sendText(`✅ รับเคสแล้ว ${i.req_no} → ${kase.caseNo}${kase.csNumber ? ` (${kase.csNumber})` : ""}\n${i.site} · ${i.severity} · Owner: ${owner.display_name}\nโดย ${by.display_name} · รอรับ ${mins < 60 ? mins + " นาที" : Math.floor(mins / 60) + " ชม. " + (mins % 60) + " นาที"}`)
+      .sendText(`✅ รับเคสแล้ว ${i.req_no} → ${kase.caseNo}${kase.csNumber ? ` (${kase.csNumber})` : ""}\n${kase.site} · ${i.severity} · Owner: ${owner.display_name}\nโดย ${by.display_name} · รอรับ ${mins < 60 ? mins + " นาที" : Math.floor(mins / 60) + " ชม. " + (mins % 60) + " นาที"}`)
       .catch(() => {});
   }
   // Requests that came by email: reply in the customer's own thread from the shared mailbox.
@@ -1000,5 +1011,5 @@ function mountInternal(api, { need, wrap: w }) {
 
 module.exports = {
   apiV1, publicApi, mountInternal, createLink, submit, claim, reject, runReminders, deliver, runRetention, matchCustomer, norm, settings, nextReqNo,
-  FILE_EXT, storeIntakeFile, removeStored, notifyNew, isAfterHours, businessHours, hotline, hotlineForCustomers, teamRecipients, customerName, intakeUrl, SEV_COLOR, siteList,
+  FILE_EXT, unknownCustomerLabel, storeIntakeFile, removeStored, notifyNew, isAfterHours, businessHours, hotline, hotlineForCustomers, teamRecipients, customerName, intakeUrl, SEV_COLOR, siteList,
 };
