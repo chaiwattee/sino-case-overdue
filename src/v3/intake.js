@@ -832,7 +832,8 @@ function mountInternal(api, { need, wrap: w }) {
   }));
   api.post("/intake/:id(\\d+)/claim", need("case_create"), w(async (req, res) => res.json(await claim(req.user, Number(req.params.id), req.body || {}))));
   api.post("/intake/:id(\\d+)/reject", need("case_create"), w(async (req, res) => res.json(await reject(req.user, Number(req.params.id), req.body || {}))));
-  api.post("/intake/:id(\\d+)/release", need("settings_manage"), w(async (req, res) => {
+  // Release a held request: admins and managers (anyone who can reassign cases).
+  api.post("/intake/:id(\\d+)/release", need("case_reassign"), w(async (req, res) => {
     const r = await one("UPDATE intakes SET held = false WHERE id = $1 AND held RETURNING *", [req.params.id]);
     if (r) {
       await audit(req.user, "intake_release", r.req_no);

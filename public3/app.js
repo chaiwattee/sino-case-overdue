@@ -1957,7 +1957,7 @@ ${live.map((e) => `<tr><td><a class="mono" href="#/case/${e.case_id}">${esc(e.ca
     if (i.is_test) t.push(`<span class="chip c-closed">ทดสอบ</span>`);
     if (i.channel === "email") t.push(`<span class="chip c-normal">Email</span>`);
     if (i.after_hours) t.push(`<span class="chip c-closed" title="แจ้งเข้ามานอกเวลาทำการ ลูกค้าได้เบอร์ Hotline ใน email ตอบรับ">นอกเวลา</span>`);
-    if (i.held) t.push(`<span class="chip c-overdue" title="${esc(i.hold_reason || "")}">พักไว้ให้ Admin ตรวจ</span>${i.hold_reason ? `<div class="hint" style="margin-top:4px">${esc(i.hold_reason)}</div>` : ""}`);
+    if (i.held) t.push(`<span class="chip c-overdue" title="${esc(i.hold_reason || "")}">พักไว้ให้ Admin / Manager ตรวจ</span>${i.hold_reason ? `<div class="hint" style="margin-top:4px">${esc(i.hold_reason)}</div>` : ""}`);
     if (i.new_line) t.push(`<span class="chip c-r1" title="เคสแรกจากบัญชี LINE นี้ โทรยืนยันกับลูกค้าตอนรับเคส">LINE ใหม่</span>`);
     return t.join(" ");
   }
@@ -2212,10 +2212,10 @@ ${h.lines.map((l, n) => `<span>${n + 1}</span><input name="p${n}" value="${esc(l
     $app.innerHTML = `<div class="crumb"><a href="#/intake">เคสจากลูกค้า</a> / ${esc(i.req_no)}</div>
 <div class="head"><div><h1>${esc(i.req_no)} ${sevChip(i.severity)}</h1><p>${ikCustomer(i)} · ${esc(i.subject)}</p></div>
 <div class="actions">${i.status === "pending" && !i.held && can("case_create") ? `<button class="btn primary" type="button" data-claim="${i.id}">รับเคสเอง</button><button class="btn" type="button" data-transfer="${i.id}">โอนให้ Owner</button><button class="btn" type="button" id="rej">ปิดคำขอ (ซ้ำ / ไม่ใช่เคส)</button>` : ""}
-${i.held && lvl("settings_manage") === "all" ? `<button class="btn primary" type="button" id="rel">ปล่อยคำขอนี้ (แจ้งทีมตามปกติ)</button><button class="btn" type="button" id="rej">ปิดคำขอ (ไม่ใช่เคส)</button>` : ""}
+${i.held && (lvl("case_reassign") === "all" || lvl("settings_manage") === "all") ? `<button class="btn primary" type="button" id="rel">ปล่อยคำขอนี้ (แจ้งทีมตามปกติ)</button><button class="btn" type="button" id="rej">ปิดคำขอ (ไม่ใช่เคส)</button>` : ""}
 ${i.case_id ? `<a class="btn primary" href="#/case/${i.case_id}">เปิดเคส ${esc(i.case_no || i.cs_number || "#" + i.case_id)}</a>` : ""}</div></div>
 ${ikTags(i) ? `<div>${ikTags(i)}</div>` : ""}
-${i.held ? `<div class="banner warn">พักไว้ให้ Admin ตรวจ${i.hold_reason ? `: <strong>${esc(i.hold_reason)}</strong>` : ""} · ถ้าเป็นเคสจริง กด “ปล่อยคำขอนี้”${i.channel === "email" ? " ระบบจะส่ง email ตอบรับให้ลูกค้าตอนนั้น" : ""} ถ้าไม่ใช่ กด “ปิดคำขอ”</div>` : ""}
+${i.held ? `<div class="banner warn">พักไว้ให้ Admin / Manager ตรวจ${i.hold_reason ? `: <strong>${esc(i.hold_reason)}</strong>` : ""} · ถ้าเป็นเคสจริง กด “ปล่อยคำขอนี้”${i.channel === "email" ? " ระบบจะส่ง email ตอบรับให้ลูกค้าตอนนั้น" : ""} ถ้าไม่ใช่ กด “ปิดคำขอ”</div>` : ""}
 <div class="grid2"><section class="card"><h2>ข้อมูลที่ลูกค้าแจ้ง</h2>
 <div class="stat2" style="grid-template-columns:1fr 1fr">
 ${row("สถานะ", `${chip(i.status === "pending" ? "r1" : i.status === "claimed" ? "ok" : "closed", IK_STATUS[i.status])}${i.status === "pending" ? ` · รอมาแล้ว ${waitedText(i.created_at)}` : ""}`)}
@@ -2272,7 +2272,7 @@ ${em.mock ? `<div class="banner warn">โหมดข้อมูลจำลอ
 <div class="stat2" style="grid-template-columns:repeat(5,1fr)"><div><div class="k">สร้างคำขอ (30 วัน)</div><div class="v">${em.counts.created}</div></div><div><div class="k">เพิ่มในเรื่องเดิม</div><div class="v">${em.counts.appended}</div></div><div><div class="k">พักให้ Admin ตรวจ</div><div class="v">${em.counts.held}</div></div><div><div class="k">ข้าม</div><div class="v">${em.counts.ignored}</div></div><div><div class="k">ผิดพลาด</div><div class="v">${em.counts.errors}</div></div></div>
 <div class="formgrid">
 <label class="f">กล่องจดหมาย (shared mailbox)<input id="em-mb" value="${esc(es.mailbox)}" placeholder="service@sinostech.co.th"></label>
-<label class="f">email จากโดเมนที่ยังไม่ผูกกับลูกค้า<select id="em-unk"><option value="hold" ${es.unknownDomain === "hold" ? "selected" : ""}>สร้างคำขอแต่พักไว้ให้ Admin ตรวจ (ไม่ตอบลูกค้า)</option><option value="ignore" ${es.unknownDomain === "ignore" ? "selected" : ""}>ข้าม ไม่สร้างคำขอ</option></select></label>
+<label class="f">email จากโดเมนที่ยังไม่ผูกกับลูกค้า<select id="em-unk"><option value="hold" ${es.unknownDomain === "hold" ? "selected" : ""}>สร้างคำขอแต่พักไว้ให้ Admin / Manager ตรวจ (ไม่ตอบลูกค้า)</option><option value="ignore" ${es.unknownDomain === "ignore" ? "selected" : ""}>ข้าม ไม่สร้างคำขอ</option></select></label>
 <label class="f">ข้าม email จากโดเมน (ภายในบริษัท)<input id="em-ign" value="${esc(es.ignoreDomains.join(", "))}" placeholder="sinostech.co.th"></label>
 <label class="f">ผู้ส่งรายเดียวส่งเรื่องใหม่ได้ต่อชั่วโมง (เกินนี้พักไว้)<input id="em-rate" type="number" min="1" max="100" value="${es.perSenderPerHour}"></label>
 <label class="f">ลบ email ที่ประมวลผลแล้วออกจากกล่องเมื่อเก่ากว่า (วัน)<input id="em-keep" type="number" min="30" max="3650" value="${es.keepDays}"></label></div>
@@ -2394,7 +2394,7 @@ ${d.outbox.map((o) => `<tr><td>${fdt(o.created_at)}</td><td class="mono">${esc(o
       });
     $("es-go").onclick = act(async () => {
       const r = await post("/intake-admin/email/simulate", { from: $("es-from").value, name: $("es-name").value, subject: $("es-subj").value, body: $("es-body").value, at: $("es-at").value, test: $("es-test").checked, withFile: $("es-file").checked, inReplyTo: $("es-reply").checked, auto: $("es-auto").checked });
-      const MSG = { created: ["ok", "สร้างคำขอ"], appended: ["ok", "เพิ่มเข้าเรื่องเดิม"], held: ["warn", "สร้างคำขอแต่พักไว้ให้ Admin ตรวจ"], ignored: ["", "ข้าม ไม่สร้างคำขอ"] };
+      const MSG = { created: ["ok", "สร้างคำขอ"], appended: ["ok", "เพิ่มเข้าเรื่องเดิม"], held: ["warn", "สร้างคำขอแต่พักไว้ให้ Admin / Manager ตรวจ"], ignored: ["", "ข้าม ไม่สร้างคำขอ"] };
       const [cls, label] = MSG[r.decision] || ["", r.decision];
       $("es-out").innerHTML = `<div class="banner ${cls}">${label}${r.reqNo ? ` <a href="#/intake/${r.intakeId}">${esc(r.reqNo)}</a>` : ""}${r.reason ? ` · ${esc(r.reason)}` : ""}${r.decision === "created" ? " · ลูกค้าจะได้ email ตอบกลับพร้อมเลข REQ (ในโหมดจำลองไม่ได้ส่งจริง)" : ""}</div>`;
     });

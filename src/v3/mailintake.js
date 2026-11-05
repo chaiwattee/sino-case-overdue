@@ -402,14 +402,15 @@ async function onClosed(i, message) {
 // ------------------------------------------------------------ team notifications
 async function notifyHeld(i) {
   const { to } = await intake().teamRecipients({ is_test: i.is_test });
-  const admins = (await all("SELECT email FROM users WHERE active AND role = 'admin' AND email IS NOT NULL")).map((r) => r.email);
-  const rcpt = [...new Set([...(i.is_test ? to : admins.length ? admins : to)])];
+  // Admins and managers: both can release or close a held request.
+  const leads = (await all("SELECT email FROM users WHERE active AND role IN ('admin','manager') AND email IS NOT NULL")).map((r) => r.email);
+  const rcpt = [...new Set([...(i.is_test ? to : leads.length ? leads : to)])];
   const html = shell(
     "#B07800",
-    `<p style="margin:0 0 14px">มี email แจ้งเคส <strong>พักไว้ให้ Admin ตรวจ</strong>: ${esc(i.hold_reason || "")}</p>
+    `<p style="margin:0 0 14px">มี email แจ้งเคส <strong>พักไว้ให้ Admin / Manager ตรวจ</strong>: ${esc(i.hold_reason || "")}</p>
 ${fieldTable([["เลขรับแจ้ง", i.req_no], ["จาก", `${i.contact_name} <${i.contact_email}>`], ["หัวข้อ", i.subject]])}
 <p style="margin:14px 0;white-space:pre-wrap;background:#F6F7F9;padding:12px 14px;border-radius:8px">${esc(String(i.detail).slice(0, 1500))}</p>
-<p style="margin:0 0 12px">ถ้าเป็นเคสจริง เลือกลูกค้าแล้วกด “ปล่อย” (ลูกค้าจะได้ email ตอบรับตอนนั้น) ถ้าไม่ใช่เคส กด “ปิดคำขอ” · ถ้าโดเมนนี้เป็นของลูกค้า เพิ่มโดเมนในหน้าตั้งค่า LINE OA และ API → ลูกค้า</p>
+<p style="margin:0 0 12px">ถ้าเป็นเคสจริง กด “ปล่อยคำขอนี้” (ลูกค้าจะได้ email ตอบรับตอนนั้น และทีมรับเคสได้ตามปกติ) ถ้าไม่ใช่เคส กด “ปิดคำขอ” · ถ้าโดเมนนี้เป็นของลูกค้า แจ้ง Admin เพิ่มโดเมนในหน้าตั้งค่า เพื่อไม่ให้ถูกพักครั้งต่อไป</p>
 ${button(intake().intakeUrl(i), "ตรวจคำขอ")}`
   );
   if (rcpt.length) await graph.sendMail({ to: rcpt, cc: [], subject: `${i.is_test ? "[ทดสอบ] " : ""}[รอตรวจ] email แจ้งเคส ${i.req_no} จาก ${i.contact_email}`, html }).catch((err) => console.error("[mail-intake] held mail:", err.message));
