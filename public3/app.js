@@ -92,6 +92,8 @@
   }
 
 
+  const statusTable = (list) => `<dl class="st-dl">${list.map((x) => `<dt>${esc(x)}</dt><dd>${esc(statusHelp(x) || "-")}</dd>`).join("")}</dl>`;
+  const statusHelp = (st) => ((LOOKUPS && LOOKUPS.statusHelp) || {})[st] || "";
   const isClosedStatus = (st) => (LOOKUPS && LOOKUPS.closedStatuses ? LOOKUPS.closedStatuses : ["success", "cancel", "n/a", "resolved"]).includes(String(st || "").toLowerCase());
   /** Ask for status + Resolution before closing. Resolves to {status, resolution, root_cause} or null if cancelled. */
   async function askResolution(c, { status, edit = false } = {}) {
@@ -104,7 +106,9 @@
     dlg.innerHTML = `<form class="card" method="dialog" id="rsf" style="min-width:min(560px,90vw)"><h2>${edit ? "แก้ Resolution" : "ปิดเคส"} ${esc(caseRef(c))}</h2>
 <p class="muted" style="margin:0;font-size:14px">${esc(c.site || "")} · ${esc(c.task || "")}${ageTxt ? " · " + ageTxt : ""}</p>
 ${edit ? "" : `<fieldset class="f" style="border:0;padding:0;margin:0"><legend style="font-size:13px;font-weight:600;margin-bottom:6px">ปิดด้วย Status</legend>
-<div class="fpills">${closedOpts.map((x) => `<label class="fpill"><input type="radio" name="st" value="${esc(x)}" ${x === st0 ? "checked" : ""}>${esc(x)}</label>`).join("")}</div></fieldset>`}
+<div class="fpills">${closedOpts.map((x) => `<label class="fpill" title="${esc(statusHelp(x))}"><input type="radio" name="st" value="${esc(x)}" ${x === st0 ? "checked" : ""}>${esc(x)}</label>`).join("")}</div>
+<div class="st-help" id="st-help"></div>
+<details class="st-all"><summary>Success กับ Resolved ต่างกันอย่างไร · ดูความหมายทุก Status</summary>${statusTable(closedOpts)}</details></fieldset>`}
 <label class="f"><span class="req">Resolution: แก้ไขอย่างไร / ผลลัพธ์</span><textarea name="res" rows="4" required placeholder="เช่น SMTP relay ของลูกค้าเปลี่ยน IP แก้ค่า relay ใน Scheduler ทดสอบส่ง report 3 รอบ ลูกค้ายืนยันว่าได้รับแล้ว">${esc(edit ? c.resolution || "" : "")}</textarea></label>
 <div class="hint" id="rs-count" style="text-align:right;margin-top:-6px"></div>
 <label class="f">สาเหตุของปัญหา (ไม่บังคับ)<select name="rc"><option value="">-</option>${(lk.rootCauses || []).map((x) => `<option ${x === c.rootCause ? "selected" : ""}>${esc(x)}</option>`).join("")}</select></label>
@@ -119,6 +123,13 @@ ${edit ? "" : `<fieldset class="f" style="border:0;padding:0;margin:0"><legend s
     };
     f.res.addEventListener("input", upd);
     upd();
+    const sh = dlg.querySelector("#st-help");
+    const showHelp = () => {
+      const p = f.querySelector("input[name=st]:checked");
+      if (sh && p) sh.innerHTML = `<strong>${esc(p.value)}:</strong> ${esc(statusHelp(p.value) || "-")}`;
+    };
+    f.querySelectorAll("input[name=st]").forEach((r) => r.addEventListener("change", showHelp));
+    showHelp();
     return new Promise((resolve) => {
       let done = false;
       const finish = (v) => {
@@ -385,7 +396,7 @@ ${lvl("audit_view") !== "none" ? `<section class="card"><div class="title"><h2>�
     const same = (a, b) => a.length === b.length && a.every((x) => b.includes(x));
     const grp = !st.length || same(st, statuses) ? "all" : same(st, openSt) ? "open" : same(st, closedSt) ? "closed" : "";
     const link = (over) => "#/cases?" + qs({ q: params.q, site: params.site, source: params.source, owner: params.owner, range, stage, flag, st: st.join("|"), ...over });
-    const pill = (on, href, label, n) => `<a class="fpill ${on ? "on" : ""}" href="${href}" aria-pressed="${on}">${esc(label)} <span class="n">${n}</span></a>`;
+    const pill = (on, href, label, n, title = "") => `<a class="fpill ${on ? "on" : ""}" href="${href}" aria-pressed="${on}"${title ? ` title="${esc(title)}"` : ""}>${esc(label)} <span class="n">${n}</span></a>`;
     const toggle = (x) => (stSet.has(x) ? st.filter((y) => y !== x) : [...st, x]).join("|");
 
     const owners = [...new Map(allCases.map((c) => [c.ownerId, c.owner])).entries()].filter(([id]) => id).sort((x, y) => String(x[1]).localeCompare(String(y[1]), "th"));
@@ -421,12 +432,13 @@ ${pill(grp === "all", link({ st: "" }), "ทั้งหมด", base.length)}
 ${pill(grp === "open", link({ st: openSt.join("|") }), "ยังไม่ปิด", cnt((c) => !isCl(c.status)))}
 ${pill(grp === "closed", link({ st: closedSt.join("|") }), "ปิดแล้ว", cnt((c) => isCl(c.status)))}
 <span class="psep" aria-hidden="true"></span>
-${statuses.map((x) => pill(stSet.has(x) && grp !== "all", link({ st: grp === "all" ? x : toggle(x) }), x, cnt((c) => c.status === x))).join("")}
+${statuses.map((x) => pill(stSet.has(x) && grp !== "all", link({ st: grp === "all" ? x : toggle(x) }), x, cnt((c) => c.status === x), statusHelp(x))).join("")}
 <span class="psep" aria-hidden="true"></span>
 ${pill(flag === "overdue", link({ flag: flag === "overdue" ? "" : "overdue" }), "เกิน Due", byStatus.filter(isFlag.overdue).length)}
 ${pill(flag === "ext", link({ flag: flag === "ext" ? "" : "ext" }), "มีการขยายเวลา", byStatus.filter(isFlag.ext).length)}
 </div>
-<span class="hint">“ยังไม่ปิด” = ${esc(openSt.join(", "))} · “ปิดแล้ว” = ${esc(closedSt.join(", "))} · กด Status ทีละตัวเพื่อเลือกหลายตัว · ตัวเลข = จำนวนเคสตามคำค้น ลูกค้า ทีม Owner และช่วงวันที่ที่เลือก</span></div>
+<span class="hint">“ยังไม่ปิด” = ${esc(openSt.join(", "))} · “ปิดแล้ว” = ${esc(closedSt.join(", "))} · กด Status ทีละตัวเพื่อเลือกหลายตัว · ตัวเลข = จำนวนเคสตามคำค้น ลูกค้า ทีม Owner และช่วงวันที่ที่เลือก</span>
+<details class="st-all"><summary>ความหมายของแต่ละ Status</summary>${statusTable(statuses)}</details></div>
 </section>
 <section class="card"><div class="title"><h2>ผลค้นหา: ${esc(parts.join(" · ") || "ทุกเคส")}</h2><span>${cases.length} เคส${params.site ? ` · ลูกค้านี้มีทั้งหมด ${siteCount} เคส` : ""}</span></div>
 ${caseTable(cases, { missingRes: showRes, empty: "ไม่พบเคสตามเงื่อนไขนี้" })}</section>`;
@@ -481,7 +493,7 @@ ${caseTable(cases, { missingRes: showRes, empty: "ไม่พบเคสตา
     const statusSel = (c) => {
       const editable = can("case_edit", c);
       if (!editable) return `${esc(c.status)}`;
-      const opts = lk.status.map((s) => `<option ${s === c.status ? "selected" : ""}>${esc(s)}</option>`).join("");
+      const opts = lk.status.map((s) => `<option ${s === c.status ? "selected" : ""} title="${esc(statusHelp(s))}">${esc(s)}</option>`).join("");
       return `<label><span class="sr">Status ของ ${esc(c.csNumber || c.id)}</span><select class="inline" data-status="${c.id}" data-prev="${esc(c.status)}">${opts}</select></label>`;
     };
     $app.innerHTML = `
@@ -683,7 +695,7 @@ ${ro ? `<div class="banner warn">คุณดูเคสนี้ได้อ�
 ${comboBox("site", c.site, lk.site, { label: "Site / ลูกค้า", allowNew: !ro })}
 <label class="f"><span class="req">Severity</span><select name="severity" required>${isNew ? `<option value="">เลือก Severity</option>` : ""}${(lk.severity || []).map((x) => `<option ${x === c.severity ? "selected" : ""}>${esc(x)}</option>`).join("")}</select></label>
 <label class="f">Product<select name="product">${productOpts}</select></label>
-<label class="f"><span class="req">Status</span><select name="status">${statusOpts}</select></label>
+<label class="f"><span class="req">Status</span><select name="status">${statusOpts}</select><span class="hint" id="st-hint">${esc(statusHelp(c.status))}</span></label>
 <label class="f"><span class="req">ทีม</span><select name="team" ${!isNew && !permsC.reassign ? "disabled" : ""}>${teamOpts}</select></label>
 ${ownerField}
 <label class="f" style="grid-column:1/-1"><span class="req">Task / Case</span><input type="text" name="task" value="${esc(c.task || "")}" maxlength="300" required></label>
@@ -720,6 +732,7 @@ ${actsHtml(data.activities)}</section>`}
     if (!isNew) bindExtCard(c, extData.extensions);
     const f = document.getElementById("cf");
     bindCombo(f, "site", lk.site);
+    f.status.addEventListener("change", () => (document.getElementById("st-hint").textContent = statusHelp(f.status.value)));
     f.onsubmit = async (e) => {
       e.preventDefault();
       if (ro) return;
@@ -1577,6 +1590,9 @@ ${[["r1", `วันที่ ${cfg.alert1Day} (ครั้งเดียว)`
 <section class="card"><h2>รายการ dropdown</h2>
 ${[["site", "Site / ลูกค้า · Owner เพิ่มใหม่ได้จากฟอร์มเคส"], ["product", "Product"], ["status", "Status"]].map(([k, l]) => `<div class="stack" style="gap:8px"><div class="hint">${l} (${byKind(k).length})</div><div class="chips">${lkChips(k)}<button class="btn" type="button" data-add="${k}" style="min-height:32px;padding:0 10px">เพิ่ม</button></div></div>`).join("")}
 </section>
+<section class="card" id="sh-card"><div class="title"><h2>คำอธิบาย Status</h2><span>แสดงตอนเลือก Status ปิดเคส และหน้าค้นหา</span></div>
+${byKind("status").filter((l) => l.active).map((l) => `<label class="f">${esc(l.value)}<textarea rows="2" data-sh="${esc(l.value)}" maxlength="300">${esc((s.statusHelp || {})[l.value] || "")}</textarea></label>`).join("")}
+<div class="right"><button class="btn primary" type="button" id="sh-save">บันทึกคำอธิบาย</button></div></section>
 <section class="card"><h2>การเก็บข้อมูล</h2>
 <label class="f">เก็บเคสที่ปิดแล้วและประวัติต่างๆ ไว้<select id="ret">${[1, 2, 3, 5].map((y) => `<option value="${y}" ${y === s.retentionYears ? "selected" : ""}>${y} ปี</option>`).join("")}</select></label>
 <div class="stat2"><div><div class="k">เคสทั้งหมดในระบบ</div><div class="v">${s.stats.cases.toLocaleString()}</div></div>
@@ -1596,6 +1612,19 @@ ${s.annualReports.map((a) => `<tr><td style="font-weight:600">${a.year + 543} ($
 </section>
 <dialog id="dlg"></dialog>`;
 
+    const shs = document.getElementById("sh-save");
+    if (shs)
+      shs.onclick = async () => {
+        const statusHelp = {};
+        document.querySelectorAll("[data-sh]").forEach((t) => (statusHelp[t.dataset.sh] = t.value));
+        try {
+          await post("/settings", { statusHelp }, "PUT");
+          LOOKUPS = null;
+          toast("บันทึกคำอธิบาย Status แล้ว");
+        } catch (err) {
+          toast(err.message, 6000);
+        }
+      };
     const wr = document.getElementById("wr-check");
     if (wr) wr.onclick = async () => {
       wr.disabled = true;

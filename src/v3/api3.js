@@ -66,6 +66,7 @@ api.get("/lookups", wrap(async (req, res) => {
   out.rootCauses = repo.ROOT_CAUSES;
   out.resolutionMin = repo.RESOLUTION_MIN;
   out.closedStatuses = config.closedStatuses;
+  out.statusHelp = { ...repo.STATUS_HELP, ...(await getSetting("status_help", {})) };
   res.json(out);
 }));
 
@@ -663,6 +664,7 @@ api.get("/settings", need("settings_manage"), wrap(async (req, res) => {
     annual: await getSetting("annual_report", { recipients: "", cc: "" }),
     alertEmail: await jobs.alertRules(),
     cert: jobs.certInfo(),
+    statusHelp: { ...repo.STATUS_HELP, ...(await getSetting("status_help", {})) },
     webRisk: { ...(await getSetting("web_risk", {})), configured: !!(config3.webRiskKey || config3.safeBrowsingKey) },
     lookups, stats: { ...stats, dbSize: size.size }, annualReports: annual, jobs: config3.jobs,
   });
@@ -683,6 +685,13 @@ api.put("/settings", need("settings_manage"), wrap(async (req, res) => {
     const ccTypes = (Array.isArray(a.ccTypes) ? a.ccTypes : []).filter((t) => ["r1", "r2", "overdue"].includes(t));
     if (!splitEmails(a.fallback).length && !splitEmails(a.cc).length) throw bad("ต้องมีอีเมลอย่างน้อย 1 อีเมล สำหรับเคสที่ไม่มีอีเมล Owner");
     await setSetting("alert_email", { cc: splitEmails(a.cc).join(", "), ccTypes, fallback: splitEmails(a.fallback).join(", ") });
+  }
+  if (b.statusHelp && typeof b.statusHelp === "object") {
+    const clean = {};
+    Object.entries(b.statusHelp).forEach(([k, v]) => {
+      if (String(k).length <= 40) clean[String(k)] = String(v || "").trim().slice(0, 300);
+    });
+    await setSetting("status_help", clean);
   }
   if (b.annual) await setSetting("annual_report", { recipients: String(b.annual.recipients || ""), cc: String(b.annual.cc || "") });
   await audit(req.user, "settings_update", null, b);

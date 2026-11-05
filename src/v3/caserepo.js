@@ -23,6 +23,15 @@ const CASE_SELECT = `
 
 const ROOT_CAUSES = ["ค่าระบบ / Configuration", "Bug ของ Product", "ฝั่งลูกค้า / Network", "ผู้ใช้ใช้งานไม่ถูกต้อง", "คำขอ / ไม่ใช่ปัญหา", "อื่นๆ"];
 const RESOLUTION_MIN = 20;
+// Default meaning of each Status (admin can change the text in Settings).
+const STATUS_HELP = {
+  "In Progress": "กำลังดำเนินการ ทีมกำลังแก้ไขหรือติดตามอยู่",
+  Pending: "รอฝั่งอื่น เช่น รอลูกค้าตอบ รอข้อมูล รอ Vendor ยังนับวัน SLA ต่อ",
+  Success: "งานหรือคำขอทำเสร็จตามที่ลูกค้าขอ เช่น ติดตั้ง เปลี่ยน config เพิ่ม user ทำ report ให้ (เคสประเภทคำขอ / งานบริการ)",
+  Resolved: "ปัญหาที่ลูกค้าแจ้งแก้ไขแล้ว ระบบกลับมาใช้งานได้ตามปกติ (เคสประเภทแจ้งปัญหา / incident)",
+  Cancel: "ลูกค้ายกเลิก หรือไม่ต้องดำเนินการต่อ ระบุเหตุผลใน Resolution",
+  "N/A": "ไม่ใช่เคสของทีม เปิดซ้ำ หรือไม่เข้าเงื่อนไขการรับเคส ระบุเหตุผลใน Resolution",
+};
 function checkResolution(text) {
   const t = String(text || "").trim();
   if (t.length < RESOLUTION_MIN) throw Object.assign(new Error(`กรุณาใส่ Resolution อย่างน้อย ${RESOLUTION_MIN} ตัวอักษร (แก้ไขอย่างไร / ผลลัพธ์)`), { status: 400 });
@@ -321,5 +330,5 @@ async function deleteCase(user, kase, reason) {
 
 module.exports = {
   loadCases, getCase, canSee, activities, addActivity, createCase, updateCase, editStartDate, deleteCase,
-  ensureLookup, logChange, toCase, CASE_SELECT, SEVERITIES, severityOf, ROOT_CAUSES, RESOLUTION_MIN,
+  ensureLookup, logChange, toCase, CASE_SELECT, SEVERITIES, severityOf, ROOT_CAUSES, RESOLUTION_MIN, STATUS_HELP,
 };
