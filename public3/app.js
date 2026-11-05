@@ -91,6 +91,60 @@
     return LOOKUPS;
   }
 
+
+  const isClosedStatus = (st) => (LOOKUPS && LOOKUPS.closedStatuses ? LOOKUPS.closedStatuses : ["success", "cancel", "n/a", "resolved"]).includes(String(st || "").toLowerCase());
+  /** Ask for status + Resolution before closing. Resolves to {status, resolution, root_cause} or null if cancelled. */
+  async function askResolution(c, { status, edit = false } = {}) {
+    const lk = await lookups();
+    const min = lk.resolutionMin || 20;
+    const closedOpts = lk.status.filter(isClosedStatus);
+    const st0 = status && isClosedStatus(status) ? status : closedOpts.find((s) => s.toLowerCase() === "success") || closedOpts[0];
+    const dlg = document.getElementById("dlg") || document.body.appendChild(Object.assign(document.createElement("dialog"), { id: "dlg" }));
+    const ageTxt = c.stage === "closed" ? "" : c.stage === "overdue" ? `เกิน Due ${c.daysOverdue} วัน` : `อายุเคส ${c.totalAge ?? c.age ?? 0} วัน (ทัน SLA)`;
+    dlg.innerHTML = `<form class="card" method="dialog" id="rsf" style="min-width:min(560px,90vw)"><h2>${edit ? "แก้ Resolution" : "ปิดเคส"} ${esc(caseRef(c))}</h2>
+<p class="muted" style="margin:0;font-size:14px">${esc(c.site || "")} · ${esc(c.task || "")}${ageTxt ? " · " + ageTxt : ""}</p>
+${edit ? "" : `<fieldset class="f" style="border:0;padding:0;margin:0"><legend style="font-size:13px;font-weight:600;margin-bottom:6px">ปิดด้วย Status</legend>
+<div class="fpills">${closedOpts.map((x) => `<label class="fpill"><input type="radio" name="st" value="${esc(x)}" ${x === st0 ? "checked" : ""}>${esc(x)}</label>`).join("")}</div></fieldset>`}
+<label class="f"><span class="req">Resolution: แก้ไขอย่างไร / ผลลัพธ์</span><textarea name="res" rows="4" required placeholder="เช่น SMTP relay ของลูกค้าเปลี่ยน IP แก้ค่า relay ใน Scheduler ทดสอบส่ง report 3 รอบ ลูกค้ายืนยันว่าได้รับแล้ว">${esc(edit ? c.resolution || "" : "")}</textarea></label>
+<div class="hint" id="rs-count" style="text-align:right;margin-top:-6px"></div>
+<label class="f">สาเหตุของปัญหา (ไม่บังคับ)<select name="rc"><option value="">-</option>${(lk.rootCauses || []).map((x) => `<option ${x === c.rootCause ? "selected" : ""}>${esc(x)}</option>`).join("")}</select></label>
+<p class="hint" style="margin:0">Resolution บันทึกเป็น Activity ในไทม์ไลน์ แสดงในหน้าเคส ผลค้นหา และ Report Excel (ข้อมูลภายใน ไม่ส่งถึงลูกค้า)</p>
+<div class="right"><button class="btn" value="cancel" formnovalidate>ยกเลิก</button><button class="btn primary" value="ok">${edit ? "บันทึก" : "ปิดเคส"}</button></div></form>`;
+    const f = dlg.querySelector("#rsf");
+    const cnt = dlg.querySelector("#rs-count");
+    const upd = () => {
+      const n = f.res.value.trim().length;
+      cnt.textContent = `${n} ตัวอักษร · ต้องมีอย่างน้อย ${min} ตัวอักษร`;
+      cnt.style.color = n >= min ? "" : "var(--r2-fg)";
+    };
+    f.res.addEventListener("input", upd);
+    upd();
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (v) => {
+        if (done) return;
+        done = true;
+        resolve(v);
+      };
+      f.onsubmit = (e) => {
+        if (e.submitter && e.submitter.value === "cancel") return finish(null);
+        e.preventDefault();
+        const text = f.res.value.trim();
+        if (text.length < min) {
+          toast(`กรุณาใส่ Resolution อย่างน้อย ${min} ตัวอักษร`);
+          f.res.focus();
+          return;
+        }
+        const picked = f.querySelector("input[name=st]:checked");
+        dlg.close();
+        finish({ status: edit ? undefined : picked ? picked.value : st0, resolution: text, root_cause: f.rc.value });
+      };
+      dlg.addEventListener("close", () => finish(null), { once: true });
+      dlg.showModal();
+      setTimeout(() => f.res.focus(), 30);
+    });
+  }
+
   // ------------------------------------------------------------ chrome
   function buildChrome() {
     const tabs = [
@@ -161,8 +215,13 @@
     return `<div class="age"><div class="track"><div class="f-${c.stage}" style="width:${pct}%"></div></div><small>${txt}</small></div>`;
   }
 
-  function caseTable(cases, { showOwner = true } = {}) {
-    if (!cases.length) return `<div class="empty">ไม่มีเคส</div>`;
+  function resLine(c, { missing = false } = {}) {
+    if (c.stage !== "closed") return "";
+    if (c.resolution) return `<div class="resol sm" title="${esc(c.resolution)}">${c.status && !["success", "resolved"].includes(c.status.toLowerCase()) ? `Resolution (${esc(c.status)}): ` : "Resolution: "}${esc(c.resolution)}</div>`;
+    return missing ? `<div class="resol sm none">ไม่มี Resolution (ปิดก่อนเริ่มบังคับ)</div>` : "";
+  }
+  function caseTable(cases, { showOwner = true, missingRes = false, empty = "ไม่มีเคส" } = {}) {
+    if (!cases.length) return `<div class="empty">${empty}</div>`;
     return `<div class="tablewrap"><table style="min-width:${showOwner ? 1080 : 980}px">
 <thead><tr><th>เลขเคส</th><th>ลูกค้า</th><th>Severity</th><th>งาน</th>${showOwner ? "<th>Owner</th>" : ""}<th>ทีม</th><th>เปิดเคส</th><th>Due</th><th>อายุเคส</th><th>สถานะ</th></tr></thead>
 <tbody>${cases
@@ -171,7 +230,7 @@
 <td>${caseCell(c, `#/case/${c.id}`)}</td>
 <td style="font-weight:600">${esc(c.site || "-")}</td>
 <td>${sevChip(c.severity)}</td>
-<td style="font-size:13px">${esc(c.task || "")}</td>
+<td style="font-size:13px">${esc(c.task || "")}${resLine(c, { missing: missingRes })}</td>
 ${showOwner ? `<td><a href="#/owner/${encodeURIComponent(c.ownerId)}">${esc(c.owner || "-")}</a></td>` : ""}
 <td>${esc(c.sourceLabel)}</td>
 <td>${fd(c.startDate)}</td>
@@ -183,7 +242,7 @@ ${showOwner ? `<td><a href="#/owner/${encodeURIComponent(c.ownerId)}">${esc(c.ow
       .join("")}</tbody></table></div>`;
   }
 
-  const FIELD = { extension: "ขยายเวลา (Due)", severity: "Severity", start_date: "Start date", target_date: "Target date", status: "Status", owner: "Owner", deleted: "ลบเคส" };
+  const FIELD = { extension: "ขยายเวลา (Due)", severity: "Severity", start_date: "Start date", target_date: "Target date", status: "Status", owner: "Owner", deleted: "ลบเคส", resolution: "Resolution" };
   const DIR = { later: "เลื่อนออกไป", earlier: "เลื่อนเข้ามา", set: "ใส่ค่าใหม่", cleared: "ลบค่าออก" };
   function changeRows(changes, { empty = "ยังไม่มีประวัติการแก้ไข" } = {}) {
     if (!changes.length) return `<div class="empty">${empty}</div>`;
@@ -246,7 +305,7 @@ ${extHtml}
 ${ikHtml}
 <form class="filters" id="flt" onsubmit="return false">
 <label class="f">ทีม<select name="source"><option value="">ทุกทีมที่เห็นได้ (${data.sources.length})</option>${teamOpts}</select></label>
-<label class="f" style="flex:2 1 260px">ค้นหาเคส<input type="search" name="q" placeholder="เลขเคส, CS, ลูกค้า, Owner, งาน"></label>
+<label class="f" style="flex:2 1 260px">ค้นหาเคส<input type="search" name="q" placeholder="เลขเคส, CS, ลูกค้า, Owner, งาน · Enter เพื่อค้นหาแบบละเอียด"></label>
 </form>
 <div class="kpis">
 ${kpi("all", "เคสที่ยังไม่ปิด", openTotal, params.source ? esc(teamLabel(params.source)) : "ทุกทีมที่เห็นได้")}
@@ -288,15 +347,116 @@ ${lvl("audit_view") !== "none" ? `<section class="card"><div class="title"><h2>�
   // ------------------------------------------------------------ case lists
   async function viewCases(params) {
     setNav("overview");
-    let { cases } = await api("/cases?" + qs({ stage: params.stage, source: params.source, q: params.q }));
-    if (params.open) cases = cases.filter((c) => c.stage !== "closed");
-    if (params.stage === "closed") cases = cases.filter((c) => (c.endDate || "") >= daysAgo(30));
-    cases.sort((a, b) => (b.age || 0) - (a.age || 0));
-    const title = params.q ? `ผลค้นหา “${params.q}”` : params.stage ? STAGE[params.stage] : "เคสที่ยังไม่ปิด";
-    $app.innerHTML = `<div class="crumb"><a href="#/">ภาพรวม</a> / ${esc(title)}</div>
-<div class="head"><div><h1>${esc(title)}</h1><p>${cases.length} เคส</p></div></div>
-<section class="card">${caseTable(cases)}</section>`;
+    const [{ cases: allCases }, lk] = await Promise.all([api("/cases"), lookups()]);
+    const closedSet = (lk.closedStatuses || []).map((x) => x.toLowerCase());
+    const isCl = (st) => closedSet.includes(String(st || "").toLowerCase());
+    const statuses = [...new Set([...lk.status, ...allCases.map((c) => c.status).filter(Boolean)])];
+    const openSt = statuses.filter((x) => !isCl(x));
+    const closedSt = statuses.filter(isCl);
+    // Legacy links from the overview KPI cards: stage / open=1.
+    const stage = ["normal", "r1", "r2", "overdue", "no_start"].includes(params.stage) ? params.stage : "";
+    let st;
+    if (params.st !== undefined) st = params.st ? params.st.split("|") : [];
+    else if (params.stage === "closed") st = closedSt;
+    else if (params.open || stage) st = openSt;
+    else st = params.q || params.site ? [] : openSt;
+    const flag = params.flag || "";
+    const range = params.range || "";
+    const since = { d30: daysAgo(29), d90: daysAgo(89), m12: daysAgo(364), year: `${new Date().getFullYear()}-01-01` }[range] || "";
+    const q = (params.q || "").trim().toLowerCase();
+
+    // base = everything except the status / flag selection (used for the counts on the status buttons)
+    const base = allCases.filter((c) =>
+      (!params.source || c.source === params.source) &&
+      (!params.owner || c.ownerId === params.owner) &&
+      (!params.site || c.site === params.site) &&
+      (!since || (c.startDate || "") >= since) &&
+      (!stage || c.stage === stage) &&
+      (!params.closedDays || (c.stage === "closed" && (c.endDate || "") >= daysAgo(Number(params.closedDays) - 1))) &&
+      (!q || [c.caseNo, c.csNumber, c.site, c.owner, c.task, c.product, c.note, c.resolution].some((v) => String(v || "").toLowerCase().includes(q)))
+    );
+    const stSet = new Set(st);
+    const byStatus = base.filter((c) => !st.length || stSet.has(c.status));
+    const isFlag = { overdue: (c) => c.stage === "overdue", ext: (c) => (c.extCount || 0) > 0 };
+    const cases = flag && isFlag[flag] ? byStatus.filter(isFlag[flag]) : byStatus;
+    cases.sort((x, y) => (x.stage === "closed") - (y.stage === "closed") || (x.stage === "closed" ? String(y.endDate || "").localeCompare(String(x.endDate || "")) : (y.totalAge ?? y.age ?? 0) - (x.totalAge ?? x.age ?? 0)));
+
+    const cnt = (fn) => base.filter(fn).length;
+    const same = (a, b) => a.length === b.length && a.every((x) => b.includes(x));
+    const grp = !st.length || same(st, statuses) ? "all" : same(st, openSt) ? "open" : same(st, closedSt) ? "closed" : "";
+    const link = (over) => "#/cases?" + qs({ q: params.q, site: params.site, source: params.source, owner: params.owner, range, stage, flag, st: st.join("|"), ...over });
+    const pill = (on, href, label, n) => `<a class="fpill ${on ? "on" : ""}" href="${href}" aria-pressed="${on}">${esc(label)} <span class="n">${n}</span></a>`;
+    const toggle = (x) => (stSet.has(x) ? st.filter((y) => y !== x) : [...st, x]).join("|");
+
+    const owners = [...new Map(allCases.map((c) => [c.ownerId, c.owner])).entries()].filter(([id]) => id).sort((x, y) => String(x[1]).localeCompare(String(y[1]), "th"));
+    const teams = [...new Map(allCases.map((c) => [c.source, c.sourceLabel])).entries()];
+    const sites = [...new Set(allCases.map((c) => c.site).filter(Boolean))].sort((x, y) => x.localeCompare(y, "th"));
+    const siteCount = params.site ? allCases.filter((c) => c.site === params.site).length : 0;
+
+    const parts = [];
+    if (params.site) parts.push(`ลูกค้า ${params.site}`);
+    if (grp === "open") parts.push("ยังไม่ปิด");
+    else if (grp === "closed") parts.push("ปิดแล้ว");
+    else if (grp === "") parts.push(st.join(", ") || "ไม่ได้เลือก Status");
+    if (stage) parts.push(STAGE[stage]);
+    if (flag === "overdue") parts.push("เกิน Due");
+    if (flag === "ext") parts.push("มีการขยายเวลา");
+    if (params.q) parts.push(`“${params.q}”`);
+    const showRes = cases.some((c) => c.stage === "closed");
+
+    $app.innerHTML = `<div class="crumb"><a href="#/">ภาพรวม</a> / ค้นหาเคส</div>
+<div class="head"><div><h1>ค้นหาเคส</h1><p>พบ ${cases.length} เคส</p></div>
+<div class="actions">${lvl("export") === "all" && cases.length ? `<button class="btn" type="button" id="cs-export">Export ผลค้นหาเป็น Excel</button>` : ""}</div></div>
+<section class="card" style="gap:16px">
+<form class="sfilters" id="sf" onsubmit="return false">
+<label class="f">คำค้น<input type="search" name="q" value="${esc(params.q || "")}" placeholder="เลขเคส, CS, งาน, Owner, Resolution"></label>
+<div class="site-pick">${comboBox("site", params.site || "", sites, { allowNew: false, required: false, label: "ลูกค้า" })}${params.site ? `<button type="button" class="clear" id="site-clear" aria-label="ล้างลูกค้า">×</button>` : ""}</div>
+<label class="f">ทีม<select name="source"><option value="">ทุกทีม</option>${teams.map(([k, l]) => `<option value="${esc(k)}" ${k === params.source ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label>
+<label class="f">Owner<select name="owner"><option value="">ทุกคน</option>${owners.map(([id, n]) => `<option value="${esc(id)}" ${id === params.owner ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></label>
+<label class="f">เปิดเคสในช่วง<select name="range">${[["", "ทั้งหมด"], ["d30", "30 วันล่าสุด"], ["d90", "90 วันล่าสุด"], ["m12", "12 เดือนล่าสุด"], ["year", "ปีนี้"]].map(([v, l]) => `<option value="${v}" ${v === range ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+</form>
+<div class="stack" style="gap:6px"><span style="font-size:13px;font-weight:600">สถานะเคส${stage ? ` · ระดับ ${esc(STAGE[stage])} <a href="${link({ stage: "" })}" style="font-weight:500">ล้าง</a>` : ""}</span>
+<div class="fpills">
+${pill(grp === "all", link({ st: "" }), "ทั้งหมด", base.length)}
+${pill(grp === "open", link({ st: openSt.join("|") }), "ยังไม่ปิด", cnt((c) => !isCl(c.status)))}
+${pill(grp === "closed", link({ st: closedSt.join("|") }), "ปิดแล้ว", cnt((c) => isCl(c.status)))}
+<span class="psep" aria-hidden="true"></span>
+${statuses.map((x) => pill(stSet.has(x) && grp !== "all", link({ st: grp === "all" ? x : toggle(x) }), x, cnt((c) => c.status === x))).join("")}
+<span class="psep" aria-hidden="true"></span>
+${pill(flag === "overdue", link({ flag: flag === "overdue" ? "" : "overdue" }), "เกิน Due", byStatus.filter(isFlag.overdue).length)}
+${pill(flag === "ext", link({ flag: flag === "ext" ? "" : "ext" }), "มีการขยายเวลา", byStatus.filter(isFlag.ext).length)}
+</div>
+<span class="hint">“ยังไม่ปิด” = ${esc(openSt.join(", "))} · “ปิดแล้ว” = ${esc(closedSt.join(", "))} · กด Status ทีละตัวเพื่อเลือกหลายตัว · ตัวเลข = จำนวนเคสตามคำค้น ลูกค้า ทีม Owner และช่วงวันที่ที่เลือก</span></div>
+</section>
+<section class="card"><div class="title"><h2>ผลค้นหา: ${esc(parts.join(" · ") || "ทุกเคส")}</h2><span>${cases.length} เคส${params.site ? ` · ลูกค้านี้มีทั้งหมด ${siteCount} เคส` : ""}</span></div>
+${caseTable(cases, { missingRes: showRes, empty: "ไม่พบเคสตามเงื่อนไขนี้" })}</section>`;
     bindRowLinks();
+    const sf = document.getElementById("sf");
+    const go = (over = {}) => {
+      location.hash = link({ q: sf.q.value.trim(), site: sf.site.value.trim(), source: sf.source.value, owner: sf.owner.value, range: sf.range.value, ...over });
+    };
+    sf.site.placeholder = "ทุกลูกค้า · พิมพ์เพื่อค้นหา";
+    bindCombo(sf, "site", sites, { allowNew: false, onPick: (v) => go({ site: sites.includes(v) ? v : sites.find((x) => x.toLowerCase().includes(v.toLowerCase())) || "" }) });
+    sf.q.onkeydown = (e) => {
+      if (e.key === "Enter") go();
+    };
+    ["source", "owner", "range"].forEach((n) => (sf[n].onchange = () => go()));
+    const sc = document.getElementById("site-clear");
+    if (sc) sc.onclick = () => go({ site: "" });
+    const ex = document.getElementById("cs-export");
+    if (ex)
+      ex.onclick = async () => {
+        try {
+          const r = await fetch("api/export/cases", { method: "POST", headers: { "Content-Type": "application/json", "X-Requested-With": "fetch" }, body: JSON.stringify({ ids: cases.map((c) => c.id), title: parts.join(" · ") }) });
+          if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
+          const blob = await r.blob();
+          const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: `cases-search-${daysAgo(0)}.xlsx` });
+          a.click();
+          setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+        } catch (err) {
+          toast("Export ไม่สำเร็จ: " + err.message, 6000);
+        }
+      };
   }
 
   async function viewMine(params) {
@@ -308,7 +468,7 @@ ${lvl("audit_view") !== "none" ? `<section class="card"><div class="title"><h2>�
     let list = tab === "open" ? open : tab === "closed" ? closed30 : cases;
     if (params.q) {
       const s = params.q.toLowerCase();
-      list = list.filter((c) => [c.caseNo, c.csNumber, c.site, c.task, c.product, c.severity].some((v) => String(v || "").toLowerCase().includes(s)));
+      list = list.filter((c) => [c.caseNo, c.csNumber, c.site, c.task, c.product, c.severity, c.resolution].some((v) => String(v || "").toLowerCase().includes(s)));
     }
     list.sort((a, b) => (a.stage === "closed") - (b.stage === "closed") || (b.age || 0) - (a.age || 0));
     const cnt = (s) => open.filter((c) => c.stage === s).length;
@@ -350,7 +510,7 @@ ${list.map((c) => `<tr class="click" data-href="#/case/${c.id}">
 <td>${caseCell(c, `#/case/${c.id}`, esc(c.sourceLabel))}</td>
 <td style="font-weight:600">${esc(c.site)}</td>
 <td>${sevChip(c.severity)}</td>
-<td style="font-size:13px">${esc(c.task)}</td>
+<td style="font-size:13px">${esc(c.task)}${resLine(c, { missing: tab === "closed" })}</td>
 <td>${esc(c.product || "-")}</td>
 <td>${fd(c.startDate)}<div class="hint">Due ${c.extCount ? `<s>${fd(c.origDueDate)}</s> ${fd(c.dueDate)}` : fd(c.dueDate)}</div></td>
 <td>${c.extCount ? `<small class="muted">รวม ${c.totalAge} วัน · ขยาย ${c.extCount} ครั้ง</small>` : ageCell(c)}${c.pendingExtId ? `<div><span class="chip c-r1">รออนุมัติขยาย</span></div>` : ""}</td>
@@ -358,7 +518,7 @@ ${list.map((c) => `<tr class="click" data-href="#/case/${c.id}">
 <td style="font-size:13px" class="muted">${fdt(c.updatedAt)}</td>
 <td style="text-align:right"><a href="#/case/${c.id}" style="font-weight:600">แก้ไข</a></td></tr>${extRow(c, { before: 5, after: 3 })}`).join("")}</tbody></table></div>` : `<div class="empty">${tab === "open" ? "ไม่มีเคสที่เปิดอยู่ กด “เปิดเคสใหม่” เพื่อเริ่ม" : "ไม่มีเคส"}</div>`}
 </section>
-<p class="hint">เปลี่ยน Status ในตารางแล้วบันทึกทันที ถ้าเลือก Success, Resolved, Cancel หรือ N/A ระบบจะใส่ End date ให้และหยุดแจ้งเตือน</p>`;
+<p class="hint">เปลี่ยน Status ในตารางแล้วบันทึกทันที ถ้าเลือก Success, Resolved, Cancel หรือ N/A ระบบจะให้กรอก Resolution ก่อนปิด แล้วใส่ End date ให้และหยุดแจ้งเตือน</p>`;
     bindRowLinks();
     bindIntakeActions($app, () => route());
     bindExtPending($app);
@@ -369,8 +529,18 @@ ${list.map((c) => `<tr class="click" data-href="#/case/${c.id}">
     $app.querySelectorAll("select[data-status]").forEach((sel) => {
       sel.onchange = async () => {
         try {
-          await post(`/case/${sel.dataset.status}`, { status: sel.value }, "PUT");
-          toast(`บันทึก Status เป็น ${sel.value} แล้ว`);
+          let body = { status: sel.value };
+          if (isClosedStatus(sel.value) && !isClosedStatus(sel.dataset.prev)) {
+            const kase = cases.find((x) => String(x.id) === sel.dataset.status);
+            const r = await askResolution(kase, { status: sel.value });
+            if (!r) {
+              sel.value = sel.dataset.prev;
+              return;
+            }
+            body = r;
+          }
+          await post(`/case/${sel.dataset.status}`, body, "PUT");
+          toast(isClosedStatus(body.status) && !isClosedStatus(sel.dataset.prev) ? `ปิดเคสด้วย Status ${body.status} แล้ว` : `บันทึก Status เป็น ${body.status} แล้ว`);
           viewMine(params);
         } catch (e) {
           toast("บันทึกไม่สำเร็จ: " + e.message, 6000);
@@ -388,7 +558,7 @@ ${list.map((c) => `<tr class="click" data-href="#/case/${c.id}">
 <div class="combo-list" role="listbox" hidden></div>
 ${allowNew ? `<span class="hint">พิมพ์ชื่อใหม่ได้ ระบบจะเพิ่มเข้า dropdown ให้ทุกคนใช้ต่อ และแจ้ง Admin ตรวจชื่อซ้ำ</span>` : ""}</div>`;
   }
-  function bindCombo(root, name, options, { allowNew = true } = {}) {
+  function bindCombo(root, name, options, { allowNew = true, onPick = null } = {}) {
     const wrap = root.querySelector(`[data-combo="${name}"]`);
     const input = wrap.querySelector("input");
     const list = wrap.querySelector(".combo-list");
@@ -421,6 +591,11 @@ ${allowNew ? `<span class="hint">พิมพ์ชื่อใหม่ได�
         e.preventDefault();
         input.value = btns[hl].dataset.v;
         close();
+        onPick && onPick(input.value);
+      } else if (e.key === "Enter" && onPick) {
+        e.preventDefault();
+        close();
+        onPick(input.value.trim());
       } else if (e.key === "Escape") close();
     });
     list.addEventListener("mousedown", (e) => {
@@ -429,6 +604,7 @@ ${allowNew ? `<span class="hint">พิมพ์ชื่อใหม่ได�
       e.preventDefault();
       input.value = b.dataset.v;
       close();
+      onPick && onPick(input.value);
     });
     input.addEventListener("blur", () => setTimeout(close, 120));
   }
@@ -525,6 +701,9 @@ ${data && data.changes.length ? `<section class="card"><h2>ประวัติ
 </form>
 <aside class="side">
 ${slaCard}
+${closed ? `<section class="card"><div class="title"><h2>Resolution</h2>${permsC.edit && c.resolution ? `<button class="btn" type="button" id="btn-res" style="min-height:34px">แก้ไข</button>` : ""}</div>
+${c.resolution ? `<div class="resol">${esc(c.resolution)}</div>
+<p class="muted" style="margin:0;font-size:13px">ปิดโดย ${esc(c.resolvedBy || "-")}${c.resolvedAt ? " · " + fdt(c.resolvedAt) : ""} · Status ${esc(c.status)}${c.rootCause ? " · สาเหตุ: " + esc(c.rootCause) : ""}</p>` : `<div class="resol none">ไม่มี Resolution (ปิดก่อนเริ่มบังคับ)</div>${permsC.edit ? `<button class="btn" type="button" id="btn-res" style="align-self:flex-start">เพิ่ม Resolution</button>` : ""}`}</section>` : ""}
 ${isNew ? "" : extCard(c, extData.extensions, closed, permsC)}
 ${isNew ? `<section class="card"><h2>ก่อนเปิดเคส</h2><p class="muted" style="margin:0;font-size:14px">กรอก Site, Task และ Status ให้ครบ ระบบจะส่ง email เตือน Owner ในวันที่ ${cfg.alert1Day}, ${cfg.alert2Day} และทุกวันหลังเกิน Due ถ้ายังไม่ปิดเคส</p></section>` : `
 <section class="card"><div><h2>Activity / Detail</h2><div class="hint" style="margin-top:4px">ทุกบันทึกมีวันที่และชื่อผู้บันทึก แก้หรือลบย้อนหลังไม่ได้</div></div>
@@ -558,6 +737,14 @@ ${actsHtml(data.activities)}</section>`}
       if (!body.site) return toast("กรุณาระบุ Site / ลูกค้า");
       if (!body.task) return toast("กรุณาระบุ Task / Case");
       if (!body.severity) return toast("กรุณาเลือก Severity");
+      if (isClosedStatus(body.status) && (isNew || !closed)) {
+        const r = await askResolution(isNew ? { ...c, ...body, stage: "normal", age: 0 } : c, { status: body.status });
+        if (!r) {
+          if (!isNew) f.status.value = c.status;
+          return;
+        }
+        Object.assign(body, r);
+      }
       try {
         if (isNew) {
           body.detail = f.detail.value.trim();
@@ -566,7 +753,7 @@ ${actsHtml(data.activities)}</section>`}
           location.hash = "#/case/" + r.id;
         } else {
           const r = await post("/case/" + id, body, "PUT");
-          toast(r.changed.length ? (r.newSite ? `บันทึกแล้ว และเพิ่มลูกค้าใหม่ “${r.newSite}”` : "บันทึกแล้ว") : "ไม่มีอะไรเปลี่ยน", 4000);
+          toast(r.changed.length ? (body.resolution && !closed ? "ปิดเคสแล้ว" : r.newSite ? `บันทึกแล้ว และเพิ่มลูกค้าใหม่ “${r.newSite}”` : "บันทึกแล้ว") : "ไม่มีอะไรเปลี่ยน", 4000);
           viewCase(id);
         }
       } catch (err) {
@@ -589,11 +776,24 @@ ${actsHtml(data.activities)}</section>`}
     const bc = document.getElementById("btn-close");
     if (bc)
       bc.onclick = async () => {
-        const st = lk.status.find((s) => s.toLowerCase() === "success") || "Success";
-        if (!confirm(`ปิดเคสนี้ด้วย Status “${st}”?`)) return;
+        const r = await askResolution(c);
+        if (!r) return;
         try {
-          await post("/case/" + id, { status: st }, "PUT");
+          await post("/case/" + id, r, "PUT");
           toast("ปิดเคสแล้ว");
+          viewCase(id);
+        } catch (err) {
+          toast(err.message, 6000);
+        }
+      };
+    const br = document.getElementById("btn-res");
+    if (br)
+      br.onclick = async () => {
+        const r = await askResolution(c, { edit: true });
+        if (!r) return;
+        try {
+          await post("/case/" + id, { resolution: r.resolution, root_cause: r.root_cause }, "PUT");
+          toast("บันทึก Resolution แล้ว");
           viewCase(id);
         } catch (err) {
           toast(err.message, 6000);

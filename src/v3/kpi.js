@@ -85,7 +85,7 @@ async function compute(ym) {
   // Cases the owner worked on in the month: open at any point during it.
   const cases = await all(
     `SELECT c.id, c.case_no, c.owner_id, c.site, c.product, c.severity, c.task, c.start_date, c.due_date, c.end_date, c.start_at, c.created_at,
-            c.closed_at, c.ext_count, c.legacy_key, u.display_name AS owner_name, u.email AS owner_email, u.active
+            c.closed_at, c.ext_count, c.legacy_key, c.resolution, u.display_name AS owner_name, u.email AS owner_email, u.active
        FROM cases c JOIN users u ON u.id = c.owner_id
       WHERE c.start_date <= $2 AND (c.end_date IS NULL OR c.end_date >= $1)`,
     [R.fromIso, R.toIso]
@@ -207,8 +207,9 @@ async function compute(ym) {
     m.extensions = exts.filter((e) => e.owner_id === o.id).length;
     const sBack = clamp(10 - 2 * m.overdueAtEnd - Math.min(3, m.extensions), 0, 10);
 
-    // 7. Documentation (10): closed cases ending with a real note (5) + ≥3 meaningful activities per case (5).
+    // 7. Documentation (10): closed cases with a Resolution / ending with a real note (5) + ≥3 meaningful activities per case (5).
     const noted = closed.filter((c) => {
+      if (String(c.resolution || "").trim().length >= 20) return true;
       const h = human(c);
       const last = h[h.length - 1];
       return last && String(last.detail || "").trim().length >= 20;

@@ -134,6 +134,8 @@ const CASE_COLUMNS = [
   { header: "End date", key: "endDate", width: 12 },
   { header: "อายุเคส (วัน)", key: "age", width: 12 },
   { header: "เกิน Due (วัน)", key: "daysOverdue", width: 13 },
+  { header: "Resolution", key: "resolution", width: 50 },
+  { header: "สาเหตุ", key: "rootCause", width: 22 },
 ];
 
 function caseRow(c) {
@@ -157,6 +159,22 @@ function addSheet(wb, name, columns, rows) {
     if (/date|due/i.test(c.key)) ws.getColumn(i + 1).numFmt = "dd/mm/yyyy";
   });
   return ws;
+}
+
+/** One-sheet workbook of the given cases (search results). */
+async function casesWorkbook(cases, title) {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "Sino Case Tracker";
+  const ws = addSheet(wb, "ผลค้นหา", CASE_COLUMNS, cases.map(caseRow));
+  if (title) {
+    ws.spliceRows(1, 0, [`ผลค้นหา: ${title}`], []);
+    ws.getRow(1).font = { bold: true, size: 13 };
+    ws.getRow(3).font = { bold: true };
+    ws.getRow(3).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE9ECF0" } };
+    ws.getRow(1).fill = { type: "pattern", pattern: "none" };
+    ws.views = [{ state: "frozen", ySplit: 3 }];
+  }
+  return wb.xlsx.writeBuffer();
 }
 
 async function reportWorkbook(rep) {
@@ -329,6 +347,7 @@ async function runDueSchedules(now = new Date()) {
 module.exports = {
   buildReport,
   reportWorkbook,
+  casesWorkbook,
   casesCsv,
   sendReport,
   resolveRange,

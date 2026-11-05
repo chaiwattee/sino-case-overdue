@@ -7,7 +7,7 @@ const d = require("../dates");
 const { q, one, all, tx } = require("./db");
 
 const CASE_SELECT = `
-  SELECT c.*, t.label AS team_label, u.display_name AS owner_name, u.email AS owner_email,
+  SELECT c.*, t.label AS team_label, u.display_name AS owner_name, u.email AS owner_email, ur.display_name AS resolved_by_name,
          (SELECT a.detail FROM case_activities a WHERE a.case_id = c.id AND NOT a.is_system
            ORDER BY a.activity_date DESC, a.id DESC LIMIT 1) AS last_activity,
          (SELECT max(a.created_at) FROM case_activities a WHERE a.case_id = c.id) AS last_activity_at,
@@ -18,7 +18,17 @@ const CASE_SELECT = `
            WHERE e.case_id = c.id AND e.status = 'approved' ORDER BY e.seq DESC LIMIT 1) AS last_ext
   FROM cases c
   JOIN teams t ON t.code = c.team
-  LEFT JOIN users u ON u.id = c.owner_id`;
+  LEFT JOIN users u ON u.id = c.owner_id
+  LEFT JOIN users ur ON ur.id = c.resolved_by`;
+
+const ROOT_CAUSES = ["ค่าระบบ / Configuration", "Bug ของ Product", "ฝั่งลูกค้า / Network", "ผู้ใช้ใช้งานไม่ถูกต้อง", "คำขอ / ไม่ใช่ปัญหา", "อื่นๆ"];
+const RESOLUTION_MIN = 20;
+function checkResolution(text) {
+  const t = String(text || "").trim();
+  if (t.length < RESOLUTION_MIN) throw Object.assign(new Error(`กรุณาใส่ Resolution อย่างน้อย ${RESOLUTION_MIN} ตัวอักษร (แก้ไขอย่างไร / ผลลัพธ์)`), { status: 400 });
+  return t.slice(0, 4000);
+}
+const rootCauseOf = (v) => (v ? ROOT_CAUSES.find((x) => x === String(v).trim()) || null : null);
 
 const SEVERITIES = ["Critical", "High", "Medium", "Low", "Request information"];
 const severityOf = (v) => SEVERITIES.find((x) => x.toLowerCase() === String(v || "").trim().toLowerCase()) || null;
@@ -51,6 +61,10 @@ function toCase(r) {
     updatedAt: r.last_activity_at && r.last_activity_at > r.updated_at ? r.last_activity_at : r.updated_at,
     caseUrl: `${config3.baseUrl}/#/case/${r.id}`,
     fileUrl: `${config3.baseUrl}/#/case/${r.id}`,
+    resolution: r.resolution || "",
+    rootCause: r.root_cause || "",
+    resolvedAt: r.resolved_at || null,
+    resolvedBy: r.resolved_by_name || "",
   };
   const c = withStage(base);
   c.closedAt = c.endDate;
@@ -166,6 +180,7 @@ async function createCase(user, body, { ownerId, startDate } = {}) {
     if (body.product) await ensureLookup(c, "product", body.product, user);
     const status = clean(body.status, 40) || "In Progress";
     const closed = config.closedStatuses.includes(status.toLowerCase());
+    const resolution = closed && !body.legacy_key ? checkResolution(body.resolution) : null;
     const r = await c.query(
       `INSERT INTO cases (team, cs_number, status, site, product, owner_id, task, note, start_date, due_date, end_date,
          closed_at, created_by, legacy_key, start_at, severity)
@@ -177,6 +192,10 @@ async function createCase(user, body, { ownerId, startDate } = {}) {
     );
     const id = r.rows[0].id;
     await addActivity(c, id, user, { date: d.toISODate(start), kind: "เปิดเคส", detail: clean(body.detail) || "เปิดเคส", system: !body.detail });
+    if (resolution) {
+      await c.query("UPDATE cases SET resolution = $2, root_cause = $3, resolved_by = $4, resolved_at = now() WHERE id = $1", [id, resolution, rootCauseOf(body.root_cause), user?.id || null]);
+      await addActivity(c, id, user, { kind: "ปิดเคส", detail: `ปิดเคส (${status})\nResolution: ${resolution}` });
+    }
     return { id, newSite: site.created ? site.value : null };
   });
 }
@@ -218,21 +237,45 @@ async function updateCase(user, kase, body, { allowReassign }) {
       const status = clean(body.status, 40);
       const wasClosed = isClosed(kase);
       const nowClosed = config.closedStatuses.includes(status.toLowerCase());
+      let resolution = null;
+      if (nowClosed && !wasClosed) resolution = checkResolution(body.resolution);
       set("status", status);
       if (nowClosed && !wasClosed) {
         set("end_date", d.toISODate(d.today()));
         vals.push(new Date());
         sets.push(`closed_at = $${vals.length}`);
+        set("resolution", resolution);
+        set("root_cause", rootCauseOf(body.root_cause));
+        set("resolved_by", user?.id || null);
+        sets.push("resolved_at = now()");
+        // A pending extension request no longer makes sense once the case is closed.
+        await c.query(
+          "UPDATE case_extensions SET status = 'cancelled', decided_at = now(), decision_note = 'ยกเลิกอัตโนมัติ: ปิดเคสแล้ว' WHERE case_id = $1 AND status = 'pending'",
+          [kase.id]
+        );
       }
       if (!nowClosed && wasClosed) {
-        sets.push("end_date = NULL", "closed_at = NULL");
+        // Reopened: the old resolution stays in the timeline; a new one is required at the next close.
+        sets.push("end_date = NULL", "closed_at = NULL", "resolution = NULL", "root_cause = NULL", "resolved_by = NULL", "resolved_at = NULL");
       }
       await addActivity(c, kase.id, user, {
-        kind: nowClosed ? "ปิดเคส" : "เปลี่ยน Status",
-        detail: `Status: ${kase.status || "-"} → ${status}`,
-        system: true,
+        kind: nowClosed && !wasClosed ? "ปิดเคส" : !nowClosed && wasClosed ? "เปิดเคสใหม่" : "เปลี่ยน Status",
+        detail: resolution ? `Status: ${kase.status || "-"} → ${status}\nResolution: ${resolution}` : `Status: ${kase.status || "-"} → ${status}`,
+        system: !resolution,
       });
       await logChange(c, kase, user, "status", kase.status, status);
+    }
+
+    if (body.status === undefined && isClosed(kase) && (body.resolution !== undefined || body.root_cause !== undefined)) {
+      if (body.resolution !== undefined) {
+        const t = checkResolution(body.resolution);
+        if (t !== (kase.resolution || "")) {
+          set("resolution", t);
+          await addActivity(c, kase.id, user, { kind: "แก้ Resolution", detail: `Resolution: ${t}` });
+          await logChange(c, kase, user, "resolution", kase.resolution || null, t);
+        }
+      }
+      if (body.root_cause !== undefined && rootCauseOf(body.root_cause) !== (kase.rootCause || null)) set("root_cause", rootCauseOf(body.root_cause));
     }
 
     if (allowReassign && body.owner_id && Number(body.owner_id) !== kase.owner_id) {
@@ -278,5 +321,5 @@ async function deleteCase(user, kase, reason) {
 
 module.exports = {
   loadCases, getCase, canSee, activities, addActivity, createCase, updateCase, editStartDate, deleteCase,
-  ensureLookup, logChange, toCase, CASE_SELECT, SEVERITIES, severityOf,
+  ensureLookup, logChange, toCase, CASE_SELECT, SEVERITIES, severityOf, ROOT_CAUSES, RESOLUTION_MIN,
 };

@@ -63,6 +63,9 @@ api.get("/lookups", wrap(async (req, res) => {
   const out = { site: [], product: [], status: [] };
   rows.forEach((r) => out[r.kind].push(r.value));
   out.severity = repo.SEVERITIES;
+  out.rootCauses = repo.ROOT_CAUSES;
+  out.resolutionMin = repo.RESOLUTION_MIN;
+  out.closedStatuses = config.closedStatuses;
   res.json(out);
 }));
 
@@ -121,7 +124,8 @@ api.get("/overview", wrap(async (req, res) => {
 function ser3(c) {
   const iso = (x) => (x instanceof Date ? d.toISODate(x) : x || null);
   return { ...ser(c), caseNo: c.caseNo, extCount: c.extCount || 0, origDueDate: iso(c.origDueDate), periodStart: iso(c.periodStart), totalAge: c.totalAge,
-    pendingExtId: c.pendingExtId, lastExt: c.lastExt, closedInExtension: c.closedInExtension ?? null, severity: c.severity, id: c.id, team: c.team, ownerUserId: c.owner_id, updatedAt: c.updatedAt, startAt: c.startAt };
+    pendingExtId: c.pendingExtId, lastExt: c.lastExt, closedInExtension: c.closedInExtension ?? null, severity: c.severity, id: c.id, team: c.team,
+    resolution: c.resolution || "", rootCause: c.rootCause || "", resolvedAt: c.resolvedAt || null, resolvedBy: c.resolvedBy || "", ownerUserId: c.owner_id, updatedAt: c.updatedAt, startAt: c.startAt };
 }
 
 api.get("/cases", wrap(async (req, res) => {
@@ -134,7 +138,7 @@ api.get("/cases", wrap(async (req, res) => {
   if (qy.stage) cases = cases.filter((c) => c.stage === qy.stage);
   if (qy.q) {
     const s = String(qy.q).toLowerCase();
-    cases = cases.filter((c) => [c.caseNo, c.csNumber, c.site, c.owner, c.task, c.product, c.note].some((v) => String(v || "").toLowerCase().includes(s)));
+    cases = cases.filter((c) => [c.caseNo, c.csNumber, c.site, c.owner, c.task, c.product, c.note, c.resolution].some((v) => String(v || "").toLowerCase().includes(s)));
   }
   res.json({ cases: cases.map(ser3) });
 }));
@@ -288,7 +292,7 @@ api.put("/case/:id", wrap(async (req, res) => {
   }
   const r = await repo.updateCase(u, c, b, { allowReassign });
   // Status and owner changes are already in case_changes; record the other edited fields here.
-  const other = (r.changed || []).filter((f) => !["status", "owner", "owner_id", "end_date", "closed_at"].includes(f));
+  const other = (r.changed || []).filter((f) => !["status", "owner", "owner_id", "end_date", "closed_at", "resolved_by"].includes(f));
   if (other.length) await audit(u, "case_update", `${c.caseNo || c.csNumber || "#" + c.id} · ${c.site || ""}`, { case_id: c.id, fields: other });
   res.json({ ok: true, ...r });
 }));
@@ -341,6 +345,23 @@ api.get("/reports/preview", wrap(async (req, res) => {
   await ext.augmentReport(rep, { caseIds: jobs.scopeIds(rep) });
   const customers = new Set([...rep.openedCases, ...rep.closedCases, ...rep.openCases].map((c) => c.site)).size;
   res.json({ rangeLabel: rep.rangeLabel, kpis: rep.kpis, owners: rep.owners, changes: rep.changes.length, customers, sites, extensions: rep.extensions });
+}));
+
+api.post("/export/cases", wrap(async (req, res) => {
+  const lvl = await perms.level(req.user, "export");
+  if (lvl === "none") throw bad("ไม่มีสิทธิ์ Export", 403);
+  const ids = new Set((Array.isArray(req.body?.ids) ? req.body.ids : []).map(Number).filter(Boolean));
+  if (!ids.size) throw bad("ไม่มีเคสให้ Export");
+  if (ids.size > 20000) throw bad("เคสมากเกินไป");
+  let cases = (await visibleCases(req.user)).filter((c) => ids.has(c.id));
+  if (lvl === "own") cases = cases.filter((c) => c.owner_id === req.user.id);
+  const title = String(req.body?.title || "").slice(0, 200);
+  await audit(req.user, "export", `ผลค้นหา ${title}`.trim(), { format: "xlsx", cases: cases.length });
+  const buf = await reports.casesWorkbook(cases, title);
+  const name = `cases-search-${d.toISODate(d.today())}.xlsx`;
+  res.set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.set("Content-Disposition", `attachment; filename="${name}"`);
+  res.send(Buffer.from(buf));
 }));
 
 api.get("/export", wrap(async (req, res) => {
