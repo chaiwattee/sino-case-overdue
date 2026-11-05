@@ -2212,10 +2212,10 @@ ${h.lines.map((l, n) => `<span>${n + 1}</span><input name="p${n}" value="${esc(l
     $app.innerHTML = `<div class="crumb"><a href="#/intake">เคสจากลูกค้า</a> / ${esc(i.req_no)}</div>
 <div class="head"><div><h1>${esc(i.req_no)} ${sevChip(i.severity)}</h1><p>${ikCustomer(i)} · ${esc(i.subject)}</p></div>
 <div class="actions">${i.status === "pending" && !i.held && can("case_create") ? `<button class="btn primary" type="button" data-claim="${i.id}">รับเคสเอง</button><button class="btn" type="button" data-transfer="${i.id}">โอนให้ Owner</button><button class="btn" type="button" id="rej">ปิดคำขอ (ซ้ำ / ไม่ใช่เคส)</button>` : ""}
-${i.held && (lvl("case_reassign") === "all" || lvl("settings_manage") === "all") ? `<button class="btn primary" type="button" id="rel">ปล่อยคำขอนี้ (แจ้งทีมตามปกติ)</button><button class="btn" type="button" id="rej">ปิดคำขอ (ไม่ใช่เคส)</button>` : ""}
+${i.held && (lvl("case_reassign") === "all" || lvl("settings_manage") === "all") ? `<button class="btn primary" type="button" id="rel">ยืนยันว่าเป็นเคสจริง</button><button class="btn" type="button" id="rej">ปิดคำขอ (ไม่ใช่เคส)</button>` : ""}
 ${i.case_id ? `<a class="btn primary" href="#/case/${i.case_id}">เปิดเคส ${esc(i.case_no || i.cs_number || "#" + i.case_id)}</a>` : ""}</div></div>
 ${ikTags(i) ? `<div>${ikTags(i)}</div>` : ""}
-${i.held ? `<div class="banner warn">พักไว้ให้ Admin / Manager ตรวจ${i.hold_reason ? `: <strong>${esc(i.hold_reason)}</strong>` : ""} · ถ้าเป็นเคสจริง กด “ปล่อยคำขอนี้”${i.channel === "email" ? " ระบบจะส่ง email ตอบรับให้ลูกค้าตอนนั้น" : ""} ถ้าไม่ใช่ กด “ปิดคำขอ”</div>` : ""}
+${i.held ? `<div class="banner warn">พักไว้ให้ Admin / Manager ตรวจ${i.hold_reason ? `: <strong>${esc(i.hold_reason)}</strong>` : ""} · ถ้าเป็นเคสจริง กด “ยืนยันว่าเป็นเคสจริง”${i.channel === "email" ? " ระบบจะส่ง email ตอบรับให้ลูกค้าตอนนั้น" : ""} ถ้าไม่ใช่ กด “ปิดคำขอ”</div>` : ""}
 <div class="grid2"><section class="card"><h2>ข้อมูลที่ลูกค้าแจ้ง</h2>
 <div class="stat2" style="grid-template-columns:1fr 1fr">
 ${row("สถานะ", `${chip(i.status === "pending" ? "r1" : i.status === "claimed" ? "ok" : "closed", IK_STATUS[i.status])}${i.status === "pending" ? ` · รอมาแล้ว ${waitedText(i.created_at)}` : ""}`)}
@@ -2248,7 +2248,7 @@ ${prior.length ? `<div class="k">คำขอก่อนหน้าจาก L
     const rl = document.getElementById("rel");
     if (rl) rl.onclick = async () => {
       await post(`/intake/${i.id}/release`);
-      toast("ปล่อยแล้ว ระบบแจ้งทีมตามปกติ");
+      toast("ยืนยันแล้ว ระบบแจ้งทีมให้รับเคส และตอบ email ลูกค้า (ถ้ามาทาง email)", 5000);
       viewIntakeItem(i.id);
     };
   }

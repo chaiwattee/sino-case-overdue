@@ -422,7 +422,7 @@ async function notifyBurst() {
   if (last && Date.now() - new Date(last).getTime() < s.burst.minutes * 60000) return;
   await setSetting("intake_burst_alert_at", new Date().toISOString());
   const held = await one("SELECT count(*)::int AS n FROM intakes WHERE held AND status = 'pending'");
-  const msg = `มีเคสจากลูกค้าเข้ามาผิดปกติ (ตั้งแต่ ${s.burst.count} เคสใน ${s.burst.minutes} นาที) ระบบพักไว้ ${held.n} เคส และหยุดแจ้งทีละเคส Admin ตรวจและปล่อยได้ที่ ${config3.baseUrl}/#/intake?status=held`;
+  const msg = `มีเคสจากลูกค้าเข้ามาผิดปกติ (ตั้งแต่ ${s.burst.count} เคสใน ${s.burst.minutes} นาที) ระบบพักไว้ ${held.n} เคส และหยุดแจ้งทีละเคส Admin / Manager ตรวจและกด “ยืนยันว่าเป็นเคสจริง” ได้ที่ ${config3.baseUrl}/#/intake?status=held`;
   const { to } = await teamRecipients({});
   if (to.length) await graph.sendMail({ to, cc: [], subject: "[Sino Case SLA] เคสจากลูกค้าเข้ามาผิดปกติ ระบบพักไว้ตรวจ", html: shell("#C0283C", `<p>${esc(msg)}</p>`) }).catch(() => {});
   if (s.telegram) await telegram.sendText("⚠️ " + msg).catch(() => {});
