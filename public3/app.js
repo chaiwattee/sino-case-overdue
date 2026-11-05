@@ -2206,7 +2206,7 @@ ${h.lines.map((l, n) => `<span>${n + 1}</span><input name="p${n}" value="${esc(l
 
   async function viewIntakeItem(id) {
     setNav("intake");
-    const { item: i, files, prior } = await api("/intake/" + Number(id));
+    const { item: i, files, prior, updateUrl } = await api("/intake/" + Number(id));
     INTAKE_CACHE[i.id] = i;
     const row = (k, v) => `<div><div class="k">${k}</div><div>${v}</div></div>`;
     $app.innerHTML = `<div class="crumb"><a href="#/intake">เคสจากลูกค้า</a> / ${esc(i.req_no)}</div>
@@ -2233,6 +2233,7 @@ ${files.length ? `<div class="k">ไฟล์แนบ</div><div class="chips">$
 ${row("ช่องทาง", i.channel === "email" ? "Email ถึงกล่องรับแจ้งเคส · ตอบกลับลูกค้าในเรื่องเดิมอัตโนมัติ" : i.line_user_id ? "LINE OA" : "ลิงก์ที่ทีมสร้างส่งให้")}
 ${i.channel === "email" ? row("ระบบเดา Severity / ระบบ", `${esc(i.severity)} / ${esc(i.product || "-")} · ตรวจและแก้ได้ตอนรับเคส`) : ""}
 ${row("ชื่อบริษัทที่ลูกค้าพิมพ์", esc(i.customer_text || "-"))}
+${updateUrl ? row("ลิงก์ให้ลูกค้าเพิ่มข้อมูล / แนบรูป (Add details)", `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><a class="mono" href="${esc(updateUrl)}" target="_blank" rel="noopener" style="word-break:break-all;font-size:13px">${esc(updateUrl)}</a><button class="btn" type="button" id="upd-copy" style="min-height:32px">คัดลอก</button></div><div class="hint">ระบบใส่ลิงก์นี้ใน email ถึงลูกค้าอยู่แล้ว ส่งเองทาง LINE หรือแชทได้ ใช้ได้จนเคสปิด + 7 วัน</div>`) : ""}
 ${i.claimed_at ? row(i.status === "claimed" ? "รับเคสโดย" : "ปิดโดย", `${esc(i.claimed_by_name || "-")} · ${fdt(i.claimed_at)}${i.owner_name && i.owner_name !== i.claimed_by_name ? ` · Owner: ${esc(i.owner_name)}` : ""}`) : ""}
 ${i.closed_reason || i.duplicate_of ? row("เหตุผล", esc(i.duplicate_of ? "ซ้ำกับ " + i.duplicate_of : i.closed_reason)) : ""}
 ${i.reminder_count ? row("เตือนทีมแล้ว", `${i.reminder_count} ครั้ง`) : ""}</div>
@@ -2240,6 +2241,8 @@ ${prior.length ? `<div class="k">คำขอก่อนหน้าจาก L
 </section></div>
 <dialog id="dlg"></dialog>`;
     bindIntakeActions($app, (r) => (location.hash = `#/case/${r.caseId}`));
+    const uc = document.getElementById("upd-copy");
+    if (uc) uc.onclick = () => navigator.clipboard.writeText(updateUrl).then(() => toast("คัดลอกลิงก์แล้ว"));
     const rj = document.getElementById("rej");
     if (rj) rj.onclick = () => openRejectDialog(i);
     const rl = document.getElementById("rel");

@@ -818,7 +818,8 @@ function mountInternal(api, { need, wrap: w }) {
     if (!r) throw bad("ไม่พบคำขอนี้", 404);
     const files = await all("SELECT id, file_name, mime, size FROM intake_files WHERE intake_id = $1 ORDER BY id", [r.id]);
     const prior = r.line_user_id ? await all("SELECT id, req_no, subject, status, created_at FROM intakes WHERE line_user_id = $1 AND id <> $2 ORDER BY id DESC LIMIT 5", [r.line_user_id, r.id]) : [];
-    res.json({ item: r, files, prior });
+    const usable = !["rejected", "duplicate"].includes(r.status);
+    res.json({ item: r, files, prior, updateUrl: usable ? updateUrl(r.id) : null });
   }));
   api.get("/intake/:id(\\d+)/files/:fid(\\d+)", w(async (req, res) => {
     const f = await one("SELECT * FROM intake_files WHERE id = $1 AND intake_id = $2", [req.params.fid, req.params.id]);
