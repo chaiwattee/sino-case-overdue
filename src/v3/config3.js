@@ -38,6 +38,7 @@ const config3 = {
     retention: flag("V3_RETENTION", true),
     annual: flag("V3_ANNUAL", true),
     intake: flag("V3_INTAKE", true),
+    backup: flag("V3_BACKUP", true),
   },
   disableScheduler: flag("DISABLE_SCHEDULER"),
 

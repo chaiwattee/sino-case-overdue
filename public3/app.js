@@ -1612,6 +1612,73 @@ ${audit.map((r) => { const a = ACTION[r.action] || ["closed", r.action]; return 
   }
 
   // ------------------------------------------------------------ settings (admin)
+  // ------------------------------------------------------------ backup card (settings page)
+  async function loadBackupCard() {
+    const el = document.getElementById("bk-card");
+    if (!el) return;
+    let b;
+    try {
+      b = await api("/backup");
+    } catch (e) {
+      el.innerHTML = `<h2>Backup และทดสอบ restore</h2><div class="banner err">${esc(e.message)}</div>`;
+      return;
+    }
+    const s = b.settings;
+    const bk = b.backup;
+    const t = b.test;
+    const ago = (iso) => {
+      const h = (Date.now() - new Date(iso).getTime()) / 3600000;
+      return h < 1 ? `${Math.max(1, Math.round(h * 60))} นาทีที่แล้ว` : h < 48 ? `${Math.round(h)} ชม. ที่แล้ว` : `${Math.round(h / 24)} วันที่แล้ว`;
+    };
+    const stale = bk && bk.ok && (Date.now() - new Date(bk.at).getTime()) / 3600000 > 36;
+    const bkBanner = !b.keySet
+      ? `<div class="banner err">ยังไม่ได้ตั้ง BACKUP_KEY ใน .env ระบบจึงยังไม่สร้าง backup ดูวิธีตั้งใน docs/backup.md</div>`
+      : !bk ? `<div class="banner warn">ยังไม่เคยสร้าง backup ระบบสร้างทุกคืน 01:30 หรือกด “Backup ตอนนี้”</div>`
+      : !bk.ok && !bk.name ? `<div class="banner err">Backup ล่าสุดไม่สำเร็จ (${fdt(bk.at)}): ${esc(bk.error)}</div>`
+      : `<div class="banner ${!bk.ok || stale ? "warn" : "ok"}">Backup ล่าสุด ${fdt(bk.at)} (${ago(bk.at)}) · ${esc(bk.sizeText || "")} · ${bk.cases.toLocaleString()} เคส · ไฟล์แนบ ${bk.files.toLocaleString()} ไฟล์${bk.error ? `<br>${esc(bk.error)}` : ""}${stale ? "<br>เก่าเกิน 36 ชั่วโมง ตรวจว่างาน backup ทุกคืนยังทำงานอยู่" : ""}</div>`;
+    const testBanner = !t ? `<div class="banner">ยังไม่เคยทดสอบ restore ระบบทดสอบทุกวันอาทิตย์ 03:15 หรือกด “ทดสอบ restore ตอนนี้”</div>`
+      : !t.ok ? `<div class="banner err">ทดสอบ restore ไม่ผ่าน (${fdt(t.at)}): ${esc(t.error)}</div>`
+      : `<div class="banner ${t.level === "full" && !t.warning ? "ok" : "warn"}">ทดสอบ restore ${t.level === "full" ? "ผ่าน" : "ผ่านบางส่วน"} ${fdt(t.at)} · ไฟล์ ${esc(t.name)} · ${t.tables} ตาราง ${t.cases.toLocaleString()} เคส ไฟล์แนบ ${t.files.toLocaleString()} ไฟล์ ครบ · ใช้เวลา ${t.seconds} วินาที${t.note ? `<br>${esc(t.note)} (วิธีให้สิทธิ์ใน docs/backup.md)` : ""}${t.warning ? `<br>${esc(t.warning)}` : ""}</div>`;
+    el.innerHTML = `<div class="title"><h2>Backup และทดสอบ restore</h2><span>backup ทุกคืน 01:30 · ทดสอบ restore ทุกวันอาทิตย์ 03:15 · ล้มเหลวแจ้ง Admin ทาง Telegram และ email</span></div>
+${b.busy ? `<div class="banner">กำลัง${esc(b.busy)}… หน้านี้อัปเดตเองเมื่อเสร็จ</div>` : ""}
+${bkBanner}${testBanner}
+<div class="formgrid">
+<label class="f">เก็บ backup ย้อนหลัง (วัน)<input id="bk-keep" type="number" min="3" max="365" value="${s.keepDays}"><span class="hint">เก็บอย่างน้อย 3 ไฟล์ล่าสุดเสมอ</span></label>
+<label class="f">คัดลอกไปโฟลเดอร์นอกเครื่องด้วย (ไม่บังคับ)<input id="bk-copy" value="${esc(s.copyDir || "")}" placeholder="/mnt/nas/case-backup"><span class="hint">เช่น โฟลเดอร์ NAS ที่ mount ไว้ เว้นว่าง = ไม่คัดลอก</span></label>
+<label class="f">SharePoint Site ID (ไม่บังคับ)<input id="bk-site" value="${esc(s.sharepoint.siteId || "")}" placeholder="contoso.sharepoint.com,xxxx,yyyy"><span class="hint">ต้องให้สิทธิ์ Sites.Selected เฉพาะ site นี้ก่อน ดู docs/backup.md</span></label>
+<label class="f">โฟลเดอร์ใน SharePoint<input id="bk-folder" value="${esc(s.sharepoint.folder || "")}"></label></div>
+<label class="chk"><input type="checkbox" id="bk-sp" ${s.sharepoint.enabled ? "checked" : ""}> ส่งสำเนาขึ้น SharePoint ด้วย</label>
+<label class="chk"><input type="checkbox" id="bk-on" ${s.enabled ? "checked" : ""}> เปิด backup อัตโนมัติทุกคืน</label>
+<div class="actions"><button class="btn primary" type="button" id="bk-save">บันทึก</button><button class="btn" type="button" id="bk-run" ${b.busy || !b.keySet ? "disabled" : ""}>Backup ตอนนี้</button><button class="btn" type="button" id="bk-test" ${b.busy || !b.files.length ? "disabled" : ""}>ทดสอบ restore ตอนนี้</button></div>
+<details><summary style="cursor:pointer;color:var(--accent)">ไฟล์ backup ในเครื่อง (${b.files.length}) และประวัติ</summary>
+<p class="hint">เก็บที่ ${esc(s.dir)} · ไฟล์แนบลูกค้าอยู่ที่ ${esc(b.fileDir)} · ไฟล์เข้ารหัสด้วย BACKUP_KEY ไม่มี .env อยู่ในไฟล์</p>
+<div class="tablewrap"><table><thead><tr><th>ไฟล์</th><th>ขนาด</th><th>เวลา</th></tr></thead><tbody>${b.files.map((f) => `<tr><td style="font-family:var(--mono,monospace)">${esc(f.name)}</td><td>${(f.size / 1048576).toFixed(1)} MB</td><td>${fdt(f.at)}</td></tr>`).join("") || `<tr><td colspan="3" class="muted">ยังไม่มี</td></tr>`}</tbody></table></div>
+<div class="tablewrap"><table><thead><tr><th>เวลา</th><th>งาน</th><th>ผล</th><th>โดย</th></tr></thead><tbody>${b.history.map((h) => `<tr><td>${fdt(h.at)}</td><td>${h.kind === "backup" ? "Backup" : "ทดสอบ restore"}</td><td>${h.ok ? `<span class="chip ${h.kind === "test" && h.level !== "full" ? "c-r1" : "c-ok"}">${h.kind === "test" && h.level !== "full" ? "ผ่านบางส่วน" : "สำเร็จ"}</span> ${h.kind === "backup" ? esc(h.sizeText || "") : ""}` : `<span class="chip c-overdue">ไม่สำเร็จ</span> <span style="font-size:13px">${esc(h.error || "")}</span>`}</td><td style="font-size:13px">${h.by === "schedule" ? "อัตโนมัติ" : esc(h.by)}</td></tr>`).join("") || `<tr><td colspan="4" class="muted">ยังไม่มี</td></tr>`}</tbody></table></div>
+</details>`;
+    const $ = (id) => document.getElementById(id);
+    $("bk-save").onclick = async () => {
+      try {
+        await post("/backup", { enabled: $("bk-on").checked, keepDays: $("bk-keep").value, copyDir: $("bk-copy").value.trim(), sharepoint: { enabled: $("bk-sp").checked, siteId: $("bk-site").value.trim(), folder: $("bk-folder").value.trim() } }, "PUT");
+        toast("บันทึกการตั้งค่า backup แล้ว");
+        loadBackupCard();
+      } catch (e) {
+        toast(e.message, 6000);
+      }
+    };
+    const start = (url, msg) => async () => {
+      try {
+        await post(url, {});
+        toast(msg, 5000);
+        loadBackupCard();
+      } catch (e) {
+        toast(e.message, 6000);
+      }
+    };
+    $("bk-run").onclick = start("/backup/run", "เริ่ม backup แล้ว");
+    $("bk-test").onclick = start("/backup/test", "เริ่มทดสอบ restore แล้ว");
+    if (b.busy) setTimeout(() => document.getElementById("bk-card") && loadBackupCard(), 3000);
+  }
+
   async function viewSettings() {
     setNav("settings");
     const s = await api("/settings");
@@ -1629,6 +1696,7 @@ ${(() => {
       return `<div class="banner ${w.error ? "warn" : bad ? "err" : "ok"}" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><span style="flex:1">${w.error ? `ตรวจคำเตือนของ Chrome ไม่สำเร็จ: ${esc(w.error)}` : bad ? `Google ติดธงเว็บนี้ว่าไม่ปลอดภัย (${bad} URL) ผู้ใช้ Chrome จะเห็นคำเตือน · แก้ที่ Google Search Console → Security issues → Request review` : w.at ? `Google ไม่ติดธงเว็บนี้ (ตรวจล่าสุด ${fdt(w.at)} ด้วย ${esc(w.api || "")})` : "ยังไม่เคยตรวจ"}</span><button class="btn" type="button" id="wr-check" style="min-height:34px">ตรวจตอนนี้</button></div>`;
     })()}
 ${newSites.length ? `<div class="banner warn">มีรายการที่ผู้ใช้เพิ่มใหม่ ${newSites.length} รายการ รอตรวจ (มีป้าย “ใหม่”) กด “แก้” เพื่อยืนยัน แก้ชื่อ หรือรวมกับรายการเดิม</div>` : ""}
+<section class="card" id="bk-card"><div class="title"><h2>Backup และทดสอบ restore</h2><span>กำลังโหลด…</span></div></section>
 <section class="card" id="ae"><div class="title"><h2>Email แจ้งเตือน Owner</h2><span>ผู้รับ email แจ้งเตือนแต่ละรอบ</span></div>
 <div class="tablewrap"><table style="min-width:720px"><thead><tr><th>รอบ</th><th>ส่งเมื่อ</th><th>ถึง</th><th style="text-align:center">CC รายชื่อด้านล่าง</th><th></th></tr></thead><tbody>
 ${[["r1", `วันที่ ${cfg.alert1Day} (ครั้งเดียว)`], ["r2", `วันที่ ${cfg.alert2Day} (ครั้งเดียว)`], ["overdue", `ทุกวันหลังเกิน Due (วันที่ ${cfg.slaDays + 1} ขึ้นไป)`]].map(([t, when]) => `<tr>
@@ -1696,6 +1764,7 @@ ${s.annualReports.map((a) => `<tr><td style="font-weight:600">${a.year + 543} ($
         wr.disabled = false;
       }
     };
+    loadBackupCard();
     document.getElementById("ae-save").onclick = async () => {
       const ccTypes = [...document.querySelectorAll("input[name=cct]:checked")].map((x) => x.value);
       try {

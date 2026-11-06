@@ -734,6 +734,25 @@ api.get("/settings", need("settings_manage"), wrap(async (req, res) => {
     lookups, stats: { ...stats, dbSize: size.size }, annualReports: annual, jobs: config3.jobs,
   });
 }));
+// ---------- backup and restore test
+api.get("/backup", need("settings_manage"), wrap(async (req, res) => res.json(await require("./backup").status())));
+api.put("/backup", need("settings_manage"), wrap(async (req, res) => res.json({ ok: true, settings: await require("./backup").save(req.user, req.body || {}) })));
+// Both run in the background (a large backup can outlast the tunnel's request timeout); the page polls GET /backup.
+api.post("/backup/run", need("settings_manage"), wrap(async (req, res) => {
+  const b = require("./backup");
+  if ((await b.status()).busy) return res.status(409).json({ error: "กำลังทำงานอยู่ รอสักครู่" });
+  b.runBackup({ by: req.user.email || "admin" }).catch(() => {});
+  await audit(req.user, "backup_run", null, {});
+  res.json({ ok: true, started: true });
+}));
+api.post("/backup/test", need("settings_manage"), wrap(async (req, res) => {
+  const b = require("./backup");
+  if ((await b.status()).busy) return res.status(409).json({ error: "กำลังทำงานอยู่ รอสักครู่" });
+  b.testRestore({ by: req.user.email || "admin" }).catch(() => {});
+  await audit(req.user, "backup_test", null, {});
+  res.json({ ok: true, started: true });
+}));
+
 api.post("/settings/web-risk/check", need("settings_manage"), wrap(async (req, res) => res.json(await jobs.checkWebRisk({ notifyClean: true }))));
 
 api.put("/settings", need("settings_manage"), wrap(async (req, res) => {
@@ -815,7 +834,7 @@ const AUDIT_GROUPS = {
   users: ["user_create", "user_update", "user_delete", "user_import", "user_signout", "password_temp", "password_link", "password_changed", "password_reset_done", "permissions_update", "bootstrap_admin"],
   cases: ["case_create", "case_update", "case_delete", "case_status", "case_owner", "case_start_date", "case_severity", "case_deleted", "import_excel"],
   data: ["export", "report_send", "schedule_create", "schedule_update", "schedule_delete", "schedule_test", "annual_download"],
-  settings: ["settings_update", "lookup_add", "lookup_update", "lookup_merge", "annual_test", "alert_email_test"],
+  settings: ["settings_update", "backup_settings", "backup_run", "backup_test", "lookup_add", "lookup_update", "lookup_merge", "annual_test", "alert_email_test"],
 };
 async function auditRows(qry) {
   const days = Math.min(3650, Math.max(1, Number(qry.days) || 30));

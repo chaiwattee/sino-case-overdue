@@ -440,6 +440,9 @@ function startJobs() {
   job("alerts", config.alertCron, j.alerts, () => runAlerts());
   job("telegram", config.telegramCron, j.telegram, () => sendTelegram());
   job("reports", "*/5 * * * *", j.reports, () => runDueSchedules());
+  // Backup at 01:30, before the 02:00 retention run deletes old cases; restore test every Sunday 03:15.
+  job("backup", "30 1 * * *", j.backup, () => require("./backup").runBackup());
+  job("backup-test", "15 3 * * 0", j.backup, () => require("./backup").testRestore());
   job("retention", "0 2 * * *", j.retention, () => runRetention());
   job("annual", "0 6 1 1 *", j.annual, () => runAnnual());
   job("cert", "15 9 * * *", true, () => checkCert());
