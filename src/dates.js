@@ -66,6 +66,9 @@ function fromISODate(s) {
 
 function thaiDate(d, opts = {}) {
   if (!d) return "-";
+  // Accept "YYYY-MM-DD" / ISO strings too (sample cases built from DB rows carry dates as text).
+  if (!(d instanceof Date)) d = fromISODate(d) || new Date(d);
+  if (Number.isNaN(d.getTime())) return "-";
   return d.toLocaleDateString("th-TH", {
     day: "numeric",
     month: "short",
