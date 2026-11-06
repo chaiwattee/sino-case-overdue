@@ -450,3 +450,10 @@ tr.ext-row td:first-child { border-left: 4px solid var(--accent); }
 .cf-n { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cf-d { font-size: 11px; color: var(--muted); }
 .banner.unconf { display: flex; gap: 14px; align-items: center; justify-content: space-between; flex-wrap: wrap; line-height: 1.6; } .banner.unconf a { color: inherit; font-weight: 700; }
+
+.grant-row td { padding-top: 0; border-top: 0; }
+.grant { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 2px 0 6px; }
+.gchip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px 4px 12px; border-radius: 999px; background: var(--chip-bg, rgba(31,95,191,.12)); font-size: 14px; }
+.gchip button { border: 0; background: transparent; color: inherit; font-size: 16px; line-height: 1; cursor: pointer; padding: 0 4px; border-radius: 50%; }
+.gchip button:hover { background: rgba(0,0,0,.12); }
+.grant select { width: auto; min-width: 200px; padding: 6px 10px; }

@@ -1465,6 +1465,8 @@ ${temps.length ? `<div class="banner warn">รหัสผ่านชั่ว�
     setNav("users");
     const data = await api("/permissions");
     const m = JSON.parse(JSON.stringify(data.matrix));
+    const g = JSON.parse(JSON.stringify(data.grants || {}));
+    const uname = Object.fromEntries((data.users || []).map((u) => [u.id, u]));
     const count = Object.fromEntries(data.counts.map((c) => [c.role, c.n]));
     const editable = lvl("users_manage") !== "none";
     const locked = (r, p) => (r === "admin" && (p === "users_manage" || p === "settings_manage")) || (r === "observer" && (data.observerLocked || []).includes(p));
@@ -1473,9 +1475,33 @@ ${temps.length ? `<div class="banner warn">รหัสผ่านชั่ว�
       const label = v === "all" ? "✓" : v === "own" ? "เฉพาะของตัวเอง" : "–";
       return `<button type="button" class="perm ${v}" data-r="${r}" data-p="${p}" ${!editable || locked(r, p) ? "disabled" : ""} aria-label="${ROLE[r]}: ${esc(label)}">${label}</button>`;
     };
+    // Named users who get this permission on top of their role (roles with ✓ keep it anyway).
+    const userGrantRow = (p) => {
+      const ids = (g[p.key] || []).filter((id) => uname[id]);
+      const hasByRole = (u) => m[u.role] && m[u.role][p.key] === "all";
+      const options = (data.users || []).filter((u) => u.role !== "observer" && !ids.includes(u.id) && !hasByRole(u));
+      return `<tr class="grant-row"><td colspan="${data.roles.length + 1}"><div class="grant">
+<span class="hint" style="margin:0">ผู้ใช้ที่ได้สิทธิ์ “${esc(p.label)}” เพิ่มจากบทบาท:</span>
+${ids.length ? ids.map((id) => `<span class="gchip">${esc(uname[id].display_name)} <span class="muted">· ${esc(ROLE[uname[id].role] || uname[id].role)}</span>${editable ? `<button type="button" data-ungrant="${p.key}:${id}" aria-label="เอาสิทธิ์ของ ${esc(uname[id].display_name)} ออก">×</button>` : ""}</span>`).join("") : `<span class="muted">ยังไม่มี</span>`}
+${editable ? `<select data-grant="${p.key}" aria-label="เพิ่มผู้ใช้"><option value="">+ เพิ่มผู้ใช้</option>${options.map((u) => `<option value="${u.id}">${esc(u.display_name)} · ${esc(ROLE[u.role] || u.role)}</option>`).join("")}</select>` : ""}
+</div></td></tr>`;
+    };
     const render = () => {
       document.getElementById("pm").innerHTML = `<table style="min-width:820px"><thead><tr><th>สิทธิ์</th>${data.roles.map((r) => `<th style="text-align:center;width:150px">${chip(ROLE_CHIP[r], ROLE[r])}<div class="hint" style="margin-top:6px">${count[r] || 0} คน</div></th>`).join("")}</tr></thead><tbody>
-${data.perms.map((p) => `<tr><td><div style="font-weight:500">${esc(p.label)}</div><div class="hint">${esc(p.hint)}</div></td>${data.roles.map((r) => `<td style="text-align:center">${cell(r, p.key)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+${data.perms.map((p) => `<tr><td><div style="font-weight:500">${esc(p.label)}</div><div class="hint">${esc(p.hint)}</div></td>${data.roles.map((r) => `<td style="text-align:center">${cell(r, p.key)}</td>`).join("")}</tr>${p.perUser ? userGrantRow(p) : ""}`).join("")}</tbody></table>`;
+      document.querySelectorAll("[data-ungrant]").forEach((b) => (b.onclick = () => {
+        const [k, id] = b.dataset.ungrant.split(":");
+        g[k] = (g[k] || []).filter((x) => x !== Number(id));
+        render();
+        document.getElementById("save").disabled = false;
+      }));
+      document.querySelectorAll("select[data-grant]").forEach((s) => (s.onchange = () => {
+        if (!s.value) return;
+        const k = s.dataset.grant;
+        g[k] = [...new Set([...(g[k] || []), Number(s.value)])];
+        render();
+        document.getElementById("save").disabled = false;
+      }));
       document.querySelectorAll(".perm[data-r]").forEach((b) => (b.onclick = () => {
         const order = ["none", "own", "all"];
         const cur = m[b.dataset.r][b.dataset.p];
@@ -1495,7 +1521,7 @@ ${data.perms.map((p) => `<tr><td><div style="font-weight:500">${esc(p.label)}</d
     if (sv)
       sv.onclick = async () => {
         try {
-          await post("/permissions", { matrix: m }, "PUT");
+          await post("/permissions", { matrix: m, grants: g }, "PUT");
           toast("บันทึกสิทธิ์แล้ว");
           ME = await api("/me");
           viewRoles();

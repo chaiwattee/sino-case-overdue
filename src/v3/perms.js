@@ -15,7 +15,7 @@ const PERMS = [
   { key: "audit_view", label: "ดูประวัติแก้ไข", hint: "การแก้วันที่และการแก้เคสทั้งหมด" },
   { key: "users_manage", label: "จัดการผู้ใช้และรีเซ็ตรหัสผ่าน", hint: "เพิ่ม ปิดใช้งาน กำหนดบทบาท" },
   { key: "settings_manage", label: "ตั้งค่าระบบ", hint: "รายการ dropdown, การเก็บข้อมูล, รายงานรายปี" },
-  { key: "hotline_edit", label: "แก้เบอร์ Hotline", hint: "เบอร์ใน email ตอบลูกค้าที่แจ้งเคสนอกเวลาทำการ" },
+  { key: "hotline_edit", label: "แก้เบอร์ Hotline", hint: "เบอร์ใน email ตอบลูกค้าที่แจ้งเคสนอกเวลาทำการ", perUser: true },
 ];
 
 const ROLES = ["admin", "manager", "observer", "engineer", "viewer"];
@@ -50,6 +50,16 @@ const DEFAULTS = {
 
 let cache = null;
 let cacheAt = 0;
+let grantCache = null;
+
+/** Permissions that can also be given to named users on top of their role (PERMS entries with perUser). */
+const PER_USER = PERMS.filter((p) => p.perUser).map((p) => p.key);
+async function grants() {
+  if (grantCache && Date.now() - cacheAt < 30000) return grantCache;
+  const saved = (await getSetting("permission_users", null)) || {};
+  grantCache = Object.fromEntries(PER_USER.map((k) => [k, (saved[k] || []).map(Number).filter(Boolean)]));
+  return grantCache;
+}
 
 async function matrix() {
   if (cache && Date.now() - cacheAt < 30000) return cache;
@@ -66,12 +76,22 @@ async function matrix() {
 }
 function invalidate() {
   cache = null;
+  grantCache = null;
 }
 
 /** Level of a permission for a user: "all" | "own" | "none". */
 async function level(user, perm) {
   if (!user) return "none";
-  return (await matrix())[user.role]?.[perm] || "none";
+  const l = (await matrix())[user.role]?.[perm] || "none";
+  if (l !== "all" && PER_USER.includes(perm) && !(user.role === "observer" && OBSERVER_LOCKED.includes(perm)) && (await grants())[perm].includes(Number(user.id))) return "all";
+  return l;
+}
+
+/** The role's levels with this user's own grants applied (for the UI). */
+async function forUser(user) {
+  const out = { ...(await matrix())[user.role] };
+  for (const k of PER_USER) out[k] = await level(user, k);
+  return out;
 }
 
 /** Can `user` do `perm` on a case (or in general when no case given)? */
@@ -82,4 +102,4 @@ async function can(user, perm, kase) {
   return false;
 }
 
-module.exports = { PERMS, ROLES, DEFAULTS, OBSERVER_LOCKED, seesAllTeams, matrix, level, can, invalidate };
+module.exports = { PERMS, ROLES, DEFAULTS, OBSERVER_LOCKED, PER_USER, seesAllTeams, matrix, grants, forUser, level, can, invalidate };

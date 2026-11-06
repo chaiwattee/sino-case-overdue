@@ -52,10 +52,9 @@ async function teamsList() {
 
 // ------------------------------------------------------------ me / lookups
 api.get("/me", wrap(async (req, res) => {
-  const m = await perms.matrix();
   res.json({
     user: req.user,
-    perms: m[req.user.role],
+    perms: await perms.forUser(req.user),
     teams: await teamsList(),
     config: {
       slaDays: config.slaDays, alert1Day: config.alert1Day, alert2Day: config.alert2Day, alertCc: config.alertCc,
@@ -650,7 +649,12 @@ api.post("/users/:id/signout", need("users_manage"), wrap(async (req, res) => {
 }));
 
 api.get("/permissions", wrap(async (req, res) => {
-  res.json({ perms: perms.PERMS, roles: perms.ROLES, observerLocked: perms.OBSERVER_LOCKED, matrix: await perms.matrix(), counts: await all("SELECT role, count(*)::int AS n FROM users WHERE active GROUP BY role") });
+  res.json({
+    perms: perms.PERMS, roles: perms.ROLES, observerLocked: perms.OBSERVER_LOCKED, matrix: await perms.matrix(),
+    counts: await all("SELECT role, count(*)::int AS n FROM users WHERE active GROUP BY role"),
+    grants: await perms.grants(),
+    users: await all("SELECT id, display_name, email, role FROM users WHERE active ORDER BY display_name"),
+  });
 }));
 api.put("/permissions", need("users_manage"), wrap(async (req, res) => {
   const m = req.body?.matrix || {};
@@ -663,9 +667,15 @@ api.put("/permissions", need("users_manage"), wrap(async (req, res) => {
     }
   }
   await setSetting("permissions", clean);
+  let grantsOut;
+  if (req.body?.grants) {
+    const active = new Set((await all("SELECT id FROM users WHERE active AND role <> 'observer'")).map((u) => Number(u.id)));
+    grantsOut = Object.fromEntries(perms.PER_USER.map((k) => [k, [...new Set((req.body.grants[k] || []).map(Number))].filter((id) => active.has(id))]));
+    await setSetting("permission_users", grantsOut);
+  }
   perms.invalidate();
-  await audit(req.user, "permissions_update", null, clean);
-  res.json({ ok: true, matrix: await perms.matrix() });
+  await audit(req.user, "permissions_update", null, grantsOut ? { ...clean, perUser: grantsOut } : clean);
+  res.json({ ok: true, matrix: await perms.matrix(), grants: await perms.grants() });
 }));
 
 
