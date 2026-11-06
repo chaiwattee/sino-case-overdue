@@ -32,6 +32,8 @@ const DEFAULTS = {
   keepDays: 14,
   dir: process.env.BACKUP_DIR || path.join(__dirname, "..", "..", "data", "backups"),
   copyDir: "", // e.g. a mounted NAS folder; empty = off
+  copyKeepDays: 30, // daily copies kept off the server (NAS / SharePoint)
+  copyMonthly: 12, // plus the first backup of each month for this many months (0 = off)
   sharepoint: { enabled: false, siteId: "", folder: "Sino Case Backup" },
 };
 const bad = (msg, status = 400) => Object.assign(new Error(msg), { status });
@@ -54,12 +56,14 @@ async function save(user, b) {
     enabled: b.enabled !== false,
     keepDays: num(b.keepDays, 3, 365, 14),
     copyDir,
+    copyKeepDays: num(b.copyKeepDays, 3, 3650, 30),
+    copyMonthly: num(b.copyMonthly, 0, 120, 12),
     sharepoint: { enabled: !!sp.enabled, siteId: String(sp.siteId || "").trim().slice(0, 300), folder: String(sp.folder || "Sino Case Backup").trim().replace(/^\/+|\/+$/g, "").slice(0, 200) || "Sino Case Backup" },
   };
   if (next.sharepoint.enabled && !next.sharepoint.siteId) throw bad("ใส่ Site ID ของ SharePoint ก่อนเปิดใช้");
   const { dir, ...stored } = next;
   await setSetting("backup", stored);
-  await audit(user, "backup_settings", null, { enabled: next.enabled, keepDays: next.keepDays, copyDir: next.copyDir, sharepoint: next.sharepoint });
+  await audit(user, "backup_settings", null, { enabled: next.enabled, keepDays: next.keepDays, copyDir: next.copyDir, copyKeepDays: next.copyKeepDays, copyMonthly: next.copyMonthly, sharepoint: next.sharepoint });
   return next;
 }
 
@@ -232,7 +236,7 @@ async function runBackup({ by = "schedule" } = {}) {
         await fsp.mkdir(s.copyDir, { recursive: true, mode: 0o700 });
         await fsp.copyFile(dest, path.join(s.copyDir, name + ".part"));
         await fsp.rename(path.join(s.copyDir, name + ".part"), path.join(s.copyDir, name));
-        await prune(s.copyDir, s.keepDays);
+        await prune(s.copyDir, s.copyKeepDays, s.copyMonthly);
         copies.push({ to: s.copyDir, ok: true });
       } catch (e) {
         copies.push({ to: s.copyDir, ok: false, error: e.message });
@@ -241,7 +245,7 @@ async function runBackup({ by = "schedule" } = {}) {
     if (s.sharepoint.enabled) {
       try {
         await uploadSharePoint(s.sharepoint, dest, name);
-        await pruneSharePoint(s.sharepoint, s.keepDays).catch(() => {});
+        await pruneSharePoint(s.sharepoint, s.copyKeepDays, s.copyMonthly).catch(() => {});
         copies.push({ to: "SharePoint", ok: true });
       } catch (e) {
         copies.push({ to: "SharePoint", ok: false, error: graphError(e) });
@@ -266,17 +270,38 @@ async function runBackup({ by = "schedule" } = {}) {
   }
 }
 
-/** Delete backups older than keepDays, always keeping the newest 3. */
-async function prune(dir, keepDays) {
-  const list = await listBackups(dir);
-  const cutoff = Date.now() - keepDays * 86400000;
-  const removed = [];
-  for (const b of list.slice(3)) {
-    if (new Date(b.at).getTime() < cutoff) {
-      await fsp.rm(path.join(dir, b.name), { force: true });
-      removed.push(b.name);
-    }
+/** Backup time from its file name (Bangkok time), so copies keep their age whatever the copy's mtime. */
+function nameTime(name) {
+  const m = NAME_RE.exec(name);
+  if (!m) return null;
+  const [y, mo, d] = [m[1].slice(0, 4), m[1].slice(4, 6), m[1].slice(6, 8)].map(Number);
+  const t = m[2].padEnd(6, "0");
+  return Date.UTC(y, mo - 1, d, Number(t.slice(0, 2)) - 7, Number(t.slice(2, 4)), Number(t.slice(4, 6)));
+}
+/**
+ * Which backups to delete. Kept: the newest 3 always; everything from the last keepDays days;
+ * and, when monthly > 0, the first backup of each of the last `monthly` months (this month included).
+ */
+function toDelete(names, keepDays, monthly = 0, now = Date.now()) {
+  const list = names.filter((n) => NAME_RE.test(n)).sort().reverse();
+  const keep = new Set(list.slice(0, 3));
+  const cutoff = now - keepDays * 86400000;
+  for (const n of list) if (nameTime(n) >= cutoff) keep.add(n);
+  if (monthly > 0) {
+    const ym = (t) => {
+      const d = new Date(t + 7 * 3600000);
+      return d.getUTCFullYear() * 12 + d.getUTCMonth();
+    };
+    const first = new Map();
+    for (const n of [...list].reverse()) if (!first.has(ym(nameTime(n)))) first.set(ym(nameTime(n)), n);
+    const cur = ym(now);
+    for (const [k, n] of first) if (cur - k < monthly) keep.add(n);
   }
+  return list.filter((n) => !keep.has(n));
+}
+async function prune(dir, keepDays, monthly = 0) {
+  const removed = toDelete((await listBackups(dir)).map((x) => x.name), keepDays, monthly);
+  for (const n of removed) await fsp.rm(path.join(dir, n), { force: true });
   for (const n of await fsp.readdir(dir).catch(() => [])) if (n.endsWith(".part") || n.startsWith(".work-")) {
     const p = path.join(dir, n);
     const st = await fsp.stat(p).catch(() => null);
@@ -305,11 +330,11 @@ async function uploadSharePoint(sp, file, name) {
     await fh.close();
   }
 }
-async function pruneSharePoint(sp, keepDays) {
-  const r = await graph.graph("get", `${spPath(sp)}:/children?$select=id,name,createdDateTime&$top=200`);
-  const items = (r.value || []).filter((x) => NAME_RE.test(x.name)).sort((a, b) => b.name.localeCompare(a.name));
-  const cutoff = Date.now() - keepDays * 86400000;
-  for (const it of items.slice(3)) if (new Date(it.createdDateTime).getTime() < cutoff) await graph.graph("delete", `/sites/${encodeURIComponent(sp.siteId)}/drive/items/${it.id}`);
+async function pruneSharePoint(sp, keepDays, monthly = 0) {
+  const r = await graph.graph("get", `${spPath(sp)}:/children?$select=id,name&$top=999`);
+  const items = (r.value || []).filter((x) => NAME_RE.test(x.name));
+  const del = new Set(toDelete(items.map((x) => x.name), keepDays, monthly));
+  for (const it of items) if (del.has(it.name)) await graph.graph("delete", `/sites/${encodeURIComponent(sp.siteId)}/drive/items/${it.id}`);
 }
 
 // ------------------------------------------------------------ open a backup (used by the test and by scripts/backup.js)
@@ -413,4 +438,4 @@ async function status() {
   return { settings: s, keySet: keyOk(), fileDir: fileDir(), busy, backup: st.backup || null, test: st.test || null, history: (st.history || []).slice(0, 12), files: (await listBackups(s.dir)).slice(0, 30) };
 }
 
-module.exports = { settings, save, runBackup, testRestore, status, open, decryptFile, listBackups, pgEnv, withDb, run, fileDir, human, NAME_RE };
+module.exports = { toDelete, settings, save, runBackup, testRestore, status, open, decryptFile, listBackups, pgEnv, withDb, run, fileDir, human, NAME_RE };

@@ -1643,8 +1643,10 @@ ${audit.map((r) => { const a = ACTION[r.action] || ["closed", r.action]; return 
 ${b.busy ? `<div class="banner">กำลัง${esc(b.busy)}… หน้านี้อัปเดตเองเมื่อเสร็จ</div>` : ""}
 ${bkBanner}${testBanner}
 <div class="formgrid">
-<label class="f">เก็บ backup ย้อนหลัง (วัน)<input id="bk-keep" type="number" min="3" max="365" value="${s.keepDays}"><span class="hint">เก็บอย่างน้อย 3 ไฟล์ล่าสุดเสมอ</span></label>
+<label class="f">เก็บบน server ย้อนหลัง (วัน)<input id="bk-keep" type="number" min="3" max="365" value="${s.keepDays}"><span class="hint">เก็บอย่างน้อย 3 ไฟล์ล่าสุดเสมอ</span></label>
 <label class="f">คัดลอกไปโฟลเดอร์นอกเครื่องด้วย (ไม่บังคับ)<input id="bk-copy" value="${esc(s.copyDir || "")}" placeholder="/mnt/nas/case-backup"><span class="hint">เช่น โฟลเดอร์ NAS ที่ mount ไว้ เว้นว่าง = ไม่คัดลอก</span></label>
+<label class="f">เก็บบน NAS / SharePoint ย้อนหลัง (วัน)<input id="bk-ckeep" type="number" min="3" max="3650" value="${s.copyKeepDays}"><span class="hint">สำเนารายวันนอกเครื่อง</span></label>
+<label class="f">เก็บสำเนารายเดือนบน NAS / SharePoint (เดือน)<input id="bk-cmon" type="number" min="0" max="120" value="${s.copyMonthly}"><span class="hint">เก็บ backup แรกของแต่ละเดือนไว้นานขึ้น 0 = ไม่เก็บ</span></label>
 <label class="f">SharePoint Site ID (ไม่บังคับ)<input id="bk-site" value="${esc(s.sharepoint.siteId || "")}" placeholder="contoso.sharepoint.com,xxxx,yyyy"><span class="hint">ต้องให้สิทธิ์ Sites.Selected เฉพาะ site นี้ก่อน ดู docs/backup.md</span></label>
 <label class="f">โฟลเดอร์ใน SharePoint<input id="bk-folder" value="${esc(s.sharepoint.folder || "")}"></label></div>
 <label class="chk"><input type="checkbox" id="bk-sp" ${s.sharepoint.enabled ? "checked" : ""}> ส่งสำเนาขึ้น SharePoint ด้วย</label>
@@ -1658,7 +1660,7 @@ ${bkBanner}${testBanner}
     const $ = (id) => document.getElementById(id);
     $("bk-save").onclick = async () => {
       try {
-        await post("/backup", { enabled: $("bk-on").checked, keepDays: $("bk-keep").value, copyDir: $("bk-copy").value.trim(), sharepoint: { enabled: $("bk-sp").checked, siteId: $("bk-site").value.trim(), folder: $("bk-folder").value.trim() } }, "PUT");
+        await post("/backup", { enabled: $("bk-on").checked, keepDays: $("bk-keep").value, copyDir: $("bk-copy").value.trim(), copyKeepDays: $("bk-ckeep").value, copyMonthly: $("bk-cmon").value, sharepoint: { enabled: $("bk-sp").checked, siteId: $("bk-site").value.trim(), folder: $("bk-folder").value.trim() } }, "PUT");
         toast("บันทึกการตั้งค่า backup แล้ว");
         loadBackupCard();
       } catch (e) {

@@ -41,7 +41,28 @@ pm2 restart case-v3
 
 backup ที่อยู่บน server เครื่องเดียวกันไม่ช่วยถ้าดิสก์พังหรือเครื่องหาย เลือกอย่างน้อย 1 ทาง
 
-**ก. โฟลเดอร์ NAS หรือเครื่องอื่น** mount โฟลเดอร์นั้นบน server แล้วใส่ path เต็มในช่อง "คัดลอกไปโฟลเดอร์นอกเครื่องด้วย" ระบบลบไฟล์เก่าตามจำนวนวันที่ตั้งไว้ให้ด้วย
+**ก. โฟลเดอร์ NAS หรือเครื่องอื่น** mount โฟลเดอร์นั้นบน server แล้วใส่ path เต็มในช่อง "คัดลอกไปโฟลเดอร์นอกเครื่องด้วย"
+
+ตัวอย่างที่ใช้จริง (NAS 192.168.1.224, share `svc-case-backup`, บัญชีบน NAS เอง):
+```bash
+sudo apt install -y cifs-utils
+sudo mkdir -p /mnt/nas/case-backup
+sudo bash -c 'umask 077; read -rp "NAS user: " u; read -rsp "Password: " p; echo; printf "username=%s\npassword=%s\n" "$u" "$p" > /root/.nas-case-backup'
+# บัญชี AD: เพิ่มบรรทัด domain=<ชื่อ domain> ในไฟล์นั้น
+echo "//192.168.1.224/svc-case-backup /mnt/nas/case-backup cifs credentials=/root/.nas-case-backup,uid=$(id -u),gid=$(id -g),file_mode=0600,dir_mode=0700,vers=3.0,_netdev,nofail,x-systemd.automount,x-systemd.mount-timeout=30 0 0" | sudo tee -a /etc/fstab
+sudo systemctl daemon-reload && sudo mount -a
+```
+
+การเก็บไฟล์ (ตั้งในหน้าเว็บ):
+
+| ที่เก็บ | ค่าเริ่มต้น |
+| --- | --- |
+| บน server | 7–14 วัน ("เก็บบน server ย้อนหลัง") |
+| NAS / SharePoint รายวัน | 30 วัน |
+| NAS / SharePoint รายเดือน | backup แรกของแต่ละเดือน 12 เดือน |
+
+ทุกที่เก็บไฟล์ล่าสุดอย่างน้อย 3 ไฟล์เสมอ แม้ backup จะหยุดไปหลายวัน
+แนะนำเปิด Snapshot หรือ Recycle Bin ของ share บน NAS ด้วย เพราะ server มีสิทธิ์ลบไฟล์เก่าบน NAS
 
 **ข. SharePoint** ใช้แอป Entra ตัวเดิม แต่จำกัดให้เขียนได้ site เดียว (ห้ามให้ Sites.ReadWrite.All หรือ Files.ReadWrite.All)
 
