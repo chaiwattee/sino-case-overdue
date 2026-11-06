@@ -12,7 +12,7 @@ function layout(color, inner, { footer } = {}) {
   return `<!doctype html><html lang="en"><body style="margin:0;padding:24px;background:#F3F5F9;font-family:'Segoe UI',Tahoma,Arial,sans-serif;color:#18212F">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;background:#FFFFFF;border:1px solid #D9DFE8;border-radius:12px;overflow:hidden">
 <tr><td style="height:6px;background:${color};font-size:0;line-height:0">&nbsp;</td></tr><tr><td style="padding:28px 30px;font-size:15px;line-height:1.65">
-<p style="margin:0 0 16px"><img src="${esc(config3.baseUrl)}/sinostech-logo.png" alt="SINO S-TECH LIMITED" width="185" height="60" style="display:block;border:0"></p>
+<p style="margin:0 0 16px"><img src="${esc(config3.baseUrl)}/sinostech-logo.png" alt="SINO S-TECH LIMITED" width="240" height="60" style="display:block;border:0"></p>
 ${inner}
 <p style="margin:22px 0 0;padding-top:14px;border-top:1px solid #E2E5EA;font-size:13px;color:#5B6675">${footer || "Support, SINO S-TECH LIMITED · You can reply to this email with more information or attachments. Please keep the [REQ-…] number in the subject so it goes to the same case."}</p>
 </td></tr></table></body></html>`;

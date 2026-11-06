@@ -379,6 +379,11 @@ async function teamRecipients(i) {
   }
   const s = await settings();
   let to = splitList(s.notifyTo);
+  // Requests that came in by email go to the address set in the email section (default support@), if any.
+  if (i.channel === "email") {
+    const e = await require("./mailintake").emailSettings();
+    if (splitList(e.teamNotifyTo).length) to = splitList(e.teamNotifyTo);
+  }
   if (!to.length) {
     const ae = await getSetting("alert_email", null);
     to = splitList((ae && ae.cc) || config.alertCc.join(","));

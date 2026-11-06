@@ -387,7 +387,7 @@ tr.ext-row td:first-child { border-left: 4px solid var(--accent); }
 .login-note { font-size: 13px; line-height: 1.6; color: var(--muted); background: var(--surface-2); border-radius: 10px; padding: 10px 12px; }
 .linkbtn { font: inherit; font-size: 14px; background: none; border: 0; padding: 4px 0; color: var(--accent); cursor: pointer; text-align: left; text-decoration: underline; }
 .logo-chip { display: block; width: fit-content; background: #FFFFFF; border-radius: 12px; padding: 8px 12px; margin-bottom: 18px; }
-.logo-chip img { display: block; width: 185px; height: auto; }
+.logo-chip img { display: block; width: 240px; height: auto; }
 
 /* KPI */
 .kp-g3 { display: grid; grid-template-columns: 300px minmax(0, 1fr) minmax(0, 1fr); gap: 16px; margin-bottom: 16px; }

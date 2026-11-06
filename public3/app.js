@@ -2312,6 +2312,7 @@ ${em.mock ? `<div class="banner warn">โหมดข้อมูลจำลอ
 <div class="stat2" style="grid-template-columns:repeat(5,1fr)"><div><div class="k">สร้างคำขอ (30 วัน)</div><div class="v">${em.counts.created}</div></div><div><div class="k">เพิ่มในเรื่องเดิม</div><div class="v">${em.counts.appended}</div></div><div><div class="k">พักให้ Admin ตรวจ</div><div class="v">${em.counts.held}</div></div><div><div class="k">ข้าม</div><div class="v">${em.counts.ignored}</div></div><div><div class="k">ผิดพลาด</div><div class="v">${em.counts.errors}</div></div></div>
 <div class="formgrid">
 <label class="f">กล่องจดหมาย (shared mailbox)<input id="em-mb" value="${esc(es.mailbox)}" placeholder="service@sinostech.co.th"></label>
+<label class="f">แจ้งทีมเมื่อมีเคสใหม่ทาง email ที่<input id="em-team" value="${esc(es.teamNotifyTo || "")}" placeholder="support@sinostech.co.th"><span class="hint">ใส่ได้หลาย email คั่นด้วยจุลภาค เว้นว่าง = ใช้รายชื่อแจ้งทีมเดียวกับ LINE OA / ลิงก์ฟอร์ม · Owner เคสล่าสุดของลูกค้ารายนั้นได้ CC เหมือนเดิม</span></label>
 <label class="f">email จากโดเมนที่ยังไม่ผูกกับลูกค้า<select id="em-unk"><option value="accept" ${es.unknownDomain === "accept" ? "selected" : ""}>รับเป็นคำขอปกติ ตอบลูกค้าทันที ยืนยันลูกค้าบนหน้าเคสภายหลัง (แนะนำ)</option><option value="hold" ${es.unknownDomain === "hold" ? "selected" : ""}>สร้างคำขอแต่พักไว้ให้ Admin / Manager ตรวจ (ไม่ตอบลูกค้า)</option><option value="ignore" ${es.unknownDomain === "ignore" ? "selected" : ""}>ข้าม ไม่สร้างคำขอ</option></select></label>
 <label class="f">ข้าม email จากโดเมน (ภายในบริษัท)<input id="em-ign" value="${esc(es.ignoreDomains.join(", "))}" placeholder="sinostech.co.th"></label>
 <label class="f">ผู้ส่งรายเดียวส่งเรื่องใหม่ได้ต่อชั่วโมง (เกินนี้พักไว้)<input id="em-rate" type="number" min="1" max="100" value="${es.perSenderPerHour}"></label>
@@ -2422,7 +2423,7 @@ ${d.outbox.map((o) => `<tr><td>${fdt(o.created_at)}</td><td class="mono">${esc(o
       b.disabled = false;
     };
     $("em-save").onclick = act(async () => {
-      await post("/intake-admin/email", { enabled: $("em-on").checked, mailbox: $("em-mb").value.trim(), autoReply: $("em-ack").checked, unknownDomain: $("em-unk").value, ignoreDomains: $("em-ign").value, perSenderPerHour: $("em-rate").value, keepDays: $("em-keep").value }, "PUT");
+      await post("/intake-admin/email", { enabled: $("em-on").checked, mailbox: $("em-mb").value.trim(), teamNotifyTo: $("em-team").value.trim(), autoReply: $("em-ack").checked, unknownDomain: $("em-unk").value, ignoreDomains: $("em-ign").value, perSenderPerHour: $("em-rate").value, keepDays: $("em-keep").value }, "PUT");
       toast($("em-on").checked ? "บันทึกแล้ว ระบบเริ่มอ่านกล่องภายใน 2 นาที" : "บันทึกแล้ว", 5000);
       reload();
     });

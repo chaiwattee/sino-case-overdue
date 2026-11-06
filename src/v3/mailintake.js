@@ -23,6 +23,7 @@ const intake = () => require("./intake");
 const DEFAULTS = {
   enabled: false,
   mailbox: "",
+  teamNotifyTo: "support@sinostech.co.th", // team alert for new requests from this mailbox (empty = the intake notify list)
   autoReply: true,
   unknownDomain: "accept", // accept (normal request; customer confirmed on the case) | hold | ignore
   ignoreDomains: ["sinostech.co.th"],
@@ -56,11 +57,17 @@ async function saveEmailSettings(user, b) {
   const mailbox = lower(b.mailbox);
   if (mailbox && !isEmail(mailbox)) throw bad("ชื่อกล่องจดหมายไม่ถูกต้อง");
   if (b.enabled && !mailbox) throw bad("กรุณาใส่กล่องจดหมายก่อนเปิดใช้");
+  const teamList = [...new Set(String(b.teamNotifyTo || "").split(/[,;\s]+/).map(lower).filter(Boolean))];
+  const badAddr = teamList.find((x) => !isEmail(x));
+  if (badAddr) throw bad(`email แจ้งทีมไม่ถูกต้อง: ${badAddr}`);
+  if (mailbox && teamList.includes(mailbox)) throw bad("email แจ้งทีมต้องไม่ใช่กล่องรับแจ้งเคสเดียวกัน");
+  const teamNotifyTo = teamList.join(", ");
   const num = (v, lo, hi, def) => (Number.isFinite(Number(v)) ? Math.min(hi, Math.max(lo, Math.round(Number(v)))) : def);
   const next = {
     ...cur,
     enabled: !!b.enabled,
     mailbox,
+    teamNotifyTo,
     autoReply: b.autoReply !== false,
     unknownDomain: ["accept", "hold", "ignore"].includes(b.unknownDomain) ? b.unknownDomain : "accept",
     ignoreDomains: [...new Set(String(Array.isArray(b.ignoreDomains) ? b.ignoreDomains.join(",") : b.ignoreDomains || "").split(/[,;\s]+/).map((x) => lower(x).replace(/^@/, "")).filter(Boolean))],
@@ -70,7 +77,7 @@ async function saveEmailSettings(user, b) {
   // Mail that arrived before the channel was switched on (or before the mailbox changed) is never turned into requests.
   if (next.enabled && (!cur.enabled || cur.mailbox !== mailbox || !cur.startedAt)) next.startedAt = new Date().toISOString();
   await setSetting("intake", { ...s, email: next });
-  await audit(user, "intake_email_settings", mailbox, { enabled: next.enabled, autoReply: next.autoReply, unknownDomain: next.unknownDomain, ignoreDomains: next.ignoreDomains });
+  await audit(user, "intake_email_settings", mailbox, { enabled: next.enabled, teamNotifyTo: next.teamNotifyTo, autoReply: next.autoReply, unknownDomain: next.unknownDomain, ignoreDomains: next.ignoreDomains });
   return next;
 }
 
