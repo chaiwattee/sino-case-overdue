@@ -295,7 +295,18 @@ ${showOwner ? `<td><a href="#/owner/${encodeURIComponent(c.ownerId)}">${esc(c.ow
   // ------------------------------------------------------------ overview
   async function viewOverview(params) {
     setNav("overview");
-    const [data, ikHtml, extHtml, lk] = await Promise.all([api("/overview?" + qs({ source: params.source })), intakeSection(), extPendingSection(), lookups()]);
+    const [data, ikHtml, extHtml, lk, srAll] = await Promise.all([api("/overview?" + qs({ source: params.source })), intakeSection(), extPendingSection(), lookups(), srList("team")]);
+    const srTeam = srAll.filter((r) => !params.source || r.team === params.source);
+    const srCount = (st) => srTeam.filter((r) => (st === "pending" ? ["pending", "info"].includes(r.status) : r.status === st)).length;
+    const srLate = srTeam.filter((r) => r.status === "overdue").sort((a, b) => b.overdueDays - a.overdueDays);
+    const srHtml = srCount("pending") + srCount("in_progress") + srCount("overdue")
+      ? `<section class="card srsum"><div class="title"><h2>คำขอบริการภายใน</h2><a href="#/sr?scope=team">ดูทั้งหมด</a></div>
+<div class="kpis">
+<a class="kpi k-r1" href="#/sr?scope=team&status=pending"><div class="l">รออนุมัติ</div><div class="v">${srCount("pending")}</div></a>
+<a class="kpi k-normal" href="#/sr?scope=team&status=in_progress"><div class="l">กำลังดำเนินการ</div><div class="v">${srCount("in_progress")}</div></a>
+<a class="kpi k-overdue" href="#/sr?scope=team&status=overdue"><div class="l">เลย Target</div><div class="v">${srCount("overdue")}</div></a>
+</div>${srLate.length ? srWorkTable(srLate.slice(0, 5), { showAssignee: true }) : ""}</section>`
+      : "";
     cfg = data.config;
     const k = data.kpis;
     const openTotal = k.open || 0;
@@ -325,6 +336,7 @@ ${lvl("export") === "all" ? `<a class="btn" href="api/export?${qs({ from: daysAg
 ${can("case_create") ? `<a class="btn primary" href="#/case/new">เปิดเคสใหม่</a>` : ""}</div></div>
 ${extHtml}
 ${ikHtml}
+${srHtml}
 <form class="ofilters" id="flt" onsubmit="return false">
 <label class="f">ทีม<select name="source"><option value="">ทุกทีมที่เห็นได้ (${data.sources.length})</option>${teamOpts}</select></label>
 <label class="f">ค้นหาเคส<input type="search" name="q" placeholder="เลขเคส, CS, งาน, Owner, Resolution"></label>
@@ -498,7 +510,9 @@ ${caseTable(cases, { missingRes: showRes, empty: "ไม่พบเคสตา
 
   async function viewMine(params) {
     setNav("mine");
-    const [{ cases }, lk, ikHtml, extHtml] = await Promise.all([api("/cases?mine=1"), lookups(), intakeSection(), extPendingSection()]);
+    const [{ cases }, lk, ikHtml, extHtml, srAll] = await Promise.all([api("/cases?mine=1"), lookups(), intakeSection(), extPendingSection(), srList("assigned")]);
+    const srMine = srAll.filter(srOpen).sort(srByTarget);
+    const srLate = srMine.filter((r) => r.status === "overdue" || r.daysLeft === 0 || r.daysLeft === 1);
     const tab = params.tab || "open";
     const open = cases.filter((c) => c.stage !== "closed");
     const closed30 = cases.filter((c) => c.stage === "closed" && (c.endDate || "") >= daysAgo(30));
@@ -535,7 +549,9 @@ ${soon.length ? `<div class="banner warn" role="status">${soon.map((c) => `<a hr
 <div class="kpi k-r2"><div class="l">แจ้งรอบ 2</div><div class="v">${cnt("r2")}</div></div>
 <div class="kpi k-overdue"><div class="l">เกิน Due</div><div class="v">${cnt("overdue")}</div></div>
 <div class="kpi k-closed"><div class="l">ปิดทัน SLA (30 วัน)</div><div class="v">${sla}</div></div>
+${srMine.length ? `<a class="kpi k-sr" href="#mine-sr"><div class="l">คำขอบริการค้าง</div><div class="v">${srMine.length}</div><div class="s">${srMine.filter((r) => r.status === "overdue").length ? `เลย Target ${srMine.filter((r) => r.status === "overdue").length}` : "ไม่มีที่เลย Target"}</div></a>` : ""}
 </div>
+${srLate.length ? `<div class="banner warn" role="status">คำขอบริการ: ${srLate.map((r) => `<a href="#/sr/${r.id}">${esc(r.srNo)}</a> ${esc(r.title)} ${r.status === "overdue" ? `เลย Target ${r.overdueDays} วันทำการ` : r.daysLeft === 0 ? "ครบ Target วันนี้" : "ครบ Target วันทำการถัดไป"}`).join(" · ")}</div>` : ""}
 <section class="card">
 <div class="title"><div class="tabs2" role="tablist">
 <a role="tab" href="#/mine?tab=open" class="${tab === "open" ? "on" : ""}" aria-selected="${tab === "open"}">ยังเปิดอยู่ (${open.length})</a>
@@ -555,6 +571,8 @@ ${list.map((c) => `<tr class="click" data-href="#/case/${c.id}">
 <td style="font-size:13px" class="muted">${fdt(c.updatedAt)}</td>
 <td style="text-align:right"><a href="#/case/${c.id}" style="font-weight:600">แก้ไข</a></td></tr>${extRow(c, { before: 5, after: 3 })}`).join("")}</tbody></table></div>` : `<div class="empty">${tab === "open" ? "ไม่มีเคสที่เปิดอยู่ กด “เปิดเคสใหม่” เพื่อเริ่ม" : "ไม่มีเคส"}</div>`}
 </section>
+<section class="card" id="mine-sr"><div class="title"><h2>คำขอบริการที่ได้รับมอบหมาย (${srMine.length})</h2><span>งานภายในจากทีมอื่น นับตาม Target date ที่ Manager ตั้ง ไม่ใช่ SLA ${cfg.slaDays} วัน · <a href="#/sr?scope=assigned">ดูทั้งหมด</a></span></div>
+${srWorkTable(srMine)}</section>
 <p class="hint">เปลี่ยน Status ในตารางแล้วบันทึกทันที ถ้าเลือก Success, Resolved, Cancel หรือ N/A ระบบจะให้กรอก Resolution ก่อนปิด แล้วใส่ End date ให้และหยุดแจ้งเตือน</p>`;
     bindRowLinks();
     bindIntakeActions($app, () => route());
@@ -896,7 +914,8 @@ ${actsHtml(data.activities)}</section>`}
       $app.innerHTML = `<div class="empty">ยังไม่มีข้อมูล Owner</div>`;
       return;
     }
-    const o = await api("/owner/" + encodeURIComponent(id));
+    const [o, srAll] = await Promise.all([api("/owner/" + encodeURIComponent(id)), srList("team")]);
+    const srOwner = srAll.filter((r) => srOpen(r) && r.assignee && r.assignee.email && o.email && r.assignee.email.toLowerCase() === String(o.email).toLowerCase()).sort(srByTarget);
     const k = o.kpis;
     const open = o.cases.filter((c) => c.stage !== "closed");
     const closed = o.cases.filter((c) => c.stage === "closed");
@@ -932,8 +951,10 @@ ${lvl("export") === "all" ? `<a class="btn" href="api/export?${qs({ from: daysAg
 <div class="kpi k-r2"><div class="l">แจ้งรอบ 2</div><div class="v">${k.r2}</div></div>
 <div class="kpi k-overdue"><div class="l">เกิน Due</div><div class="v">${k.overdue}</div></div>
 <div class="kpi k-closed"><div class="l">ปิดทัน SLA (30 วัน)</div><div class="v">${k.sla.pct === null ? "-" : k.sla.pct + "%"}</div><div class="s">${k.sla.onTime} จาก ${k.sla.closed} เคส</div></div>
+<div class="kpi k-sr"><div class="l">คำขอบริการค้าง</div><div class="v">${srOwner.length}</div><div class="s">เลย Target ${srOwner.filter((r) => r.status === "overdue").length}</div></div>
 </div>
 <section class="card"><div class="title"><h2>เคสที่ยังไม่ปิด</h2><span>เรียงจากเปิดนานสุด</span></div>${caseTable(open, { showOwner: false })}</section>
+<section class="card"><div class="title"><h2>คำขอบริการที่ยังไม่ปิด (${srOwner.length})</h2><span>งานภายในที่ได้รับมอบหมาย · เรียงตาม Target date</span></div>${srWorkTable(srOwner)}</section>
 <div class="grid2">
 <section class="card"><h2>ประวัติแจ้งเตือน (60 วัน)</h2>${historyHtml || `<div class="empty">ยังไม่มี email แจ้งเตือน</div>`}</section>
 <section class="card"><h2>ปิดเคสย้อนหลัง 4 สัปดาห์</h2>
@@ -957,7 +978,8 @@ ${closed.length ? `<section class="card"><div class="title"><h2>ปิดแล�
     const closed = params.closed ?? "7";
     const showSys = params.sys === "1";
     const limit = params.n === "all" ? Infinity : Number(params.n || 0) || Infinity;
-    const m = await api(`/owner/${encodeURIComponent(id)}/meeting?closed=${closed}`);
+    const [m, srAll] = await Promise.all([api(`/owner/${encodeURIComponent(id)}/meeting?closed=${closed}`), srList("team")]);
+    const srOwner = srAll.filter((r) => srOpen(r) && r.assignee && m.email && r.assignee.email.toLowerCase() === String(m.email).toLowerCase()).sort(srByTarget);
     const k = m.kpis;
     const gen = new Date(m.generatedAt);
     const open = m.cases.filter((c) => c.stage !== "closed");
@@ -1016,7 +1038,8 @@ ${actRows(c)}
 <div class="mt-kpis">
 <div><b>${k.open}</b>ยังไม่ปิด</div><div class="k-normal"><b>${k.normal}</b>ปกติ</div><div class="k-r1"><b>${k.r1}</b>แจ้งรอบ 1</div>
 <div class="k-r2"><b>${k.r2}</b>แจ้งรอบ 2</div><div class="k-overdue"><b>${k.overdue}</b>เกิน Due</div>
-<div><b>${k.sla.pct === null ? "-" : k.sla.pct + "%"}</b>ปิดทัน SLA (30 วัน)</div></div>
+<div><b>${k.sla.pct === null ? "-" : k.sla.pct + "%"}</b>ปิดทัน SLA (30 วัน)</div>
+<div class="k-sr"><b>${srOwner.length}</b>คำขอบริการค้าง</div></div>
 ${m.cases.length ? `<table class="mt-index"><thead><tr><th>#</th><th>เลขเคส</th><th>ลูกค้า</th><th>Severity</th><th>งาน</th><th>Status</th><th>อายุเคส</th><th>อัปเดตล่าสุด</th></tr></thead><tbody>
 ${m.cases.map((c, i) => { const la = lastAct(c); return `<tr class="${c.stage === "closed" ? "done" : ""}"><td>${i + 1}</td><td class="mono"><a href="#mc-${c.id}" data-jump="${c.id}">${esc(caseRef(c))}</a>${csOf(c) ? `<div class="muted" style="font-size:11px">${esc(csOf(c))}</div>` : ""}</td><td><strong>${esc(c.site || "-")}</strong></td><td>${sevChip(c.severity)}</td>
 <td class="muted">${esc(c.task || "")}</td><td>${esc(c.status || "-")}</td>
@@ -1024,6 +1047,7 @@ ${m.cases.map((c, i) => { const la = lastAct(c); return `<tr class="${c.stage ==
 </tbody></table>` : `<div class="empty">ไม่มีเคสที่ต้องแสดง</div>`}
 ${open.length ? `<h2 class="mt-sec">เคสที่ยังไม่ปิด (${open.length})</h2>${open.map((c, i) => card(c, i)).join("")}` : ""}
 ${done.length ? `<h2 class="mt-sec">ปิดแล้วใน ${m.closedDays} วันล่าสุด (${done.length})</h2>${done.map((c, i) => card(c, open.length + i)).join("")}` : ""}
+${srOwner.length ? `<h2 class="mt-sec">คำขอบริการภายในที่ยังไม่ปิด (${srOwner.length})</h2>${srWorkTable(srOwner, { print: true })}` : ""}
 </section>`;
     const go = (patch) => {
       const p = { closed, n: params.n, sys: showSys ? "1" : "", ...patch };
@@ -2895,6 +2919,32 @@ ${r.canEditCategories ? `<section class="card noprint"><details><summary style="
   }
   const fileBox = (meta, label = "ไฟล์แนบ (ไม่บังคับ)") => `<div class="f fp"><span>${label}</span><input type="file" multiple accept="${meta.fileExt.map((x) => "." + x).join(",")}">
 <span class="hint">ไม่เกิน ${meta.maxFileMb} MB ต่อไฟล์ · วางภาพหน้าจอ (Ctrl+V) ในกล่องนี้ได้</span><div class="fp-list"></div></div>`;
+
+  /** Service requests visible to this user ("team" = everything they may see), [] on any error. */
+  async function srList(scope) {
+    if (ME.user.role === "viewer" || ME.user.role === "requester") return [];
+    try {
+      return (await api("/sr?scope=" + scope)).items;
+    } catch (e) {
+      return [];
+    }
+  }
+  const srOpen = (r) => r.status === "in_progress" || r.status === "overdue";
+  // Overdue first, then the nearest target date.
+  const srByTarget = (a, b) => (b.status === "overdue") - (a.status === "overdue") || String(a.targetDate || "").localeCompare(String(b.targetDate || ""));
+  const srDue = (r) => (r.status === "overdue" ? `<span class="t-over">เลย ${r.overdueDays} วันทำการ</span>` : r.daysLeft === 0 ? `<span class="t-r2">ครบวันนี้</span>` : r.daysLeft != null ? `อีก ${r.daysLeft} วันทำการ` : "");
+  /** Compact table of service requests for the case pages (เคสของฉัน, ราย Owner, ประชุม). */
+  function srWorkTable(items, { showAssignee = false, print = false } = {}) {
+    if (!items.length) return `<div class="empty">ไม่มีคำขอบริการค้าง</div>`;
+    return `<div class="tablewrap"><table class="${print ? "mt-index" : ""}"><thead><tr><th>เลขคำขอ</th><th>งานที่ขอ</th><th>ผู้ขอ</th>${showAssignee ? "<th>ผู้รับผิดชอบ</th>" : ""}<th>Severity</th><th>Target</th><th>สถานะ</th></tr></thead><tbody>
+${items.map((r) => `<tr class="click" data-href="#/sr/${r.id}"><td class="mono"><a href="#/sr/${r.id}">${esc(r.srNo)}</a></td>
+<td style="font-weight:600">${esc(r.title)}${r.customer ? `<div class="hint">${esc(r.customer)}</div>` : ""}</td>
+<td>${esc(r.requester.name)}<div class="hint">${esc(r.requester.department || "")}</div></td>
+${showAssignee ? `<td>${r.assignee ? esc(r.assignee.name) : "-"}</td>` : ""}
+<td>${srSev(r)}</td>
+<td>${r.targetDate ? fd(r.targetDate) : "-"}<div class="hint">${srDue(r)}</div></td>
+<td>${srChip(r)}${r.ext ? `<div class="hint">ขอเลื่อนเป็น ${fd(r.ext.target)}</div>` : ""}</td></tr>`).join("")}</tbody></table></div>`;
+  }
 
   async function viewSr(params) {
     setNav("sr");

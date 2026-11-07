@@ -500,3 +500,7 @@ label.f[hidden], div.f[hidden] { display: none; }
 .srapprove { border-color: var(--r1); }
 .srext { display: flex; justify-content: space-between; gap: 14px; align-items: center; flex-wrap: wrap; }
 .btn.ok { background: var(--normal); border-color: var(--normal); color: #fff; }
+
+.kpi.k-sr { --k: #9B59B6; }
+.mt-kpis .k-sr b { color: #9B59B6; }
+.srsum .kpis { margin-bottom: 4px; }
