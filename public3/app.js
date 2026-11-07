@@ -26,8 +26,8 @@
   };
   const STAGE = { normal: "ปกติ", r1: "แจ้งรอบ 1", r2: "แจ้งรอบ 2", overdue: "เกิน Due", no_start: "ไม่มี Start date", closed: "ปิดแล้ว" };
   const ALERT = { r1: "แจ้งรอบ 1", r2: "แจ้งรอบ 2", overdue: "เกิน Due" };
-  const ROLE = { admin: "Admin", manager: "Manager", observer: "Observer", engineer: "Engineer", viewer: "Viewer" };
-  const ROLE_HINT = { admin: "ทำได้ทุกอย่าง รวมถึงจัดการผู้ใช้และตั้งค่าระบบ", manager: "ดูและแก้เคสของทีม อนุมัติขยายเวลา ส่ง Report ปรับคะแนน KPI", observer: "ดูได้ทุกทีมทุกหน้า (ภาพรวม เคส ราย Owner KPI Report ประวัติแก้ไข) แก้ไขอะไรไม่ได้", engineer: "เปิด แก้ และปิดเคสของตัวเอง เห็น KPI ของตัวเอง", viewer: "ดูภาพรวมและเคสของทีมตัวเองอย่างเดียว" };
+  const ROLE = { admin: "Admin", manager: "Manager", observer: "Observer", engineer: "Engineer", viewer: "Viewer", requester: "ผู้ขอบริการ" };
+  const ROLE_HINT = { admin: "ทำได้ทุกอย่าง รวมถึงจัดการผู้ใช้และตั้งค่าระบบ", manager: "ดูและแก้เคสของทีม อนุมัติขยายเวลา ส่ง Report ปรับคะแนน KPI", observer: "ดูได้ทุกทีมทุกหน้า (ภาพรวม เคส ราย Owner KPI Report ประวัติแก้ไข) แก้ไขอะไรไม่ได้", engineer: "เปิด แก้ และปิดเคสของตัวเอง เห็น KPI ของตัวเอง", viewer: "ดูภาพรวมและเคสของทีมตัวเองอย่างเดียว", requester: "พนักงานทีมอื่น ส่งคำขอบริการและดูได้เฉพาะคำขอของตัวเอง ไม่เห็นเคสลูกค้า (ระบบสร้างให้อัตโนมัติเมื่อ login ด้วยบัญชี Microsoft ของบริษัท)" };
   document.addEventListener("change", (e) => {
     const t = e.target;
     if (t && t.name === "role" && t.tagName === "SELECT") {
@@ -40,7 +40,7 @@
   const SEV_CHIP = { Critical: "overdue", High: "r2", Medium: "r1", Low: "normal", "Request information": "closed" };
   const SEV_SHORT = { "Request information": "Request info" };
   const sevChip = (v) => (v ? `<span class="chip c-${SEV_CHIP[v] || "closed"} sev" title="Severity: ${esc(v)}">${esc(SEV_SHORT[v] || v)}</span>` : "");
-  // Case number CASE-2026-0001 (every case) with the vendor CS Number underneath.
+  // Case number CASE-2026-11-0001 (every case) with the vendor CS Number underneath.
   const caseRef = (c) => c.caseNo || c.case_no || c.csNumber || c.cs_number || "#" + (c.id || c.case_id);
   const csOf = (c) => c.csNumber || c.cs_number || "";
   const caseCell = (c, href, extra = "") =>
@@ -177,8 +177,9 @@ ${edit ? "" : `<fieldset class="f" style="border:0;padding:0;margin:0"><legend s
       ["users", "#/users", "จัดการผู้ใช้", lvl("users_manage") !== "none"],
       ["settings", "#/settings", "ตั้งค่า", lvl("settings_manage") !== "none"],
     ];
+    tabs.splice(3, 0, ["sr", "#/sr", "คำขอบริการ", ME.user.role !== "viewer"]);
     document.getElementById("tabs").innerHTML = tabs
-      .filter((t) => t[3])
+      .filter((t) => t[3] && (ME.user.role !== "requester" || t[0] === "sr"))
       .map(([k, h, l]) => `<a href="${h}" data-nav="${k}">${l}</a>`)
       .join("");
     const u = ME.user;
@@ -188,6 +189,8 @@ ${edit ? "" : `<fieldset class="f" style="border:0;padding:0;margin:0"><legend s
       u.role === "admin" || u.role === "observer" ? "ทุกทีม" : esc(u.teams.map((t) => teamLabel(t)).join(", ") || "ยังไม่มีทีม")
     }`;
     document.getElementById("menu-pw").hidden = u.auth_type !== "local";
+    const mp = document.getElementById("menu-profile");
+    if (mp) mp.hidden = false;
     const btn = document.getElementById("me-btn");
     const menu = document.getElementById("me-menu");
     btn.onclick = (e) => {
@@ -404,7 +407,7 @@ ${lvl("audit_view") !== "none" ? `<section class="card"><div class="title"><h2>�
       (!since || (c.startDate || "") >= since) &&
       (!stage || c.stage === stage) &&
       (!params.closedDays || (c.stage === "closed" && (c.endDate || "") >= daysAgo(Number(params.closedDays) - 1))) &&
-      (!q || [c.caseNo, c.csNumber, c.site, c.owner, c.task, c.product, c.note, c.resolution].some((v) => String(v || "").toLowerCase().includes(q)))
+      (!q || [c.caseNo, c.caseNoOld, c.csNumber, c.site, c.owner, c.task, c.product, c.note, c.resolution].some((v) => String(v || "").toLowerCase().includes(q)))
     );
     const stSet = new Set(st);
     const byStatus = base.filter((c) => !st.length || stSet.has(c.status));
@@ -502,7 +505,7 @@ ${caseTable(cases, { missingRes: showRes, empty: "ไม่พบเคสตา
     let list = tab === "open" ? open : tab === "closed" ? closed30 : cases;
     if (params.q) {
       const s = params.q.toLowerCase();
-      list = list.filter((c) => [c.caseNo, c.csNumber, c.site, c.task, c.product, c.severity, c.resolution].some((v) => String(v || "").toLowerCase().includes(s)));
+      list = list.filter((c) => [c.caseNo, c.caseNoOld, c.csNumber, c.site, c.task, c.product, c.severity, c.resolution].some((v) => String(v || "").toLowerCase().includes(s)));
     }
     list.sort((a, b) => (a.stage === "closed") - (b.stage === "closed") || (b.age || 0) - (a.age || 0));
     const cnt = (s) => open.filter((c) => c.stage === s).length;
@@ -1247,6 +1250,8 @@ ${extTable(p.extensions || [], "การขอขยายเวลาในช
 <div style="display:flex;align-items:center;gap:12px"><div class="avatar" style="width:46px;height:46px;font-size:18px" aria-hidden="true">${esc(sel.display_name.charAt(0).toUpperCase())}</div>
 <div><h2>${esc(sel.display_name)}</h2><div class="muted" style="font-size:13px">${esc(sel.email)} · ${sel.auth_type === "sso" ? "บัญชี Microsoft" : "บัญชีรหัสผ่าน"}</div></div></div>
 <label class="f">ชื่อที่แสดง<input name="display_name" value="${esc(sel.display_name)}"></label>
+<label class="f">เบอร์โทร<input name="phone" value="${esc(sel.phone || "")}" placeholder="081-234-5678"><span class="hint">แสดงใน email ถึงลูกค้าเมื่อรับเคส</span></label>
+<div class="formgrid" style="grid-template-columns:1fr 1fr;gap:10px"><label class="f">หน่วยงาน<input name="department" value="${esc(sel.department || "")}"></label><label class="f">ตำแหน่ง<input name="job_title" value="${esc(sel.job_title || "")}"></label></div>
 <label class="f">บทบาท<select name="role" ${sel.id === ME.user.id ? "disabled" : ""}>${Object.entries(ROLE).map(([k, l]) => `<option value="${k}" ${k === sel.role ? "selected" : ""}>${l}</option>`).join("")}</select><span class="hint" data-role-hint>${esc(ROLE_HINT[sel.role] || "")}</span></label>
 <fieldset><legend>ทีมที่เห็นเคส</legend>${teamChecks(sel)}</fieldset>
 <label class="chk" style="justify-content:space-between"><span>เปิดใช้งานบัญชี<span class="hint" style="display:block">ปิดแล้วเข้าระบบไม่ได้ แต่เคสเดิมยังอยู่ครบ</span></span><input type="checkbox" name="active" ${sel.active ? "checked" : ""} ${sel.id === ME.user.id ? "disabled" : ""}></label>
@@ -1290,7 +1295,7 @@ ${list.map((u) => `<tr class="click" data-href="#/users?id=${u.id}" style="${sel
     const f = document.getElementById("uf");
     f.onsubmit = async (e) => {
       e.preventDefault();
-      const body = { display_name: f.display_name.value, teams: [...f.querySelectorAll("input[name=teams]:checked")].map((x) => x.value) };
+      const body = { display_name: f.display_name.value, phone: f.phone.value, department: f.department.value, job_title: f.job_title.value, teams: [...f.querySelectorAll("input[name=teams]:checked")].map((x) => x.value) };
       if (!f.role.disabled) body.role = f.role.value;
       if (!f.active.disabled) body.active = f.active.checked;
       try {
@@ -1698,6 +1703,7 @@ ${(() => {
       return `<div class="banner ${w.error ? "warn" : bad ? "err" : "ok"}" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><span style="flex:1">${w.error ? `ตรวจคำเตือนของ Chrome ไม่สำเร็จ: ${esc(w.error)}` : bad ? `Google ติดธงเว็บนี้ว่าไม่ปลอดภัย (${bad} URL) ผู้ใช้ Chrome จะเห็นคำเตือน · แก้ที่ Google Search Console → Security issues → Request review` : w.at ? `Google ไม่ติดธงเว็บนี้ (ตรวจล่าสุด ${fdt(w.at)} ด้วย ${esc(w.api || "")})` : "ยังไม่เคยตรวจ"}</span><button class="btn" type="button" id="wr-check" style="min-height:34px">ตรวจตอนนี้</button></div>`;
     })()}
 ${newSites.length ? `<div class="banner warn">มีรายการที่ผู้ใช้เพิ่มใหม่ ${newSites.length} รายการ รอตรวจ (มีป้าย “ใหม่”) กด “แก้” เพื่อยืนยัน แก้ชื่อ หรือรวมกับรายการเดิม</div>` : ""}
+<section class="card" id="hol-card"><div class="title"><h2>วันหยุดบริษัท</h2><span>กำลังโหลด…</span></div></section>
 <section class="card" id="bk-card"><div class="title"><h2>Backup และทดสอบ restore</h2><span>กำลังโหลด…</span></div></section>
 <section class="card" id="ae"><div class="title"><h2>Email แจ้งเตือน Owner</h2><span>ผู้รับ email แจ้งเตือนแต่ละรอบ</span></div>
 <div class="tablewrap"><table style="min-width:720px"><thead><tr><th>รอบ</th><th>ส่งเมื่อ</th><th>ถึง</th><th style="text-align:center">CC รายชื่อด้านล่าง</th><th></th></tr></thead><tbody>
@@ -1767,6 +1773,7 @@ ${s.annualReports.map((a) => `<tr><td style="font-weight:600">${a.year + 543} ($
       }
     };
     loadBackupCard();
+    bindHolidays();
     document.getElementById("ae-save").onclick = async () => {
       const ccTypes = [...document.querySelectorAll("input[name=cct]:checked")].map((x) => x.value);
       try {
@@ -2183,7 +2190,7 @@ ${i.site ? "" : `<label class="f">ลูกค้า (Site)<select name="site"><
 <label class="f">CS Number (ถ้ามี)<input name="cs" placeholder="เช่น CS5056901"></label>
 <label class="f">Severity<select name="sev">${lk.severity.map((s) => `<option ${s === i.severity ? "selected" : ""}>${esc(s)}</option>`).join("")}</select></label></div>
 <label class="f">ข้อความถึง Owner / บันทึกแรก (ไม่บังคับ)<textarea name="note" rows="2" placeholder="เช่น ลูกค้าเคยเจออาการเดียวกันเมื่อเดือนก่อน ดูเคส CS5056401 ประกอบ"></textarea></label>
-<p class="hint" style="margin:0">เมื่อยืนยัน คำขอนี้กลายเป็นเคสปกติ เริ่มนับ SLA ${cfg.slaDays} วันวันนี้ และระบบแจ้งลูกค้า${i.channel === "email" ? "ทาง email " : i.channel === "line" ? "ทาง LINE " : ""}ว่าใครรับเคส</p>
+<p class="hint" style="margin:0">เมื่อยืนยัน คำขอนี้กลายเป็นเคสปกติ เริ่มนับ SLA ${cfg.slaDays} วันวันนี้ และระบบแจ้งลูกค้า${i.channel === "email" ? "ทาง email " : i.channel === "line" ? "ทาง LINE " : ""}ว่าใครรับเคส${!ME.user.phone ? ` <span style="color:var(--warn,#B4530A)">· คุณยังไม่ได้ใส่เบอร์โทร ลูกค้าจะไม่เห็นเบอร์ของคุณ <a href="#/profile">ใส่เบอร์</a></span>` : ""}</p>
 <div class="right"><button class="btn" value="cancel" formnovalidate>ยกเลิก</button><button class="btn primary" value="ok">ยืนยันรับเคส</button></div></form>`;
     const f = dlg.querySelector("#cf");
     const sync = () => {
@@ -2802,6 +2809,397 @@ ${r.canEditCategories ? `<section class="card noprint"><details><summary style="
     if (mo) mo.onchange = go;
   }
 
+  // ------------------------------------------------------------ service requests (internal, SR-…)
+  const SR_ST = { pending: "s-wait", info: "s-info", in_progress: "s-run", overdue: "s-due", done: "s-ok", rejected: "s-off", cancelled: "s-off" };
+  const SR_SEV = { urgent_high: "sv1", urgent: "sv2", normal: "sv3" };
+  const srChip = (r) => `<span class="srst ${SR_ST[r.status] || ""}">${esc(r.statusLabel)}</span>`;
+  const srSev = (r) => `<span class="srsev ${SR_SEV[r.severity] || ""}">${esc(r.severityLabel)}</span>`;
+  const dlong = (iso) => {
+    if (!iso) return "-";
+    const t = new Date(iso + "T00:00:00");
+    return t.toLocaleDateString("th-TH", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+  };
+  let SR_META = null;
+  async function srMeta(force) {
+    if (!SR_META || force) SR_META = await api("/sr/meta");
+    return SR_META;
+  }
+  async function refreshSrBadge() {
+    try {
+      const m = await srMeta(true);
+      const n = m.canManage ? m.counts.pending : 0;
+      const a = document.querySelector('#tabs a[data-nav="sr"]');
+      if (!a) return;
+      let b = a.querySelector(".badge");
+      if (!b && n) {
+        b = document.createElement("span");
+        b.className = "badge";
+        a.appendChild(b);
+      }
+      if (b) {
+        b.textContent = n;
+        b.hidden = !n;
+        b.title = `${n} คำขอรออนุมัติ`;
+      }
+    } catch (e) {}
+  }
+  /** Read picked/pasted files as base64 for the JSON API. */
+  function readFiles(list) {
+    return Promise.all(
+      [...list].map(
+        (f) =>
+          new Promise((ok, no) => {
+            const r = new FileReader();
+            r.onload = () => ok({ name: f.name || "pasted.png", type: f.type, data: String(r.result).split(",")[1] || "" });
+            r.onerror = () => no(new Error(`อ่านไฟล์ ${f.name} ไม่ได้`));
+            r.readAsDataURL(f);
+          })
+      )
+    );
+  }
+  /** A file input with paste support; returns a getter for the picked files. */
+  function filePicker(root, meta) {
+    const inp = root.querySelector("input[type=file]");
+    const out = root.querySelector(".fp-list");
+    const files = [];
+    const show = () => (out.innerHTML = files.map((f, i) => `<span class="gchip">📎 ${esc(f.name || "pasted.png")} <span class="muted">${Math.max(1, Math.round(f.size / 1024))} KB</span><button type="button" data-rm="${i}" aria-label="เอาไฟล์ ${esc(f.name)} ออก">×</button></span>`).join(""));
+    const add = (list) => {
+      for (const f of list) {
+        const ext = (f.name || "x.png").split(".").pop().toLowerCase();
+        if (!meta.fileExt.includes(ext)) toast(`ไฟล์ .${ext} ไม่รองรับ`, 5000);
+        else if (f.size > meta.maxFileMb * 1048576) toast(`${f.name} ใหญ่เกิน ${meta.maxFileMb} MB`, 5000);
+        else if (files.length >= 10) toast("แนบได้สูงสุด 10 ไฟล์ต่อครั้ง", 5000);
+        else files.push(f);
+      }
+      show();
+    };
+    inp.onchange = () => {
+      add(inp.files);
+      inp.value = "";
+    };
+    out.onclick = (e) => {
+      const b = e.target.closest("[data-rm]");
+      if (b) {
+        files.splice(Number(b.dataset.rm), 1);
+        show();
+      }
+    };
+    root.addEventListener("paste", (e) => {
+      const imgs = [...(e.clipboardData?.files || [])];
+      if (imgs.length) {
+        e.preventDefault();
+        add(imgs);
+      }
+    });
+    return { get: () => readFiles(files), count: () => files.length };
+  }
+  const fileBox = (meta, label = "ไฟล์แนบ (ไม่บังคับ)") => `<div class="f fp"><span>${label}</span><input type="file" multiple accept="${meta.fileExt.map((x) => "." + x).join(",")}">
+<span class="hint">ไม่เกิน ${meta.maxFileMb} MB ต่อไฟล์ · วางภาพหน้าจอ (Ctrl+V) ในกล่องนี้ได้</span><div class="fp-list"></div></div>`;
+
+  async function viewSr(params) {
+    setNav("sr");
+    const m = await srMeta(true);
+    const isReq = ME.user.role === "requester";
+    const scopes = isReq ? [["mine", "คำขอของฉัน"]] : [...(m.canManage || ME.user.role === "observer" ? [["team", "คำขอถึงทีม"]] : []), ["assigned", "ได้รับมอบหมาย"], ["mine", "ที่ฉันขอ"]];
+    const scope = scopes.some((x) => x[0] === params.scope) ? params.scope : scopes[0][0];
+    const { items } = await api("/sr?scope=" + scope);
+    const groups = [
+      ["", "ทั้งหมด", () => true],
+      ["pending", "รออนุมัติ", (r) => r.status === "pending"],
+      ["info", "ขอข้อมูลเพิ่ม", (r) => r.status === "info"],
+      ["in_progress", "กำลังดำเนินการ", (r) => r.status === "in_progress"],
+      ["overdue", "เลย Target", (r) => r.status === "overdue"],
+      ["done", "เสร็จแล้ว", (r) => r.status === "done"],
+      ["closed", "ไม่อนุมัติ / ยกเลิก", (r) => ["rejected", "cancelled"].includes(r.status)],
+    ];
+    const g = groups.find((x) => x[0] === (params.status || "")) || groups[0];
+    const rows = items.filter(g[2]);
+    const link = (o) => "#/sr?" + qs({ scope, status: params.status || "", ...o });
+    $app.innerHTML = `<div class="pagehead"><div><h1>คำขอบริการ</h1><p class="muted" style="margin:0">ขอให้ทีม Engineer ช่วยทำงานภายใน เช่น ข้อมูล รายงาน ตั้งค่า · แยกจากเคสลูกค้า</p></div>
+<a class="btn primary" href="#/sr/new">+ คำขอใหม่</a></div>
+${m.profileMissing.length ? `<div class="banner warn">กรอกหน่วยงาน ตำแหน่ง และเบอร์โทรของคุณก่อนส่งคำขอแรก <a href="#/profile">กรอกข้อมูล</a></div>` : ""}
+${scopes.length > 1 ? `<div class="fpills" role="tablist">${scopes.map(([k, l]) => `<a class="fpill ${k === scope ? "on" : ""}" role="tab" aria-selected="${k === scope}" href="#/sr?${qs({ scope: k })}">${l}</a>`).join("")}</div>` : ""}
+<div class="fpills" style="margin-top:8px">${groups.map(([k, l, f]) => {
+      const n = items.filter(f).length;
+      return k && !n && k !== (params.status || "") ? "" : `<a class="fpill ${k === (params.status || "") ? "on" : ""}" href="${link({ status: k })}">${l} <b>${n}</b></a>`;
+    }).join("")}</div>
+<section class="card" style="padding:0;margin-top:12px"><div class="tablewrap"><table class="srtable"><thead><tr><th>คำขอ</th><th>ผู้ขอ</th><th>ผู้รับผิดชอบ</th><th>สถานะ</th><th>Target</th></tr></thead><tbody>
+${rows.map((r) => `<tr data-go="#/sr/${r.id}" tabindex="0"><td><span class="mono muted">${esc(r.srNo)}</span><br><a href="#/sr/${r.id}" style="font-weight:600">${esc(r.title)}</a><br><span class="hint">${esc(r.teamLabel)} · ${srSev(r)}${r.customer ? ` · ${esc(r.customer)}` : ""}</span></td>
+<td>${esc(r.requester.name)}<br><span class="hint">${esc(r.requester.department || "")}</span></td>
+<td>${r.assignee ? esc(r.assignee.name) : `<span class="muted">-</span>`}</td>
+<td>${srChip(r)}${r.ext ? `<br><span class="hint">ขอเลื่อนเป็น ${dlong(r.ext.target)}</span>` : ""}</td>
+<td>${r.targetDate ? `${dlong(r.targetDate)}${r.status === "in_progress" && r.daysLeft != null ? `<br><span class="hint">อีก ${r.daysLeft} วันทำการ</span>` : r.status === "overdue" ? `<br><span class="hint" style="color:var(--bad,#C0283C)">เลย ${r.overdueDays} วันทำการ</span>` : ""}` : `${dlong(r.requestedDate)}<br><span class="hint">ที่ขอ</span>`}</td></tr>`).join("") || `<tr><td colspan="5" class="muted" style="padding:28px;text-align:center">ไม่มีคำขอ${g[0] ? "ในสถานะนี้" : ""}</td></tr>`}
+</tbody></table></div></section>`;
+    $app.querySelectorAll("tr[data-go]").forEach((tr) => {
+      tr.onclick = (e) => !e.target.closest("a") && (location.hash = tr.dataset.go);
+      tr.onkeydown = (e) => e.key === "Enter" && (location.hash = tr.dataset.go);
+    });
+  }
+
+  async function viewProfile(after) {
+    setNav("");
+    const { profile: p, missing } = await api("/profile");
+    $app.innerHTML = `<div class="pagehead"><div><h1>บัญชีของฉัน</h1><p class="muted" style="margin:0">${esc(p.email)} · ${ROLE[p.role] || p.role}</p></div></div>
+<form class="card" id="pf" style="max-width:620px">
+${missing.length ? `<div class="banner warn" style="margin:0">${after ? "ก่อนส่งคำขอแรก " : ""}ช่วยยืนยันข้อมูลของคุณ ทีมที่รับงานจะใช้ติดต่อกลับ${p.department || p.job_title || p.phone ? "<br>ระบบดึงข้อมูลบางส่วนจากบัญชี Microsoft ของบริษัทมาให้แล้ว ตรวจแล้วแก้ได้" : ""}</div>` : ""}
+<label class="f">ชื่อที่แสดง<input name="display_name" value="${esc(p.display_name)}" maxlength="120"></label>
+<div class="formgrid" style="grid-template-columns:1fr 1fr"><label class="f">หน่วยงาน / ฝ่าย<input name="department" value="${esc(p.department || "")}" placeholder="เช่น ฝ่ายขาย" required maxlength="120"></label>
+<label class="f">ตำแหน่ง<input name="job_title" value="${esc(p.job_title || "")}" placeholder="เช่น Account Manager" required maxlength="120"></label></div>
+<label class="f">เบอร์โทรที่ติดต่อได้<input name="phone" value="${esc(p.phone || "")}" placeholder="081-234-5678 หรือ 02-123-4567 ต่อ 105" required maxlength="60"><span class="hint">${["requester"].includes(p.role) ? "ทีมที่รับงานใช้ติดต่อกลับ" : "แสดงใน email ถึงลูกค้าเมื่อคุณรับเคส และในคำขอบริการ"}</span></label>
+<div class="right"><button class="btn primary" type="submit">${after ? "บันทึกแล้วไปต่อ" : "บันทึก"}</button></div></form>`;
+    const f = document.getElementById("pf");
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      try {
+        const r = await post("/profile", Object.fromEntries(["display_name", "department", "job_title", "phone"].map((k) => [k, f[k].value.trim()])), "PUT");
+        Object.assign(ME.user, { display_name: r.profile.display_name, phone: r.profile.phone, department: r.profile.department, job_title: r.profile.job_title });
+        SR_META = null;
+        toast("บันทึกข้อมูลแล้ว");
+        if (after) after();
+        else history.length > 1 ? history.back() : (location.hash = "#/sr");
+      } catch (err) {
+        toast(err.message, 6000);
+      }
+    };
+  }
+
+  async function viewSrNew() {
+    setNav("sr");
+    const m = await srMeta(true);
+    if (m.profileMissing.length) return viewProfile(() => viewSrNew());
+    const seg = (name, opts, cur) => `<div class="seg" role="radiogroup">${opts.map((o) => `<label><input type="radio" name="${name}" value="${esc(o.key)}" ${o.key === cur ? "checked" : ""} required><span>${esc(o.label)}</span></label>`).join("")}</div>`;
+    $app.innerHTML = `<div class="pagehead"><div><a href="#/sr" class="muted">← คำขอบริการ</a><h1>ส่งคำขอบริการ</h1></div></div>
+<form class="card" id="srf" style="max-width:820px">
+<div class="f"><span>ขอจากทีม</span>${seg("team", m.teams.map((t) => ({ key: t.code, label: t.label })), m.teams.length === 1 ? m.teams[0].code : "")}<span class="hint" id="sr-appr">เลือกทีมเพื่อดูผู้อนุมัติ</span></div>
+<label class="f">หัวข้อ<input name="title" required minlength="5" maxlength="200" placeholder="เช่น ขอ report การโทรของ call center KTB เดือน ต.ค."></label>
+<label class="f">รายละเอียดงานที่ต้องการ<textarea name="detail" rows="5" required minlength="20" maxlength="5000" placeholder="ต้องการอะไร ใช้ทำอะไร รูปแบบที่ต้องการ (เช่น Excel แยกรายวัน) ช่วงข้อมูล"></textarea></label>
+<div class="formgrid" style="grid-template-columns:1.2fr 1fr">
+<div class="f"><span>Severity</span>${seg("severity", m.severities, "normal")}<span class="hint" id="sr-sevhint">${esc(m.severities.find((x) => x.key === "normal").hint)}</span></div>
+<label class="f">ต้องการรับงานภายใน<input type="date" name="requestedDate" required min="${m.minDate}"><span class="hint">ตั้งแต่ ${dlong(m.minDate)} (วันทำการถัดไป) · Manager อาจปรับวันที่</span></label></div>
+<label class="f">เกี่ยวกับลูกค้า (ไม่บังคับ)<input name="customer" maxlength="120" placeholder="เช่น KTB"></label>
+${fileBox(m)}
+<div class="right"><a class="btn" href="#/sr">ยกเลิก</a><button class="btn primary" type="submit">ส่งคำขอ</button></div></form>`;
+    const f = document.getElementById("srf");
+    const fp = filePicker(f, m);
+    f.querySelectorAll("input[name=team]").forEach((x) => (x.onchange = () => (document.getElementById("sr-appr").textContent = `ผู้อนุมัติ: ${(m.managers[x.value] || []).join(", ") || "Admin"}`)));
+    f.querySelectorAll("input[name=severity]").forEach((x) => (x.onchange = () => (document.getElementById("sr-sevhint").textContent = m.severities.find((s) => s.key === x.value).hint)));
+    f.requestedDate.onchange = () => {
+      const day = new Date(f.requestedDate.value + "T00:00:00").getDay();
+      f.requestedDate.setCustomValidity(day === 0 || day === 6 || m.holidays.includes(f.requestedDate.value) ? "เลือกวันทำการ (ไม่ใช่เสาร์ อาทิตย์ หรือวันหยุด)" : "");
+    };
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      const btn = f.querySelector("button[type=submit]");
+      btn.disabled = true;
+      try {
+        const body = { team: f.team.value, title: f.title.value, detail: f.detail.value, severity: f.severity.value, requestedDate: f.requestedDate.value, customer: f.customer.value, files: await fp.get() };
+        const r = await post("/sr", body);
+        toast(`ส่งคำขอ ${r.srNo} แล้ว ระบบส่ง email ยืนยันให้คุณ`, 5000);
+        location.hash = "#/sr/" + r.id;
+      } catch (err) {
+        btn.disabled = false;
+        toast(err.message, 6000);
+      }
+    };
+  }
+
+  const SR_EV = {
+    submitted: "ส่งคำขอ", edited: "แก้ไขคำขอ", resubmitted: "แก้ไขและส่งใหม่", info: "ขอข้อมูลเพิ่ม", approved: "อนุมัติ", rejected: "ไม่อนุมัติ", cancelled: "ยกเลิก",
+    update: "ผู้ขอเพิ่มข้อมูล", note: "บันทึกจากทีม", reassigned: "เปลี่ยนผู้รับผิดชอบ", ext_asked: "ขอเลื่อน Target", ext_approved: "อนุมัติเลื่อน Target", ext_rejected: "ไม่อนุมัติการเลื่อน", closed: "ปิดคำขอ", reopened: "ขอเปิดใหม่",
+  };
+  function srEventLine(e, files) {
+    const dd = e.data || {};
+    const extra =
+      e.kind === "approved" ? `Target ${dlong(dd.target)}${dd.target !== dd.requested ? ` (ผู้ขอต้องการ ${dlong(dd.requested)}${dd.reason ? ` · ${esc(dd.reason)}` : ""})` : ""}${dd.category ? ` · ประเภทงาน ${esc(dd.category)}` : ""}`
+      : e.kind === "submitted" ? `ต้องการภายใน ${dlong(dd.requestedDate)}`
+      : ["ext_asked", "ext_approved", "ext_rejected"].includes(e.kind) ? `${dlong(dd.from)} → ${dlong(dd.to)}`
+      : e.kind === "reassigned" ? `${esc(dd.from || "-")} → ${esc(dd.to)}`
+      : e.kind === "reopened" ? `Target ${dlong(dd.target)}`
+      : e.kind === "closed" ? esc({ delivered: "ส่งงานแล้ว", not_possible: "ทำไม่ได้", duplicate: "ซ้ำกับคำขออื่น" }[dd.outcome] || "") : "";
+    const fs = files.filter((f) => f.event_id === e.id);
+    return `<li class="ev-${esc(e.kind)}"><div><b>${SR_EV[e.kind] || esc(e.kind)}</b> โดย ${esc(e.by_name || "ระบบ")}${extra ? ` · ${extra}` : ""}</div>
+${e.text ? `<div class="srtext">${esc(e.text)}</div>` : ""}${fs.length ? `<div>${fs.map((f) => `<a class="gchip" href="api/sr-files/${f.id}" target="_blank" rel="noopener">📎 ${esc(f.file_name)}</a>`).join(" ")}</div>` : ""}
+<div class="hint">${fdt(e.created_at)}</div></li>`;
+  }
+  function srDialog(title, inner, onOk, okLabel = "ยืนยัน") {
+    const dlg = document.getElementById("dlg") || document.body.appendChild(Object.assign(document.createElement("dialog"), { id: "dlg" }));
+    dlg.innerHTML = `<form class="card" method="dialog" id="srd" style="min-width:min(560px,92vw)"><h2>${title}</h2>${inner}
+<div class="right"><button class="btn" value="cancel" formnovalidate>ยกเลิก</button><button class="btn primary" value="ok">${okLabel}</button></div></form>`;
+    const f = dlg.querySelector("#srd");
+    f.onsubmit = async (e) => {
+      if (e.submitter && e.submitter.value === "cancel") return;
+      e.preventDefault();
+      const b = f.querySelector("button[value=ok]");
+      b.disabled = true;
+      try {
+        await onOk(f);
+        dlg.close();
+      } catch (err) {
+        b.disabled = false;
+        toast(err.message, 6000);
+      }
+    };
+    dlg.showModal();
+    return f;
+  }
+
+  async function viewSrItem(id) {
+    setNav("sr");
+    const [m, data] = await Promise.all([srMeta(), api("/sr/" + encodeURIComponent(id))]);
+    const r = data.sr;
+    const c = data.can;
+    const done = (res) => {
+      SR_META = null;
+      refreshSrBadge();
+      return viewSrItem(id);
+    };
+    const act = async (path, body, msg) => {
+      await post(`/sr/${r.id}/${path}`, body);
+      toast(msg, 4500);
+      done();
+    };
+    const asg = data.assignees || [];
+    const asgOpt = (sel) => asg.map((a) => `<option value="${a.id}" ${a.id === sel ? "selected" : ""}>${esc(a.display_name)} · งานภายในค้าง ${a.open_sr} · เคสเปิด ${a.open_cases}${a.phone ? "" : " · ยังไม่มีเบอร์"}</option>`).join("");
+    const approvePanel = c.approve
+      ? `<section class="card srapprove"><h2>ตรวจและอนุมัติ</h2>
+<form id="apf"><div class="formgrid" style="grid-template-columns:1fr 1.3fr">
+<label class="f">Target date<input type="date" name="targetDate" value="${r.requestedDate}" min="${new Date().toISOString().slice(0, 10)}" required><span class="hint">ผู้ขอต้องการ ${dlong(r.requestedDate)}</span></label>
+<label class="f">ผู้รับผิดชอบ<select name="assigneeId" required><option value="">เลือกสมาชิกทีม ${esc(r.teamLabel)}</option>${asgOpt(null)}</select></label></div>
+<label class="f" id="ap-why" hidden>เหตุผลที่ปรับวันที่ (ผู้ขอจะเห็น)<input name="targetReason" maxlength="500" placeholder="เช่น ขอส่งก่อน 1 วัน ให้ฝ่ายขายตรวจทันประชุม"></label>
+<label class="f">ประเภทงาน (ใช้ใน KPI ด้านทักษะ)<select name="category"><option value="">ให้ระบบจัดจากหัวข้อ</option>${m.categories.map((x) => `<option>${esc(x)}</option>`).join("")}</select></label>
+<label class="f">หมายเหตุถึงผู้ขอและผู้รับผิดชอบ (ไม่บังคับ)<input name="note" maxlength="1000"></label>
+<div class="actions"><button class="btn ok" type="submit">อนุมัติและมอบหมาย</button><button class="btn" type="button" id="ap-info">ขอข้อมูลเพิ่ม</button><button class="btn danger" type="button" id="ap-rej">ไม่อนุมัติ</button></div></form></section>`
+      : "";
+    const extBanner = r.ext
+      ? `<div class="banner warn srext"><div><b>${esc(r.ext.by)} ขอเลื่อน Target</b> ${dlong(r.targetDate)} → <b>${dlong(r.ext.target)}</b><br>${esc(r.ext.reason)}</div>${c.decideExt ? `<div class="actions" style="margin:0"><button class="btn ok" type="button" id="ext-ok">อนุมัติเลื่อน</button><button class="btn" type="button" id="ext-no">ไม่อนุมัติ</button></div>` : `<span class="hint">รอ Manager</span>`}</div>`
+      : "";
+    const info = [
+      ["ทีม", esc(r.teamLabel)],
+      ["Severity", srSev(r)],
+      ["ผู้ขอ", `${esc(r.requester.name)}${r.requester.department ? ` · ${esc(r.requester.department)}` : ""}${r.requester.title ? ` · ${esc(r.requester.title)}` : ""}<br><span class="hint">${esc(r.requester.email)}${r.requester.phone ? ` · <a href="tel:${esc(r.requester.phone.replace(/[^+0-9]/g, ""))}">${esc(r.requester.phone)}</a>` : ""}</span>`],
+      ["ต้องการภายใน", dlong(r.requestedDate)],
+      ...(r.targetDate ? [["Target date", `<b>${dlong(r.targetDate)}</b>${r.targetReason ? `<br><span class="hint">${esc(r.targetReason)}</span>` : ""}`]] : []),
+      ...(r.assignee ? [["ผู้รับผิดชอบ", `${esc(r.assignee.name)}${r.assignee.phone ? ` · <a href="tel:${esc(r.assignee.phone.replace(/[^+0-9]/g, ""))}">${esc(r.assignee.phone)}</a>` : ""}`]] : []),
+      ...(r.approvedBy ? [["อนุมัติโดย", `${esc(r.approvedBy)} · ${fdt(r.approvedAt)}`]] : []),
+      ...(r.category ? [["ประเภทงาน", esc(r.category)]] : []),
+      ...(r.customer ? [["ลูกค้า", esc(r.customer)]] : []),
+      ...(r.managerNote ? [["หมายเหตุ Manager", esc(r.managerNote)]] : []),
+      ...(r.outcome ? [["ผลลัพธ์", `<b>${esc(r.outcomeLabel)}</b> โดย ${esc(r.closedBy)} · ${fdt(r.closedAt)}${r.onTime != null ? ` · ${r.onTime ? "ทันกำหนด" : "ช้ากว่ากำหนด"}` : ""}<div class="srtext">${esc(r.resolution)}</div>`]] : []),
+      ...(r.status === "rejected" ? [["เหตุผลที่ไม่อนุมัติ", `<div class="srtext">${esc(r.resolution)}</div>`]] : []),
+    ];
+    const buttons = [
+      c.close ? `<button class="btn ok" type="button" id="b-close">ปิดคำขอ</button>` : "",
+      c.extend ? `<button class="btn" type="button" id="b-ext">ขอเลื่อน Target</button>` : "",
+      c.reassign ? `<button class="btn" type="button" id="b-re">เปลี่ยนผู้รับผิดชอบ</button>` : "",
+      c.edit ? `<button class="btn" type="button" id="b-edit">${r.status === "info" ? "แก้ไขและส่งใหม่" : "แก้ไขคำขอ"}</button>` : "",
+      c.cancel ? `<button class="btn danger" type="button" id="b-cancel">ยกเลิกคำขอ</button>` : "",
+      c.reopen ? `<button class="btn" type="button" id="b-reopen">ขอเปิดใหม่</button>` : "",
+    ].join("");
+    const infoEv = r.status === "info" ? data.events.filter((e) => e.kind === "info").pop() : null;
+    $app.innerHTML = `<div class="pagehead"><div><a href="#/sr" class="muted">← คำขอบริการ</a>
+<h1 style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><span class="mono" style="font-size:.8em">${esc(r.srNo)}</span> ${esc(r.title)} ${srChip(r)}</h1></div>
+<div class="actions" style="margin:0">${buttons}</div></div>
+${infoEv ? `<div class="banner warn"><b>${esc(infoEv.by_name)} ขอข้อมูลเพิ่ม:</b> ${esc(infoEv.text)}${c.edit ? "<br>กด “แก้ไขและส่งใหม่” เพื่อส่งกลับให้ Manager" : ""}</div>` : ""}
+${r.status === "overdue" ? `<div class="banner err">เลย Target มาแล้ว ${r.overdueDays} วันทำการ</div>` : ""}
+${extBanner}
+<div class="cols"><div class="main">
+<section class="card"><h2>รายละเอียด</h2><div class="srtext">${esc(r.detail)}</div></section>
+${approvePanel}
+<section class="card"><h2>ประวัติ</h2><ul class="srtl">${data.events.map((e) => srEventLine(e, data.files)).join("")}</ul>
+${c.update ? `<form id="upf" class="stack" style="border-top:1px solid var(--line);padding-top:14px"><label class="f">${r.mine ? "เพิ่มข้อมูลถึงผู้รับผิดชอบ" : "บันทึก / ตอบผู้ขอ"}<textarea name="text" rows="2" maxlength="3000" placeholder="${r.mine ? "เช่น แนบ template เพิ่ม" : "เช่น กำลังดึงข้อมูล คาดว่าส่งได้พรุ่งนี้"}"></textarea></label>${fileBox(m)}<div class="right"><button class="btn primary" type="submit">ส่ง</button></div></form>` : ""}
+</section></div>
+<aside class="side"><section class="card"><h2>ข้อมูลคำขอ</h2><table class="kvt">${info.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join("")}</table>
+${r.canReopenUntil && c.reopen ? `<p class="hint">ถ้างานยังไม่ตรงที่ขอ กด “ขอเปิดใหม่” ได้ถึง ${dlong(r.canReopenUntil)}</p>` : ""}</section></aside></div>`;
+
+    const $ = (x) => document.getElementById(x);
+    const up = $("upf");
+    if (up) {
+      const fp = filePicker(up, m);
+      up.onsubmit = async (e) => {
+        e.preventDefault();
+        try {
+          await post(`/sr/${r.id}/update`, { text: up.text.value, files: await fp.get() });
+          toast(r.mine ? "ส่งถึงผู้รับผิดชอบแล้ว" : "บันทึกแล้ว ระบบแจ้งผู้ขอทาง email", 4500);
+          done();
+        } catch (err) {
+          toast(err.message, 6000);
+        }
+      };
+    }
+    const ap = $("apf");
+    if (ap) {
+      const why = () => ($("ap-why").hidden = ap.targetDate.value === r.requestedDate);
+      ap.targetDate.onchange = () => {
+        const day = new Date(ap.targetDate.value + "T00:00:00").getDay();
+        ap.targetDate.setCustomValidity(day === 0 || day === 6 || m.holidays.includes(ap.targetDate.value) ? "เลือกวันทำการ" : "");
+        why();
+      };
+      ap.onsubmit = async (e) => {
+        e.preventDefault();
+        try {
+          await act("approve", { targetDate: ap.targetDate.value, assigneeId: ap.assigneeId.value, targetReason: ap.targetReason.value, category: ap.category.value, note: ap.note.value }, "อนุมัติแล้ว ระบบส่ง email ถึงผู้รับผิดชอบและผู้ขอ");
+        } catch (err) {
+          toast(err.message, 6000);
+        }
+      };
+      $("ap-info").onclick = () => srDialog("ขอข้อมูลเพิ่มจากผู้ขอ", `<label class="f">ต้องการข้อมูลอะไรเพิ่ม<textarea name="note" rows="3" required minlength="5" maxlength="1000"></textarea></label>`, (f) => act("info", { note: f.note.value }, "ส่งคำขอข้อมูลเพิ่มถึงผู้ขอแล้ว"), "ส่งถึงผู้ขอ");
+      $("ap-rej").onclick = () => srDialog("ไม่อนุมัติคำขอ", `<label class="f">เหตุผล (ผู้ขอจะเห็น)<textarea name="reason" rows="3" required minlength="5" maxlength="1000"></textarea></label>`, (f) => act("reject", { reason: f.reason.value }, "ไม่อนุมัติแล้ว ระบบแจ้งผู้ขอ"), "ไม่อนุมัติ");
+    }
+    if ($("ext-ok")) {
+      $("ext-ok").onclick = () => act("extend/decide", { approve: true }, "อนุมัติเลื่อน Target แล้ว").catch((e) => toast(e.message, 6000));
+      $("ext-no").onclick = () => srDialog("ไม่อนุมัติการเลื่อน Target", `<label class="f">หมายเหตุถึงผู้รับผิดชอบ<input name="note" maxlength="500"></label>`, (f) => act("extend/decide", { approve: false, note: f.note.value }, "ไม่อนุมัติการเลื่อนแล้ว"), "ไม่อนุมัติ");
+    }
+    if ($("b-close"))
+      $("b-close").onclick = () => {
+        const f = srDialog(`ปิดคำขอ ${esc(r.srNo)}`, `<div class="f"><span>ผลลัพธ์</span><div class="seg">${[["delivered", "ส่งงานแล้ว"], ["not_possible", "ทำไม่ได้"], ["duplicate", "ซ้ำกับคำขออื่น"]].map(([k, l], i) => `<label><input type="radio" name="outcome" value="${k}" ${i ? "" : "checked"}><span>${l}</span></label>`).join("")}</div></div>
+<label class="f">เหตุผล / สิ่งที่ส่งมอบ (อย่างน้อย ${m.resolutionMin} ตัวอักษร ผู้ขอจะเห็น)<textarea name="resolution" rows="4" required minlength="${m.resolutionMin}" maxlength="3000"></textarea></label>${fileBox(m, "ไฟล์ส่งมอบ (ไม่บังคับ)")}`,
+          async (f) => act("close", { outcome: f.outcome.value, resolution: f.resolution.value, files: await fp.get() }, "ปิดคำขอแล้ว ระบบแจ้งผู้ขอทาง email"), "ปิดคำขอ");
+        const fp = filePicker(f, m);
+      };
+    if ($("b-ext"))
+      $("b-ext").onclick = () =>
+        srDialog("ขอเลื่อน Target", `<p class="muted" style="margin:0">Target ตอนนี้ ${dlong(r.targetDate)} · Manager ต้องอนุมัติ และระบบแจ้งผู้ขอเมื่อวันที่เปลี่ยน</p><label class="f">วันที่ใหม่<input type="date" name="d" required min="${r.targetDate}"></label><label class="f">เหตุผล<textarea name="reason" rows="3" required minlength="10" maxlength="1000"></textarea></label>`,
+          (f) => act("extend", { targetDate: f.d.value, reason: f.reason.value }, "ส่งคำขอเลื่อนถึง Manager แล้ว"), "ขอเลื่อน");
+    if ($("b-re"))
+      $("b-re").onclick = () => srDialog("เปลี่ยนผู้รับผิดชอบ", `<label class="f">ผู้รับผิดชอบใหม่<select name="a" required>${asgOpt(r.assignee && r.assignee.id)}</select></label><label class="f">หมายเหตุ (ไม่บังคับ)<input name="note" maxlength="500"></label>`, (f) => act("reassign", { assigneeId: f.a.value, note: f.note.value }, "เปลี่ยนผู้รับผิดชอบแล้ว"), "บันทึก");
+    if ($("b-cancel")) $("b-cancel").onclick = () => srDialog("ยกเลิกคำขอ", `<label class="f">เหตุผล (ไม่บังคับ)<input name="reason" maxlength="500"></label>`, (f) => act("cancel", { reason: f.reason.value }, "ยกเลิกคำขอแล้ว"), "ยกเลิกคำขอ");
+    if ($("b-reopen")) $("b-reopen").onclick = () => srDialog("ขอเปิดคำขอใหม่", `<p class="muted" style="margin:0">คำขอกลับไปที่ ${esc(r.assignee ? r.assignee.name : "ผู้รับผิดชอบเดิม")}</p><label class="f">งานยังไม่ตรงที่ขออย่างไร<textarea name="reason" rows="3" required minlength="10" maxlength="1000"></textarea></label>`, (f) => act("reopen", { reason: f.reason.value }, "เปิดคำขอใหม่แล้ว ระบบแจ้งผู้รับผิดชอบ"), "ขอเปิดใหม่");
+    if ($("b-edit"))
+      $("b-edit").onclick = () => {
+        const f = srDialog(r.status === "info" ? "แก้ไขและส่งใหม่" : "แก้ไขคำขอ", `<label class="f">หัวข้อ<input name="title" value="${esc(r.title)}" required minlength="5" maxlength="200"></label>
+<label class="f">รายละเอียด<textarea name="detail" rows="5" required minlength="20" maxlength="5000">${esc(r.detail)}</textarea></label>
+<div class="formgrid" style="grid-template-columns:1fr 1fr"><label class="f">Severity<select name="severity">${m.severities.map((s) => `<option value="${s.key}" ${s.key === r.severity ? "selected" : ""}>${s.label}</option>`).join("")}</select></label>
+<label class="f">ต้องการภายใน<input type="date" name="d" value="${r.requestedDate}" required></label></div>
+${r.status === "info" ? `<label class="f">ข้อความถึง Manager (ไม่บังคับ)<input name="note" maxlength="1000"></label>` : ""}${fileBox(m)}`,
+          async (f) => {
+            await post(`/sr/${r.id}`, { title: f.title.value, detail: f.detail.value, severity: f.severity.value, requestedDate: f.d.value, note: f.note ? f.note.value : "", files: await fp.get() }, "PUT");
+            toast(r.status === "info" ? "ส่งกลับให้ Manager แล้ว" : "บันทึกแล้ว", 4500);
+            done();
+          }, r.status === "info" ? "ส่งใหม่" : "บันทึก");
+        const fp = filePicker(f, m);
+      };
+  }
+
+  async function bindHolidays() {
+    const el = document.getElementById("hol-card");
+    if (!el) return;
+    const { holidays } = await api("/settings/holidays");
+    el.innerHTML = `<div class="title"><h2>วันหยุดบริษัท</h2><span>ใช้นับวันทำการของคำขอบริการ (เตือนก่อนครบ 1 วันทำการ, ค้างอนุมัติ, เลย Target) · เสาร์-อาทิตย์นับเป็นวันหยุดอยู่แล้ว</span></div>
+<label class="f">วันที่ บรรทัดละ 1 วัน (ปี ค.ศ.-เดือน-วัน) ข้อความหลังวันที่ใส่เป็นชื่อวันหยุดได้<textarea id="hol-txt" rows="6" placeholder="2026-12-07 ชดเชยวันพ่อ&#10;2026-12-10 วันรัฐธรรมนูญ&#10;2026-12-31 วันสิ้นปี">${holidays.join("\n")}</textarea></label>
+<div class="right"><button class="btn primary" type="button" id="hol-save">บันทึกวันหยุด</button></div>`;
+    document.getElementById("hol-save").onclick = async () => {
+      const list = document.getElementById("hol-txt").value.split("\n").map((l) => l.trim()).filter((l) => /^\d{4}-\d{2}-\d{2}/.test(l));
+      try {
+        const r = await post("/settings/holidays", { holidays: list }, "PUT");
+        toast(`บันทึกวันหยุด ${r.holidays.length} วันแล้ว`);
+        SR_META = null;
+        bindHolidays();
+      } catch (e) {
+        toast(e.message, 6000);
+      }
+    };
+  }
+
   // ------------------------------------------------------------ router
   async function route() {
     const { parts, params } = (() => {
@@ -2829,7 +3227,10 @@ ${r.canEditCategories ? `<section class="card noprint"><details><summary style="
         case "intake": return parts[1] ? await viewIntakeItem(parts[1]) : await viewIntake(params);
         case "intake-admin": return await viewIntakeAdmin();
         case "kpi": return await viewKpi(params);
+        case "sr": return parts[1] === "new" ? await viewSrNew() : parts[1] ? await viewSrItem(parts[1]) : await viewSr(params);
+        case "profile": return await viewProfile();
         default:
+          if (ME.user.role === "requester") return (location.hash = "#/sr");
           if (ME.user.role === "engineer" && !location.hash && !sessionStorage.getItem("v3home")) {
             try { sessionStorage.setItem("v3home", "1"); } catch (e) {}
             return (location.hash = "#/mine");
@@ -2852,8 +3253,11 @@ ${r.canEditCategories ? `<section class="card noprint"><details><summary style="
     }
     cfg = { ...cfg, ...ME.config };
     buildChrome();
-    refreshIntakeBadge();
-    setInterval(() => document.visibilityState === "visible" && refreshIntakeBadge(), 120000);
+    if (ME.user.role !== "requester") {
+      refreshIntakeBadge();
+      setInterval(() => document.visibilityState === "visible" && refreshIntakeBadge(), 120000);
+    }
+    refreshSrBadge();
     window.addEventListener("hashchange", route);
     route();
   })();

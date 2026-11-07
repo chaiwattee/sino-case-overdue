@@ -443,6 +443,8 @@ function startJobs() {
   // Backup at 01:30, before the 02:00 retention run deletes old cases; restore test every Sunday 03:15.
   job("backup", "30 1 * * *", j.backup, () => require("./backup").runBackup());
   job("backup-test", "15 3 * * 0", j.backup, () => require("./backup").testRestore());
+  // Service requests: approval pending, 1 working day before target, due today, overdue (working days only).
+  job("sr-reminders", "30 8 * * *", j.sr, () => require("./sr").runReminders());
   job("retention", "0 2 * * *", j.retention, () => runRetention());
   job("annual", "0 6 1 1 *", j.annual, () => runAnnual());
   job("cert", "15 9 * * *", true, () => checkCert());

@@ -62,7 +62,7 @@ function claimedHtml(i, kase, owner, { updateUrl }) {
   return layout(
     GREEN,
     `${greet(i)}<p style="margin:0 0 14px">An engineer has taken your case.</p>
-${fieldTable([["Reference", `${i.req_no} → ${kase.caseNo}${kase.csNumber ? ` (${kase.csNumber})` : ""}`], ["Subject", i.subject], ["Engineer", owner.display_name], ["Call-back", i.contact_phone || i.contact_email || "-"]])}
+${fieldTable([["Reference", `${i.req_no} → ${kase.caseNo}${kase.csNumber ? ` (${kase.csNumber})` : ""}`], ["Subject", i.subject], ["Engineer", owner.display_name], ...(owner.phone ? [["Engineer phone", owner.phone]] : []), ...(owner.email ? [["Engineer email", owner.email]] : []), ["Your call-back", i.contact_phone || i.contact_email || "-"]])}
 <p style="margin:16px 0">${button(updateUrl, "Add details / screenshots", false)}</p>
 <p style="margin:0">To add information, reply to this email or use the button above. It will be recorded in your case for the engineer.</p>`
   );

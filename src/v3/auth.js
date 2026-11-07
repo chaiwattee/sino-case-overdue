@@ -60,7 +60,7 @@ async function startSession(res, user, remember = true) {
   await q("UPDATE users SET last_login_at = now() WHERE id = $1", [user.id]);
 }
 
-const USER_COLS = "id, email, display_name, role, auth_type, must_change_password, active, session_version";
+const USER_COLS = "id, email, display_name, role, auth_type, must_change_password, active, session_version, phone, department, job_title, profile_confirmed_at";
 
 async function loadUser(id) {
   const u = await one(`SELECT ${USER_COLS} FROM users WHERE id = $1`, [id]);
@@ -146,7 +146,7 @@ router.get("/auth/login", (req, res) => {
     response_type: "code",
     redirect_uri: `${config3.baseUrl}/auth/callback`,
     response_mode: "query",
-    scope: "openid profile email",
+    scope: "openid profile email User.Read",
     state,
     nonce,
     code_challenge: challenge,
@@ -194,6 +194,13 @@ router.get("/auth/callback", async (req, res) => {
         );
         await q("INSERT INTO user_teams (user_id, team) SELECT $1, code FROM teams", [user.id]);
         await audit(user, "bootstrap_admin", email);
+      } else if (config3.requesterDomains.includes(email.split("@")[1])) {
+        // Staff from other teams: a "requester" account is made on first sign-in. They only see their own service requests.
+        user = await one(
+          `INSERT INTO users (email, display_name, role, auth_type) VALUES ($1,$2,'requester','sso') RETURNING ${USER_COLS}`,
+          [email, claims.name || email]
+        );
+        await audit(user, "requester_created", email, { via: "sso" });
       } else {
         await audit(null, "login_denied", email, { reason: "not_registered" });
         return back("notuser");
@@ -206,6 +213,19 @@ router.get("/auth/callback", async (req, res) => {
     if (user.auth_type !== "sso") return back("uselocal");
     if (claims.name && claims.name !== user.display_name && user.display_name === user.email) {
       await q("UPDATE users SET display_name = $1 WHERE id = $2", [claims.name, user.id]);
+    }
+    // Department, job title and phone from the company directory fill blanks only (the user confirms or edits them).
+    if (tok.data.access_token && (!user.phone || !user.department || !user.job_title)) {
+      try {
+        const me = (await axios.get("https://graph.microsoft.com/v1.0/me?$select=department,jobTitle,mobilePhone,businessPhones", { headers: { Authorization: `Bearer ${tok.data.access_token}` }, timeout: 10000 })).data;
+        const phone = me.mobilePhone || (me.businessPhones || [])[0] || null;
+        await q(
+          `UPDATE users SET department = COALESCE(NULLIF(department, ''), $2), job_title = COALESCE(NULLIF(job_title, ''), $3), phone = COALESCE(NULLIF(phone, ''), $4) WHERE id = $1`,
+          [user.id, (me.department || "").slice(0, 120) || null, (me.jobTitle || "").slice(0, 120) || null, (phone || "").slice(0, 60) || null]
+        );
+      } catch (e) {
+        console.warn("[sso] profile from directory:", e.response?.status || e.message);
+      }
     }
     await startSession(res, user, saved.remember);
     await audit(user, "login", email, { method: "sso" });

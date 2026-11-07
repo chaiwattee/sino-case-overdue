@@ -41,8 +41,8 @@ const domainOf = (email) => lower(email).split("@")[1] || "";
 const isEmail = (s) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(s || ""));
 const REQ_RE = /\[?\b(REQ-\d{4}-\d{4,})\b\]?/i;
 const PREFIX_RE = /^\s*((re|fw|fwd|aw|sv|wg|tr|ตอบกลับ|ส่งต่อ)\s*(\[\d+\])?\s*:\s*)+/i;
-const TAG_RE = /\[[^\]]*\b(REQ|CASE)-\d{4}-\d{4,}[^\]]*\]/gi;
-const baseSubject = (s) => clean(s, 300).replace(/\[ทดสอบ\]\s*/g, "").replace(PREFIX_RE, "").replace(TAG_RE, "").replace(/\b(REQ|CASE)-\d{4}-\d{4,}\b/gi, "").replace(PREFIX_RE, "").replace(/\s+/g, " ").trim();
+const TAG_RE = /\[[^\]]*\b(REQ|CASE|SR)-\d{4}(?:-\d{2})?-\d{4,}[^\]]*\]/gi;
+const baseSubject = (s) => clean(s, 300).replace(/\[ทดสอบ\]\s*/g, "").replace(PREFIX_RE, "").replace(TAG_RE, "").replace(/\b(REQ|CASE|SR)-\d{4}(?:-\d{2})?-\d{4,}\b/gi, "").replace(PREFIX_RE, "").replace(/\s+/g, " ").trim();
 
 async function emailSettings() {
   const s = await intake().settings();

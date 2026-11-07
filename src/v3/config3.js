@@ -31,6 +31,8 @@ const config3 = {
   },
 
   // Background jobs. Off by default so v3 can run next to v2 without double-sending.
+  // Company domains whose staff may sign in with Microsoft and send internal service requests (no account needed beforehand).
+  requesterDomains: (process.env.REQUESTER_DOMAINS || "sinostech.co.th").split(/[,\s]+/).map((x) => x.trim().toLowerCase()).filter(Boolean),
   jobs: {
     alerts: flag("V3_ALERTS"),
     telegram: flag("V3_TELEGRAM"),
@@ -39,6 +41,7 @@ const config3 = {
     annual: flag("V3_ANNUAL", true),
     intake: flag("V3_INTAKE", true),
     backup: flag("V3_BACKUP", true),
+    sr: flag("V3_SR", true),
   },
   disableScheduler: flag("DISABLE_SCHEDULER"),
 

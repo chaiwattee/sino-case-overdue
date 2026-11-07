@@ -60,6 +60,7 @@ function toCase(r) {
     severity: r.severity || "",
     csNumber: r.cs_number || "",
     caseNo: r.case_no || "",
+    caseNoOld: r.case_no_old || "",
     task: r.task || "",
     detail: r.last_activity || "",
     note: r.note || "",

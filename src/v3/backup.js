@@ -402,7 +402,7 @@ async function testRestore({ by = "schedule", file } = {}) {
           if (got[t] === undefined) diffs.push(`ตาราง ${t} ไม่มีใน restore`);
           else if (got[t] < n) diffs.push(`${t}: backup ${n} แถว แต่ restore ได้ ${got[t]}`);
         }
-        const ref = await c.query("SELECT count(*)::int AS n FROM intake_files").catch(() => ({ rows: [{ n: null }] }));
+        const ref = await c.query("SELECT (SELECT count(*) FROM intake_files) + COALESCE((SELECT count(*) FROM sr_files), 0) AS n").then((r) => ({ rows: [{ n: Number(r.rows[0].n) }] })).catch(() => ({ rows: [{ n: null }] }));
         if (ref.rows[0].n !== null && ref.rows[0].n > tarFiles) diffs.push(`ฐานข้อมูลอ้างถึงไฟล์แนบ ${ref.rows[0].n} ไฟล์ แต่ใน backup มี ${tarFiles}`);
       } finally {
         await c.end().catch(() => {});

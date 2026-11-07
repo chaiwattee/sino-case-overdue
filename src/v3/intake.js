@@ -491,7 +491,7 @@ async function runReminders({ now = new Date() } = {}) {
 // ------------------------------------------------------------ claim / transfer / reject
 async function claim(user, id, b) {
   const ownerId = Number(b.ownerId) || user.id;
-  const owner = await one("SELECT u.id, u.display_name, u.email, u.active, array_remove(array_agg(t.team), NULL) AS teams FROM users u LEFT JOIN user_teams t ON t.user_id = u.id WHERE u.id = $1 GROUP BY u.id", [ownerId]);
+  const owner = await one("SELECT u.id, u.display_name, u.email, u.phone, u.active, array_remove(array_agg(t.team), NULL) AS teams FROM users u LEFT JOIN user_teams t ON t.user_id = u.id WHERE u.id = $1 GROUP BY u.id", [ownerId]);
   if (!owner || !owner.active) throw bad("ไม่พบผู้ใช้ที่เลือก");
   const locked = await one("UPDATE intakes SET status = 'claiming' WHERE id = $1 AND status = 'pending' RETURNING *", [id]);
   if (!locked) {
@@ -590,13 +590,13 @@ async function notifyClaimed(i, kase, by, owner) {
     customer: i.site,
     subject: i.subject,
     severity: kase.severity,
-    owner: { name: owner.display_name },
+    owner: { name: owner.display_name, phone: owner.phone || null, email: owner.email },
     claimedAt: new Date(i.claimed_at).toISOString(),
     lineUserId: i.line_user_id,
     externalRef: i.external_ref,
     contact: { name: i.contact_name, phone: i.contact_phone },
     updateUrl: updateUrl(i.id),
-    message: `An engineer has taken your case.\n${i.req_no} → ${kase.caseNo}\n${i.subject}\n\nEngineer: ${owner.display_name}\nWe will contact you at ${i.contact_phone || i.contact_email}\n\nAdd details or screenshots: ${updateUrl(i.id)}`,
+    message: `An engineer has taken your case.\n${i.req_no} → ${kase.caseNo}\n${i.subject}\n\nEngineer: ${owner.display_name}${owner.phone ? `\nEngineer phone: ${owner.phone}` : ""}\nWe will contact you at ${i.contact_phone || i.contact_email}\n\nAdd details or screenshots: ${updateUrl(i.id)}`,
   });
 }
 

@@ -20,8 +20,15 @@ const { requireUser, tempPassword, createResetLink, ssoReady } = require("./auth
 const api = express.Router();
 const jsonSmall = express.json({ limit: "200kb" });
 const jsonFile = express.json({ limit: "4mb" });
-api.use((req, res, next) => (req.path === "/users/import" ? jsonFile : jsonSmall)(req, res, next));
+const jsonSr = express.json({ limit: "40mb" }); // service-request attachments (base64, up to 10 files of 10 MB)
+api.use((req, res, next) => (req.path === "/users/import" ? jsonFile : /^\/sr(\/|$)/.test(req.path) && req.method !== "GET" ? jsonSr : jsonSmall)(req, res, next));
 api.use(requireUser());
+// Requester (staff from other teams): only their profile and their own service requests.
+api.use((req, res, next) =>
+  req.user && req.user.role === "requester" && !require("./sr").REQUESTER_PATHS.some((re) => re.test(req.path))
+    ? res.status(403).json({ ok: false, error: "บัญชีผู้ขอบริการใช้ได้เฉพาะหน้าคำขอบริการ" })
+    : next()
+);
 // Observer: read-only everywhere (exporting search results is the only POST it may use).
 api.use((req, res, next) =>
   req.user && req.user.role === "observer" && !["GET", "HEAD"].includes(req.method) && req.path !== "/export/cases"
@@ -42,6 +49,7 @@ require("./intake").mountInternal(api, { need, wrap });
 const ext = require("./extensions");
 ext.mount(api, { wrap });
 require("./kpi").mount(api, { wrap, need });
+require("./sr").mount(api, { wrap });
 
 async function visibleCases(user) {
   return repo.loadCases(user);
@@ -130,7 +138,7 @@ api.get("/overview", wrap(async (req, res) => {
 
 function ser3(c) {
   const iso = (x) => (x instanceof Date ? d.toISODate(x) : x || null);
-  return { ...ser(c), caseNo: c.caseNo, extCount: c.extCount || 0, origDueDate: iso(c.origDueDate), periodStart: iso(c.periodStart), totalAge: c.totalAge,
+  return { ...ser(c), caseNo: c.caseNo, caseNoOld: c.caseNoOld || "", extCount: c.extCount || 0, origDueDate: iso(c.origDueDate), periodStart: iso(c.periodStart), totalAge: c.totalAge,
     pendingExtId: c.pendingExtId, lastExt: c.lastExt, closedInExtension: c.closedInExtension ?? null, severity: c.severity, id: c.id, team: c.team,
     customerUnconfirmed: c.customerUnconfirmed || "",
     resolution: c.resolution || "", rootCause: c.rootCause || "", resolvedAt: c.resolvedAt || null, resolvedBy: c.resolvedBy || "", ownerUserId: c.owner_id, updatedAt: c.updatedAt, startAt: c.startAt };
@@ -507,10 +515,10 @@ api.post("/schedules/:id/test", need("reports_manage"), wrap(async (req, res) =>
 }));
 
 // ------------------------------------------------------------ users (admin)
-const ROLE_SET = new Set(perms.ROLES);
+const ROLE_SET = new Set([...perms.ROLES, "requester"]);
 async function userRow(id) {
   return one(
-    `SELECT u.id, u.email, u.display_name, u.role, u.auth_type, u.active, u.must_change_password, u.last_login_at, u.created_at,
+    `SELECT u.id, u.email, u.display_name, u.role, u.auth_type, u.active, u.must_change_password, u.last_login_at, u.created_at, u.phone, u.department, u.job_title,
             array_remove(array_agg(t.team ORDER BY t.team), NULL) AS teams,
             (SELECT count(*)::int FROM cases c WHERE c.owner_id = u.id AND c.closed_at IS NULL) AS open_cases
      FROM users u LEFT JOIN user_teams t ON t.user_id = u.id WHERE u.id = $1 GROUP BY u.id`,
@@ -519,7 +527,7 @@ async function userRow(id) {
 }
 api.get("/users", need("users_manage"), wrap(async (req, res) => {
   const rows = await all(
-    `SELECT u.id, u.email, u.display_name, u.role, u.auth_type, u.active, u.must_change_password, u.last_login_at,
+    `SELECT u.id, u.email, u.display_name, u.role, u.auth_type, u.active, u.must_change_password, u.last_login_at, u.phone, u.department, u.job_title,
             array_remove(array_agg(t.team ORDER BY t.team), NULL) AS teams,
             (SELECT count(*)::int FROM cases c WHERE c.owner_id = u.id AND c.closed_at IS NULL) AS open_cases
      FROM users u LEFT JOIN user_teams t ON t.user_id = u.id GROUP BY u.id ORDER BY u.active DESC, u.role, u.display_name`
@@ -597,6 +605,7 @@ api.put("/users/:id", need("users_manage"), wrap(async (req, res) => {
     };
     if (b.display_name !== undefined) set("display_name", String(b.display_name).trim().slice(0, 120) || cur.email);
     if (b.role !== undefined) set("role", b.role);
+    for (const k of ["phone", "department", "job_title"]) if (b[k] !== undefined) set(k, String(b[k] || "").trim().slice(0, 120) || null);
     if (b.active !== undefined) {
       set("active", !!b.active);
       if (!b.active) sets.push("session_version = session_version + 1");
@@ -689,7 +698,7 @@ async function sampleCase(type) {
   return {
     sample: true,
     c: {
-      key: "sample", id: 0, caseNo: "CASE-2026-0000", csNumber: "CS0000000", site: "ลูกค้าตัวอย่าง", task: "ตัวอย่างงาน", status: "In Progress",
+      key: "sample", id: 0, caseNo: "CASE-2026-11-0000", csNumber: "CS0000000", site: "ลูกค้าตัวอย่าง", task: "ตัวอย่างงาน", status: "In Progress",
       owner: "Owner ตัวอย่าง", ownerEmail: "owner@sinostech.co.th", source: "ENGAGE", sourceLabel: "Engage / NRX / CXone",
       startDate: start, targetDate: d.addDays(start, config.slaDays), dueDate: d.addDays(start, config.slaDays), age, stage: type,
       daysLeft: Math.max(0, config.slaDays - age), daysOverdue: Math.max(0, age - config.slaDays),

@@ -3,7 +3,7 @@
 //
 // Score (100 + bonus 5):
 //  1 SLA 30 · 2 Responsiveness 15 · 3 Weighted workload 15 · 4 Difficulty 10
-//  5 Diversity/skill 10 · 6 Backlog & extensions 10 · 7 Documentation 10 · + Team bonus 5
+//  5 Diversity/skill 10 (internal service requests count here as work types / new skills, nothing else) · 6 Backlog & extensions 10 · 7 Documentation 10 · + Team bonus 5
 const { config } = require("../config");
 const d = require("../dates");
 const { q, one, all, getSetting, setSetting, audit } = require("./db");
@@ -111,6 +111,13 @@ async function compute(ym) {
     `SELECT DISTINCT owner_id, upper(product) AS product FROM cases WHERE start_date < $1 AND product IS NOT NULL AND product <> ''`,
     [R.fromIso]
   );
+  // Internal service requests delivered in the month: they widen the owner's work types (skill), no points of their own.
+  const srBy = await require("./sr").kpiByAssignee(R.fromIso, R.toIso);
+  const srTypesBefore = await all(
+    `SELECT DISTINCT assignee_id, category FROM service_requests WHERE status = 'done' AND outcome = 'delivered' AND category IS NOT NULL
+        AND (closed_at AT TIME ZONE 'Asia/Bangkok')::date < $1`,
+    [R.fromIso]
+  ).catch(() => []);
   const productsAll = (await all("SELECT count(*)::int AS n FROM lookups WHERE kind='product' AND active"))[0]?.n || 6;
   const sitesAll = (await all("SELECT count(*)::int AS n FROM lookups WHERE kind='site' AND active"))[0]?.n || 10;
 
@@ -195,11 +202,23 @@ async function compute(ym) {
       if (c.site) siteCount[c.site] = (siteCount[c.site] || 0) + 1;
       human(c).forEach((a) => (kindCount[a.kind] = (kindCount[a.kind] || 0) + 1));
     });
+    const srk = srBy.get(o.id);
+    m.sr = srk ? { count: srk.count, onTime: srk.onTime, categories: srk.categories } : { count: 0, onTime: 0, categories: {} };
+    if (srk) {
+      for (const [cat, n] of Object.entries(srk.categories)) typeCount[cat] = (typeCount[cat] || 0) + n;
+      for (const t of srk.titles) {
+        const cat = categorize(t, cats);
+        typeCount[cat] = (typeCount[cat] || 0) + 1;
+      }
+    }
     const dv = [diversity(typeCount, cats.length + 1), diversity(prodCount, productsAll), diversity(siteCount, sitesAll)];
     m.diversity = Math.round((dv.reduce((a, b) => a + b, 0) / 3) * 100) / 100;
     const known = new Set(before.filter((b) => b.owner_id === o.id).map((b) => b.product));
     // Only once the owner has history in the system; otherwise every product would look "new".
     m.newSkills = known.size ? Object.keys(prodCount).filter((p) => !known.has(p)) : [];
+    // A work type done for the first time through a service request counts as a new skill too.
+    const srKnown = new Set(srTypesBefore.filter((x) => x.assignee_id === o.id).map((x) => x.category));
+    if (known.size || srKnown.size) for (const cat of Object.keys(m.sr.categories)) if (!srKnown.has(cat) && !m.newSkills.includes(cat)) m.newSkills.push(cat);
     const sDiv = 7 * m.diversity + Math.min(3, 1.5 * m.newSkills.length);
 
     // 6. Backlog & extensions (10): overdue at month end and approved extensions in the month.
@@ -278,6 +297,7 @@ function summarize(o, all) {
   if (m.firstResponseHrs != null && avgFirst != null && m.firstResponseHrs <= avgFirst) good.push(`ตอบสนองเร็ว (${m.firstResponseHrs} ชม.)`);
   if (m.critical) good.push(`รับเคส Critical ${m.critical} เคส`);
   if (m.newSkills.length) good.push(`ทำ ${m.newSkills.join(", ")} เป็นครั้งแรก`);
+  if (m.sr && m.sr.count) good.push(`ทำคำขอบริการภายในเสร็จ ${m.sr.count} งาน (ทันกำหนด ${m.sr.onTime}) นับเป็นทักษะ ไม่มีคะแนนแยก`);
   if (m.fastClaims) good.push(`รับเคสจากลูกค้าภายใน 1 ชม. ${m.fastClaims} เคส`);
   if (m.slaPct != null && m.slaPct < 70) work.push(`ปิดทัน SLA เพียง ${m.slaPct}%`);
   if (m.overdueAtEnd) work.push(`มีเคสเกิน Due ณ สิ้นเดือน ${m.overdueAtEnd} เคส`);
@@ -385,4 +405,4 @@ function mount(api, { wrap, need }) {
   }));
 }
 
-module.exports = { compute, trend, mount, sendMonthly, categorize, diversity, monthRange, DEFAULT_CATEGORIES, grade };
+module.exports = { compute, trend, mount, sendMonthly, categories, categorize, diversity, monthRange, DEFAULT_CATEGORIES, grade };

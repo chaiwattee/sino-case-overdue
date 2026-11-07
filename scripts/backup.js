@@ -69,7 +69,8 @@ async function main() {
       await c2.connect();
       if (manifest.fileDir && path.resolve(manifest.fileDir) !== fdir) {
         const r = await c2.query("UPDATE intake_files SET path = $2 || substr(path, length($1) + 1) WHERE path LIKE $1 || '%'", [manifest.fileDir, fdir]);
-        console.log(`  ปรับที่อยู่ไฟล์แนบ ${r.rowCount} รายการ จาก ${manifest.fileDir} เป็น ${fdir}`);
+        const r2 = await c2.query("UPDATE sr_files SET path = $2 || substr(path, length($1) + 1) WHERE path LIKE $1 || '%'", [manifest.fileDir, fdir]).catch(() => ({ rowCount: 0 }));
+        console.log(`  ปรับที่อยู่ไฟล์แนบ ${r.rowCount + r2.rowCount} รายการ จาก ${manifest.fileDir} เป็น ${fdir}`);
       }
       const cases = (await c2.query("SELECT count(*)::int AS n FROM cases")).rows[0].n;
       await c2.end();
