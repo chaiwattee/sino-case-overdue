@@ -1248,7 +1248,7 @@ ${extTable(p.extensions || [], "การขอขยายเวลาในช
     const panel = sel
       ? `<aside class="side"><form class="card" id="uf" style="border-color:var(--accent)">
 <div style="display:flex;align-items:center;gap:12px"><div class="avatar" style="width:46px;height:46px;font-size:18px" aria-hidden="true">${esc(sel.display_name.charAt(0).toUpperCase())}</div>
-<div><h2>${esc(sel.display_name)}</h2><div class="muted" style="font-size:13px">${esc(sel.email)} · ${sel.auth_type === "sso" ? "บัญชี Microsoft" : "บัญชีรหัสผ่าน"}</div></div></div>
+<div><h2>${esc(sel.display_name)}</h2><div class="muted" style="font-size:13px">${esc(sel.email)} · ${sel.auth_type === "sso" ? "บัญชี Microsoft" : sel.auth_type === "email" ? "เข้าด้วยลิงก์ทาง email" : "บัญชีรหัสผ่าน"}</div></div></div>
 <label class="f">ชื่อที่แสดง<input name="display_name" value="${esc(sel.display_name)}"></label>
 <label class="f">เบอร์โทร<input name="phone" value="${esc(sel.phone || "")}" placeholder="081-234-5678"><span class="hint">แสดงใน email ถึงลูกค้าเมื่อรับเคส</span></label>
 <div class="formgrid" style="grid-template-columns:1fr 1fr;gap:10px"><label class="f">หน่วยงาน<input name="department" value="${esc(sel.department || "")}"></label><label class="f">ตำแหน่ง<input name="job_title" value="${esc(sel.job_title || "")}"></label></div>
@@ -1258,7 +1258,7 @@ ${extTable(p.extensions || [], "การขอขยายเวลาในช
 ${sel.auth_type === "local" ? `<div style="border-top:1px solid var(--line);padding-top:14px" class="stack"><h2 style="font-size:15px">รีเซ็ตรหัสผ่าน</h2>
 <button class="btn" type="button" id="rs-link">ส่งลิงก์ตั้งรหัสใหม่ทาง email</button>
 <button class="btn" type="button" id="rs-temp">สร้างรหัสชั่วคราว (ต้องเปลี่ยนตอนเข้าครั้งแรก)</button>
-<span class="hint">ลิงก์ใช้ได้ 24 ชั่วโมง ใช้ได้ครั้งเดียว</span></div>` : `<p class="hint" style="margin:0">บัญชี Microsoft ไม่ต้องรีเซ็ตรหัสผ่านที่นี่ ใช้รหัสผ่านของบริษัท</p>`}
+<span class="hint">ลิงก์ใช้ได้ 24 ชั่วโมง ใช้ได้ครั้งเดียว</span></div>` : sel.auth_type === "email" ? `<p class="hint" style="margin:0">ไม่มีรหัสผ่าน ผู้ใช้ขอลิงก์เข้าระบบทาง email เองที่หน้า login</p>` : `<p class="hint" style="margin:0">บัญชี Microsoft ไม่ต้องรีเซ็ตรหัสผ่านที่นี่ ใช้รหัสผ่านของบริษัท</p>`}
 <div class="right" style="border-top:1px solid var(--line);padding-top:14px">
 <button class="btn" type="button" id="u-signout">บังคับออกจากระบบ</button>
 ${sel.id !== ME.user.id ? `<button class="btn danger" type="button" id="u-del">ลบผู้ใช้</button>` : ""}

@@ -210,6 +210,11 @@ router.get("/auth/callback", async (req, res) => {
       await audit(user, "login_failed", email, { method: "sso", reason: "disabled" });
       return back("disabled");
     }
+    // Signed in by email link before, now has a Microsoft account: switch to Microsoft sign-in.
+    if (user.auth_type === "email") {
+      await q("UPDATE users SET auth_type = 'sso', updated_at = now() WHERE id = $1", [user.id]);
+      user.auth_type = "sso";
+    }
     if (user.auth_type !== "sso") return back("uselocal");
     if (claims.name && claims.name !== user.display_name && user.display_name === user.email) {
       await q("UPDATE users SET display_name = $1 WHERE id = $2", [claims.name, user.id]);
@@ -250,12 +255,85 @@ router.post("/auth/local", async (req, res) => {
     noteFail(key);
     await audit(user || null, "login_failed", email, { method: "password", reason: !user ? "unknown_email" : !user.active ? "disabled" : user.auth_type === "sso" ? "sso_account" : "wrong_password" });
     if (user && user.auth_type === "sso") return res.status(400).json({ error: "บัญชีนี้ใช้ปุ่มเข้าด้วยบัญชี Microsoft" });
+    if (user && user.auth_type === "email") return res.status(400).json({ error: "บัญชีนี้เข้าด้วยลิงก์ทาง email กด \"รับลิงก์เข้าระบบทาง email\"" });
     return res.status(401).json({ error: "อีเมลหรือรหัสผ่านไม่ถูกต้อง" });
   }
   attempts.delete(key);
   await startSession(res, user, req.body.remember !== false);
   await audit(user, "login", email, { method: "password" });
   res.json({ ok: true, mustChange: user.must_change_password });
+});
+
+// ------------------------------------------------------------ sign-in link by email (staff without Microsoft 365)
+// Step 1 asks for a link; step 2 is a POST from the login page, so mail scanners that open links do not use it up.
+const LINK_MINUTES = 15;
+const linkHash = (t) => crypto.createHash("sha256").update(String(t)).digest("hex");
+router.post("/auth/email-link", async (req, res) => {
+  const email = String(req.body.email || "").trim().toLowerCase();
+  const generic = { ok: true, message: `ถ้า ${email} ใช้งานระบบได้ จะได้รับ email ลิงก์เข้าระบบภายใน 1–2 นาที ลิงก์ใช้ได้ ${LINK_MINUTES} นาที ครั้งเดียว` };
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: "ใส่ email ให้ถูกต้อง" });
+  const domain = email.split("@")[1];
+  if (!config3.requesterDomains.includes(domain)) return res.status(400).json({ error: `ใช้ได้เฉพาะ email ของบริษัท (@${config3.requesterDomains.join(", @")})` });
+  if (tooMany(`link-ip:${req.ip}`, 10, 3600000)) return res.status(429).json({ error: "ขอลิงก์บ่อยเกินไป รอสักครู่แล้วลองใหม่" });
+  noteFail(`link-ip:${req.ip}`);
+  if (tooMany(`link:${email}`, 3, 3600000)) return res.json(generic); // quietly: no more mail to this address this hour
+  noteFail(`link:${email}`);
+  const user = await one(`SELECT ${USER_COLS} FROM users WHERE lower(email) = $1`, [email]);
+  const graph = require("../graph");
+  const { shell } = require("../emails");
+  try {
+    if (user && (!user.active || user.role !== "requester")) {
+      // Accounts with other roles keep their own sign-in method; tell them which one instead of sending a link.
+      const how = !user.active ? "บัญชีนี้ถูกปิดใช้งาน ติดต่อ Admin" : user.auth_type === "sso" ? "บัญชีนี้เข้าด้วยปุ่ม \"เข้าสู่ระบบด้วยบัญชีบริษัท\" (Microsoft)" : "บัญชีนี้เข้าด้วยอีเมลและรหัสผ่านของระบบ ถ้าลืมรหัสผ่านติดต่อ Admin";
+      await graph.sendMail({ to: [email], cc: [], subject: "Sino Case SLA: วิธีเข้าสู่ระบบของคุณ", html: shell("#5B6675", `<p style="margin:0">มีการขอลิงก์เข้าระบบด้วย email นี้<br>${how}</p><p style="margin:14px 0 0;color:#5B6675;font-size:13px">ถ้าคุณไม่ได้ขอ ไม่ต้องทำอะไร</p>`) });
+      await audit(user, "email_link_refused", email, { reason: !user.active ? "disabled" : "role_" + user.role });
+      return res.json(generic);
+    }
+    const token = b64u(crypto.randomBytes(32));
+    await q("DELETE FROM login_links WHERE expires_at < now() - interval '1 day'");
+    await q(`INSERT INTO login_links (email, token_hash, ip, expires_at) VALUES ($1,$2,$3, now() + interval '${LINK_MINUTES} minutes')`, [email, linkHash(token), req.ip]);
+    const url = `${config3.baseUrl}/login.html?link=${token}`;
+    await graph.sendMail({
+      to: [email], cc: [],
+      subject: "Sino Case SLA: ลิงก์เข้าสู่ระบบ",
+      html: shell("#1F5FBF", `<p style="margin:0 0 14px">กดปุ่มด้านล่างเพื่อเข้าสู่ระบบ Sino Case SLA (คำขอบริการ)<br>ลิงก์ใช้ได้ <strong>${LINK_MINUTES} นาที</strong> และใช้ได้ครั้งเดียว</p>
+<p style="margin:0 0 16px"><a href="${url}" style="display:inline-block;padding:11px 20px;border-radius:8px;background:#1F5FBF;color:#fff;text-decoration:none;font-weight:700">เข้าสู่ระบบ</a></p>
+<p style="margin:0;color:#5B6675;font-size:13px">ถ้าคุณไม่ได้ขอ ไม่ต้องทำอะไร ไม่มีใครเข้าบัญชีได้หากไม่มีลิงก์นี้<br>ห้ามส่งต่อ email นี้ให้ผู้อื่น</p>`),
+    });
+    await audit(user || null, "email_link_sent", email, { newUser: !user });
+  } catch (e) {
+    console.error("[auth] email link:", e.message);
+    return res.status(502).json({ error: "ส่ง email ไม่สำเร็จ ลองใหม่อีกครั้ง หรือติดต่อ Admin" });
+  }
+  res.json(generic);
+});
+router.post("/auth/email-link/use", async (req, res) => {
+  const token = String(req.body.token || "");
+  if (tooMany(`link-use:${req.ip}`, 20, 15 * 60000)) return res.status(429).json({ error: "ลองหลายครั้งเกินไป รอ 15 นาที" });
+  const row = await one(
+    "UPDATE login_links SET used_at = now() WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now() RETURNING email",
+    [linkHash(token)]
+  );
+  if (!row) {
+    noteFail(`link-use:${req.ip}`);
+    return res.status(400).json({ error: "ลิงก์หมดอายุหรือถูกใช้ไปแล้ว ขอลิงก์ใหม่ได้ที่หน้านี้" });
+  }
+  const email = row.email.toLowerCase();
+  let user = await one(`SELECT ${USER_COLS} FROM users WHERE lower(email) = $1`, [email]);
+  if (user && (!user.active || user.role !== "requester")) {
+    await audit(user, "email_link_refused", email, { at: "use" });
+    return res.status(403).json({ error: !user.active ? "บัญชีนี้ถูกปิดใช้งาน ติดต่อ Admin" : "บัญชีนี้ใช้วิธีเข้าสู่ระบบแบบอื่น" });
+  }
+  if (!user) {
+    user = await one(
+      `INSERT INTO users (email, display_name, role, auth_type) VALUES ($1,$2,'requester','email') RETURNING ${USER_COLS}`,
+      [email, email.split("@")[0]]
+    );
+    await audit(user, "requester_created", email, { via: "email_link" });
+  }
+  await startSession(res, user, true);
+  await audit(user, "login", email, { method: "email_link" });
+  res.json({ ok: true });
 });
 
 router.post("/auth/logout", async (req, res) => {

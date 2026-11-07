@@ -49,6 +49,14 @@ ${sso ? `<a class="btn primary big" href="/auth/login">
 <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 11V8a5 5 0 0 1 10 0v3M5 11h14v10H5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
 เข้าสู่ระบบด้วยบัญชีบริษัท</a>` : ""}
 ${companyNote(company)}
+<button type="button" class="linkbtn" id="show-link">พนักงานที่ไม่มีบัญชี Microsoft: รับลิงก์เข้าระบบทาง email</button>
+<div id="lk" hidden>
+<div class="or"><span></span>รับลิงก์ทาง email<span></span></div>
+<form id="lf" class="stack">
+<label class="f">email บริษัทของคุณ<input type="email" name="email" autocomplete="email" required placeholder="ชื่อ@sinostech.co.th"></label>
+<button class="btn big" type="submit">ส่งลิงก์เข้าระบบ</button>
+<p class="muted" style="margin:0;font-size:13px">สำหรับส่งคำขอบริการและดูสถานะ ลิงก์ใช้ได้ 15 นาที ครั้งเดียว ไม่ต้องจำรหัสผ่าน</p>
+</form></div>
 ${sso && !showPw ? `<button type="button" class="linkbtn" id="show-pw">บัญชีภายนอก: เข้าด้วยอีเมลและรหัสผ่านของระบบนี้</button>` : ""}
 <div id="pw" ${showPw ? "" : "hidden"}>
 ${sso ? `<div class="or"><span></span>บัญชีภายนอก<span></span></div>` : ""}
@@ -64,6 +72,26 @@ ${sso ? `<div class="or"><span></span>บัญชีภายนอก<span></s
       document.getElementById("pw").hidden = false;
       sp.hidden = true;
       document.querySelector("#f input[name=email]").focus();
+    };
+    const sl = document.getElementById("show-link");
+    sl.onclick = () => {
+      document.getElementById("lk").hidden = false;
+      sl.hidden = true;
+      document.querySelector("#lf input[name=email]").focus();
+    };
+    const lf = document.getElementById("lf");
+    lf.onsubmit = async (ev) => {
+      ev.preventDefault();
+      const b = lf.querySelector("button");
+      b.disabled = true;
+      try {
+        const r = await post("/auth/email-link", { email: lf.email.value });
+        msg(r.message + " ตรวจในกล่อง Junk ด้วย", "ok");
+        setTimeout(() => (b.disabled = false), 30000);
+      } catch (e) {
+        msg(e.message);
+        b.disabled = false;
+      }
     };
     const f = document.getElementById("f");
     f.onsubmit = async (ev) => {
@@ -103,6 +131,25 @@ ${sso ? `<div class="or"><span></span>บัญชีภายนอก<span></s
     };
   }
 
+  // Opened from the email: one press signs in (a POST, so link scanners in mail systems cannot use the link up).
+  function renderLink(token) {
+    box.innerHTML = `<h2 style="font-size:24px">เข้าสู่ระบบด้วยลิงก์ทาง email</h2>
+<div id="msg" class="banner err" hidden role="alert"></div>
+<p class="muted" style="margin:0">กดปุ่มด้านล่างเพื่อเข้าสู่ระบบคำขอบริการ</p>
+<button class="btn primary big" type="button" id="go">เข้าสู่ระบบ</button>
+<a class="linkbtn" href="/login.html">กลับหน้าเข้าสู่ระบบ</a>`;
+    document.getElementById("go").onclick = async (ev) => {
+      ev.target.disabled = true;
+      try {
+        await post("/auth/email-link/use", { token });
+        location.href = "/#/sr";
+      } catch (e) {
+        msg(e.message);
+        ev.target.disabled = false;
+      }
+    };
+  }
+
   fetch("/auth/config")
     .then((r) => r.json())
     .then((c) => {
@@ -110,6 +157,7 @@ ${sso ? `<div class="or"><span></span>บัญชีภายนอก<span></s
       window.__company = c.company;
       const token = params.get("reset");
       if (token) renderReset(token);
+      else if (params.get("link")) renderLink(params.get("link"));
       else renderLogin(c.sso, c.company);
     })
     .catch(() => renderLogin(false));
