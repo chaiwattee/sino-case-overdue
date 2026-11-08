@@ -3584,8 +3584,8 @@ ${me && me.rank && me.rank > 1 ? `<div class="s pre">👤 คุณอยู่�
       const byId = Object.fromEntries(rows.map((r) => [r.id, r]));
       const ids = rows.map((r) => r.id);
       const frames = lb.frames;
-      view.innerHTML = `<h2>คะแนนสะสมเดือนต่อเดือน</h2><p class="hint" style="margin:2px 0 0">${lb.frames.length === 1 ? "ช่วง 1 เดือนมีเฟรมเดียว เลือก 3 เดือนขึ้นไปเพื่อดูการแซง" : `${lb.frames.length} เดือน · ${esc(lb.period.label)}`}</p>
-<div class="race" style="height:${ids.length * H + 10}px">${ids.map((id, i) => `<div class="lane ${id === ME.user.id ? "me" : ""}" data-id="${id}" style="transform:translateY(${i * H}px)"><div class="ln">${avHtml(byId[id], "sm")}<span>${esc(byId[id].name.split(" ")[0])}</span></div><div class="track"><div class="fill" style="width:0;background:${AV_COLORS[id % AV_COLORS.length]}"><span>0</span></div></div></div>`).join("")}<div class="month" id="rk-mo"></div></div>
+      view.innerHTML = `<div class="rk-rhead"><h2 id="rk-rh">คะแนนสะสมเดือนต่อเดือน</h2><span class="seg2" id="rk-vt" role="group" hidden><button type="button" data-v="bar" aria-pressed="false">แท่ง</button><button type="button" data-v="line" aria-pressed="true">เส้น</button></span></div><p class="hint" style="margin:2px 0 0">${lb.frames.length === 1 ? "ช่วง 1 เดือนมีเฟรมเดียว เลือก 3 เดือนขึ้นไปเพื่อดูการแซง" : `${lb.frames.length} เดือน · ${esc(lb.period.label)}`}</p>
+<div id="rk-box"><div class="race" id="rk-race" style="height:${ids.length * H + 10}px">${ids.map((id, i) => `<div class="lane ${id === ME.user.id ? "me" : ""}" data-id="${id}" style="transform:translateY(${i * H}px)"><div class="ln">${avHtml(byId[id], "sm")}<span>${esc(byId[id].name.split(" ")[0])}</span></div><div class="track"><div class="fill" style="width:0;background:${AV_COLORS[id % AV_COLORS.length]}"><span>0</span></div></div></div>`).join("")}<div class="month" id="rk-mo"></div></div></div>
 <div class="race-ctl"><span class="hint" id="rk-fl"></span><div class="prog" aria-hidden="true"><i id="rk-pg"></i></div></div>`;
       const lanes = new Map([...view.querySelectorAll(".lane")].map((l) => [Number(l.dataset.id), l]));
       const max = Math.max(60, ...frames.flatMap((f) => f.rows.map((r) => r.score)));
@@ -3599,7 +3599,7 @@ ${me && me.rank && me.rank > 1 ? `<div class="s pre">👤 คุณอยู่�
           l.style.opacity = 1;
           const fill = l.querySelector(".fill");
           fill.style.width = `${Math.max(8, (r.score / max) * 100)}%`;
-          fill.querySelector("span").textContent = r.score.toFixed(1);
+          rkTo(fill.querySelector("span"), r.score);
         });
         let k = f.rows.length;
         lanes.forEach((l, id) => { if (!seen.has(id)) { l.style.transform = `translateY(${k++ * H}px)`; l.style.opacity = 0.35; } });
@@ -3607,7 +3607,9 @@ ${me && me.rank && me.rank > 1 ? `<div class="s pre">👤 คุณอยู่�
         document.getElementById("rk-fl").textContent = `ถึงเดือน ${f.label}`;
         document.getElementById("rk-pg").style.width = `${((idx + 1) / frames.length) * 100}%`;
       };
-      frames.forEach((f, i) => rkLater(() => draw(f, i), 300 + i * 900));
+      const STEP = 2200; // ms per month
+      frames.forEach((f, i) => rkLater(() => draw(f, i), 400 + i * STEP));
+      const end = 400 + (frames.length - 1) * STEP + 1600;
       rkLater(() => {
         const last = frames[frames.length - 1].rows[0];
         const l = last && lanes.get(last.id);
@@ -3615,7 +3617,84 @@ ${me && me.rank && me.rank > 1 ? `<div class="s pre">👤 คุณอยู่�
           const [x, y] = stageXY(l.querySelector(".fill"));
           confettiAt(cv, x + l.querySelector(".fill").offsetWidth / 2 - 10, y);
         }
-      }, 300 + frames.length * 900);
+      }, end);
+      // Hold the final bars, then show the same numbers as a line chart (needs 2+ months).
+      if (frames.length > 1) {
+        rkLater(() => { const r = document.getElementById("rk-race"); if (r) r.classList.add("out"); }, end + 2200);
+        rkLater(() => rkLines(frames, byId, true), end + 2900);
+      }
+    };
+    const rkTo = (el, to) => {
+      const from = parseFloat(el.textContent) || 0;
+      if (matchMedia("(prefers-reduced-motion: reduce)").matches) return (el.textContent = to.toFixed(1));
+      const t0 = performance.now();
+      const step = (t) => { const k = Math.min(1, (t - t0) / 1400); el.textContent = (from + (to - from) * (1 - Math.pow(1 - k, 3))).toFixed(1); if (k < 1) requestAnimationFrame(step); };
+      requestAnimationFrame(step);
+    };
+    const rkLines = (frames, byId, animate) => {
+      const box = document.getElementById("rk-box");
+      if (!box) return;
+      const W = Math.max(300, box.clientWidth);
+      const narrow = W < 560;
+      const padL = 36, padR = narrow ? 96 : 160, padT = 14, padB = 30, Hh = narrow ? 300 : 380;
+      const color = (id) => (id === ME.user.id ? "var(--accent)" : AV_COLORS[id % AV_COLORS.length]);
+      const ids = Object.keys(byId).map(Number);
+      const series = ids.map((id) => ({ id, v: frames.map((f) => { const r = f.rows.find((x) => x.id === id); return r ? r.score : null; }) })).filter((x) => x.v.some((v) => v != null));
+      const all = series.flatMap((x) => x.v.filter((v) => v != null));
+      if (!all.length) return;
+      const lo = Math.max(0, Math.floor((Math.min(...all) - 0.5) / 5) * 5), hi = Math.ceil((Math.max(...all) + 0.5) / 5) * 5 || 5;
+      const x = (i) => padL + (i / Math.max(1, frames.length - 1)) * (W - padL - padR);
+      const y = (v) => padT + (1 - (v - lo) / Math.max(1, hi - lo)) * (Hh - padT - padB);
+      const tickStep = hi - lo > 40 ? 20 : hi - lo > 20 ? 10 : 5;
+      const ticks = []; for (let t = lo; t <= hi; t += tickStep) ticks.push(t);
+      const fin = frames[frames.length - 1].rows;
+      const leader = fin[0] && fin[0].id;
+      const lastOf = (sr) => { for (let i = sr.v.length - 1; i >= 0; i--) if (sr.v[i] != null) return [i, sr.v[i]]; return [0, 0]; };
+      // End labels kept at least 22px apart so names never overlap.
+      const tags = series.map((sr) => { const [i, v] = lastOf(sr); return { sr, i, v, y: y(v) }; }).sort((a, b) => a.y - b.y);
+      for (let k = 1; k < tags.length; k++) tags[k].y = Math.max(tags[k].y, tags[k - 1].y + 22);
+      const over = tags.length ? tags[tags.length - 1].y - (Hh - padB + 4) : 0;
+      if (over > 0) tags.forEach((t) => (t.y -= over));
+      const path = (sr) => { let d = "", pen = false; sr.v.forEach((v, i) => { if (v == null) { pen = false; return; } d += `${pen ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`; pen = true; }); return d; };
+      const ord = (id) => (id === leader ? 3 : id === ME.user.id ? 2 : 1);
+      const first = (nm) => esc(String(nm || "").split(" ")[0]);
+      box.innerHTML = `<div class="rk-lc ${animate ? "pre" : ""}" id="rk-lc"><svg viewBox="0 0 ${W} ${Hh}" height="${Hh}" role="img" aria-label="กราฟเส้นคะแนนสะสมรายเดือน">
+<g class="grid">${ticks.map((t) => `<line x1="${padL}" x2="${W - padR + 6}" y1="${y(t)}" y2="${y(t)}"/><text x="${padL - 6}" y="${y(t) + 4}" text-anchor="end">${t}</text>`).join("")}</g>
+<g class="xl">${frames.map((f, i) => { const every = Math.ceil(frames.length / (narrow ? 4 : 8)); return i % every && i !== frames.length - 1 ? "" : `<text x="${x(i)}" y="${Hh - 8}" text-anchor="middle">${esc(narrow ? f.label.split(" ")[0] : f.label)}</text>`; }).join("")}</g>
+${[...series].sort((a, b) => ord(a.id) - ord(b.id)).map((sr) => {
+        const cls = sr.id === leader ? "top" : sr.id === ME.user.id ? "me" : "";
+        return `<path class="ln2 ${cls}" data-id="${sr.id}" d="${path(sr)}" stroke="${color(sr.id)}"><title>${esc(byId[sr.id].name)}: ${sr.v.map((v, i) => `${frames[i].label} ${v == null ? "-" : v.toFixed(1)}`).join(" · ")}</title></path>
+${sr.v.map((v, i) => (v == null ? "" : `<circle class="dot" cx="${x(i)}" cy="${y(v)}" r="${cls ? 4 : 3}" fill="${color(sr.id)}"><title>${esc(byId[sr.id].name)} ${esc(frames[i].label)}: ${v.toFixed(1)}</title></circle>`)).join("")}`;
+      }).join("")}
+${tags.map((t) => { const rk = fin.findIndex((r) => r.id === t.sr.id) + 1; const ex = x(t.i);
+        return `<g class="tag2 ${t.sr.id === ME.user.id ? "me" : ""}" data-id="${t.sr.id}"><line x1="${ex + 5}" y1="${y(t.v)}" x2="${ex + 14}" y2="${t.y}" stroke="${color(t.sr.id)}" stroke-width="1.5"/>
+<text x="${ex + 18}" y="${t.y + 4}">${rk === 1 ? "👑 " : ""}${first(byId[t.sr.id].name)}${t.sr.id === ME.user.id ? " (คุณ)" : ""}</text>${narrow ? "" : `<text class="v" x="${W - 6}" y="${t.y + 4}" text-anchor="end">${t.v.toFixed(1)}</text>`}</g>`; }).join("")}
+</svg></div>`;
+      document.getElementById("rk-rh").textContent = "เส้นคะแนนตลอดช่วง";
+      const leadName = leader && byId[leader] ? byId[leader].name : "-";
+      document.getElementById("rk-fl").textContent = `อันดับ 1: ${leadName} · ชี้ที่เส้นเพื่อดูคะแนนรายเดือน`;
+      document.getElementById("rk-pg").style.width = "100%";
+      const lc = document.getElementById("rk-lc");
+      const paths = [...lc.querySelectorAll(".ln2")];
+      if (animate && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        paths.forEach((pa) => { const L = pa.getTotalLength(); pa.style.strokeDasharray = L; pa.style.strokeDashoffset = L; });
+        requestAnimationFrame(() => requestAnimationFrame(() => { lc.classList.remove("pre"); paths.forEach((pa) => (pa.style.strokeDashoffset = 0)); }));
+        rkLater(() => lc.classList.add("done"), 2700);
+      } else { lc.classList.remove("pre"); lc.classList.add("done"); }
+      lc.querySelectorAll(".tag2").forEach((g) => {
+        const pa = paths.find((q) => q.dataset.id === g.dataset.id);
+        if (!pa) return;
+        g.onmouseenter = () => pa.classList.add("hl");
+        g.onmouseleave = () => pa.classList.remove("hl");
+      });
+      const vt = document.getElementById("rk-vt");
+      vt.hidden = false;
+      vt.onclick = (e) => {
+        const b = e.target.closest("button");
+        if (!b) return;
+        if (b.dataset.v === "bar") run();
+        else rkLines(frames, byId, true);
+      };
     };
 
     const drawMine = () => {
