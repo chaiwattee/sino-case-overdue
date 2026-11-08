@@ -172,6 +172,7 @@ ${edit ? "" : `<fieldset class="f" style="border:0;padding:0;margin:0"><legend s
       ["intake", "#/intake", "เคสจากลูกค้า", true],
       ["owner", "#/owner", "ราย Owner", true],
       ["kpi", "#/kpi", "KPI (ทดลองใช้)", ME.user.role !== "viewer"],
+      ["rank", "#/rank", "อันดับ KPI", !!(ME.leaderboard && ME.leaderboard.visible)],
       ["reports", "#/reports", "Report &amp; Export", lvl("export") !== "none" || lvl("reports_manage") !== "none"],
       ["audit", "#/audit", "ประวัติแก้ไข", lvl("audit_view") !== "none"],
       ["users", "#/users", "จัดการผู้ใช้", lvl("users_manage") !== "none"],
@@ -183,7 +184,7 @@ ${edit ? "" : `<fieldset class="f" style="border:0;padding:0;margin:0"><legend s
       .map(([k, h, l]) => `<a href="${h}" data-nav="${k}">${l}</a>`)
       .join("");
     const u = ME.user;
-    document.getElementById("me-av").textContent = (u.display_name || u.email).trim().charAt(0).toUpperCase();
+    paintMeAvatar();
     document.getElementById("me-name").innerHTML = `${esc(u.display_name.split(" ")[0])} <span class="muted">· ${ROLE[u.role]}</span>`;
     document.getElementById("me-head").innerHTML = `<strong>${esc(u.display_name)}</strong>${esc(u.email)}<br>${ROLE[u.role]} · ${
       u.role === "admin" || u.role === "observer" ? "ทุกทีม" : esc(u.teams.map((t) => teamLabel(t)).join(", ") || "ยังไม่มีทีม")
@@ -937,7 +938,7 @@ ${actsHtml(data.activities)}</section>`}
     $app.innerHTML = `
 <div class="crumb"><a href="#/">ภาพรวม</a> / ${esc(o.owner)}</div>
 <section class="card owner-head" style="flex-direction:row">
-<div style="display:flex;align-items:center;gap:16px"><div class="avatar" aria-hidden="true">${esc((o.owner || "?").trim().charAt(0).toUpperCase())}</div>
+<div style="display:flex;align-items:center;gap:16px">${avHtml({ id: o.user ? o.user.id : 0, name: o.owner, avatar: o.user && o.user.avatar }, "lg")}
 <div><h1 style="font-size:24px">${esc(o.owner)}</h1><div class="muted" style="font-size:14px">${esc(o.email || "-")} · ${esc(o.sources.join(", "))}</div></div></div>
 <div class="actions"><label class="f" style="flex:0 1 240px;flex-direction:row;align-items:center;gap:8px">เปลี่ยน Owner
 <select id="pick">${o.owners.map((x) => `<option value="${esc(x.id)}" ${x.id === o.id ? "selected" : ""}>${esc(x.owner || x.id)}</option>`).join("")}</select></label>
@@ -1727,6 +1728,7 @@ ${(() => {
       return `<div class="banner ${w.error ? "warn" : bad ? "err" : "ok"}" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><span style="flex:1">${w.error ? `ตรวจคำเตือนของ Chrome ไม่สำเร็จ: ${esc(w.error)}` : bad ? `Google ติดธงเว็บนี้ว่าไม่ปลอดภัย (${bad} URL) ผู้ใช้ Chrome จะเห็นคำเตือน · แก้ที่ Google Search Console → Security issues → Request review` : w.at ? `Google ไม่ติดธงเว็บนี้ (ตรวจล่าสุด ${fdt(w.at)} ด้วย ${esc(w.api || "")})` : "ยังไม่เคยตรวจ"}</span><button class="btn" type="button" id="wr-check" style="min-height:34px">ตรวจตอนนี้</button></div>`;
     })()}
 ${newSites.length ? `<div class="banner warn">มีรายการที่ผู้ใช้เพิ่มใหม่ ${newSites.length} รายการ รอตรวจ (มีป้าย “ใหม่”) กด “แก้” เพื่อยืนยัน แก้ชื่อ หรือรวมกับรายการเดิม</div>` : ""}
+<section class="card" id="lb-card"><div class="title"><h2>อันดับ KPI</h2><span>กำลังโหลด…</span></div></section>
 <section class="card" id="hol-card"><div class="title"><h2>วันหยุดบริษัท</h2><span>กำลังโหลด…</span></div></section>
 <section class="card" id="bk-card"><div class="title"><h2>Backup และทดสอบ restore</h2><span>กำลังโหลด…</span></div></section>
 <section class="card" id="ae"><div class="title"><h2>Email แจ้งเตือน Owner</h2><span>ผู้รับ email แจ้งเตือนแต่ละรอบ</span></div>
@@ -1798,6 +1800,7 @@ ${s.annualReports.map((a) => `<tr><td style="font-weight:600">${a.year + 543} ($
     };
     loadBackupCard();
     bindHolidays();
+    bindLeaderboardSettings();
     document.getElementById("ae-save").onclick = async () => {
       const ccTypes = [...document.querySelectorAll("input[name=cct]:checked")].map((x) => x.value);
       try {
@@ -2996,7 +2999,9 @@ ${missing.length ? `<div class="banner warn" style="margin:0">${after ? "ก่�
 <div class="formgrid" style="grid-template-columns:1fr 1fr"><label class="f">หน่วยงาน / ฝ่าย<input name="department" value="${esc(p.department || "")}" placeholder="เช่น ฝ่ายขาย" required maxlength="120"></label>
 <label class="f">ตำแหน่ง<input name="job_title" value="${esc(p.job_title || "")}" placeholder="เช่น Account Manager" required maxlength="120"></label></div>
 <label class="f">เบอร์โทรที่ติดต่อได้<input name="phone" value="${esc(p.phone || "")}" placeholder="081-234-5678 หรือ 02-123-4567 ต่อ 105" required maxlength="60"><span class="hint">${["requester"].includes(p.role) ? "ทีมที่รับงานใช้ติดต่อกลับ" : "แสดงใน email ถึงลูกค้าเมื่อคุณรับเคส และในคำขอบริการ"}</span></label>
-<div class="right"><button class="btn primary" type="submit">${after ? "บันทึกแล้วไปต่อ" : "บันทึก"}</button></div></form>`;
+<div class="right"><button class="btn primary" type="submit">${after ? "บันทึกแล้วไปต่อ" : "บันทึก"}</button></div></form>
+${after ? "" : `<section class="card" id="av-card" style="max-width:620px;margin-top:16px"></section>`}`;
+    if (!after) avatarPicker(document.getElementById("av-card"));
     const f = document.getElementById("pf");
     f.onsubmit = async (e) => {
       e.preventDefault();
@@ -3250,6 +3255,298 @@ ${r.status === "info" ? `<label class="f">ข้อความถึง Manager
     };
   }
 
+  // ------------------------------------------------------------ avatars
+  const AVATARS = [
+    ["fox", "🦊", "#FFE1CC"], ["owl", "🦉", "#EADFCF"], ["tiger", "🐯", "#FFEBC2"], ["cat", "🐱", "#F4E3F0"], ["panda", "🐼", "#E4ECF2"], ["koala", "🐨", "#E3E8EE"],
+    ["octo", "🐙", "#FBDDE6"], ["penguin", "🐧", "#DCEBFA"], ["lion", "🦁", "#FFE9B8"], ["frog", "🐸", "#DDF3D6"], ["dolphin", "🐬", "#D6EEF7"], ["unicorn", "🦄", "#EFE2FB"],
+    ["rocket", "🚀", "#DCE6FB"], ["robot", "🤖", "#E2E7EF"], ["headset", "🎧", "#E6E1FA"], ["wrench", "🛠️", "#E9EDE3"], ["coffee", "☕", "#F1E4D6"], ["star", "🌟", "#FFF1C7"],
+  ];
+  const AV = Object.fromEntries(AVATARS.map(([k, e, bg]) => [k, { e, bg }]));
+  const AV_COLORS = ["#2F6FDB", "#0E8F7E", "#C2410C", "#7C3AED", "#BE185D", "#0369A1", "#15803D", "#A16207", "#4338CA"];
+  /** Photo > chosen avatar > initial on a colour picked from the id. */
+  function avHtml(u, cls = "") {
+    const name = (u.name || u.display_name || u.email || "?").trim();
+    const a = u.avatar || "";
+    if (a.startsWith("photo:")) return `<span class="uav ${cls}"><img src="api/avatar/${u.id}?v=${encodeURIComponent(a.slice(6, 20))}" alt=""></span>`;
+    if (AV[a]) return `<span class="uav emo ${cls}" style="background:${AV[a].bg}" aria-hidden="true">${AV[a].e}</span>`;
+    return `<span class="uav ${cls}" style="background:${AV_COLORS[(Number(u.id) || name.length) % AV_COLORS.length]}" aria-hidden="true">${esc(name.charAt(0).toUpperCase())}</span>`;
+  }
+  function paintMeAvatar() {
+    const el = document.getElementById("me-av");
+    if (!el) return;
+    el.outerHTML = avHtml({ id: ME.user.id, name: ME.user.display_name, avatar: ME.user.avatar }, "me-av").replace('class="uav', 'id="me-av" class="uav');
+  }
+  function avatarPicker(host) {
+    const draw = () => {
+      const u = { id: ME.user.id, name: ME.user.display_name, avatar: ME.user.avatar };
+      host.innerHTML = `<div class="title"><h2>Avatar</h2><span>แสดงในอันดับ KPI หน้าราย Owner และมุมขวาบน</span></div>
+<div class="avpick"><div class="avprev">${avHtml(u, "xl")}<span class="hint">${(ME.user.avatar || "").startsWith("photo:") ? "ใช้รูปที่อัปโหลด" : ME.user.avatar ? "avatar ที่เลือก" : "ยังไม่เลือก ใช้ตัวอักษรชื่อ"}</span></div>
+<div><div class="avgrid" role="radiogroup" aria-label="เลือก avatar">${AVATARS.map(([k, e, bg]) => `<button type="button" class="avopt" role="radio" aria-checked="${ME.user.avatar === k}" aria-label="${k}" data-k="${k}" style="background:${bg}">${e}</button>`).join("")}</div>
+<div class="actions" style="margin-top:12px"><label class="btn" for="av-file" style="cursor:pointer">อัปโหลดรูปของฉัน</label><input type="file" id="av-file" accept="image/png,image/jpeg,image/webp" hidden>
+<button type="button" class="btn" id="av-none">ใช้ตัวอักษรชื่อ</button><span class="hint">รูปถูกตัดเป็นวงกลม 256×256 ไม่บังคับ</span></div></div></div>`;
+      const save = async (body) => {
+        try {
+          const r = await post("/profile/avatar", body, "PUT");
+          ME.user.avatar = r.avatar;
+          paintMeAvatar();
+          draw();
+          toast("เปลี่ยน avatar แล้ว");
+        } catch (e) {
+          toast(e.message, 6000);
+        }
+      };
+      host.querySelector(".avgrid").onclick = (e) => {
+        const b = e.target.closest(".avopt");
+        if (b) save({ avatar: b.dataset.k });
+      };
+      host.querySelector("#av-none").onclick = () => save({ avatar: null });
+      host.querySelector("#av-file").onchange = (e) => {
+        const f = e.target.files[0];
+        if (!f) return;
+        const img = new Image();
+        img.onload = () => {
+          const c = document.createElement("canvas");
+          c.width = c.height = 256;
+          const m = Math.min(img.width, img.height);
+          c.getContext("2d").drawImage(img, (img.width - m) / 2, (img.height - m) / 2, m, m, 0, 0, 256, 256);
+          URL.revokeObjectURL(img.src);
+          save({ photo: c.toDataURL("image/jpeg", 0.85) });
+        };
+        img.onerror = () => toast("เปิดรูปนี้ไม่ได้ ลองไฟล์ JPG หรือ PNG", 5000);
+        img.src = URL.createObjectURL(f);
+        e.target.value = "";
+      };
+    };
+    draw();
+  }
+
+  // ------------------------------------------------------------ KPI ranking (animated)
+  const BADGE = {
+    improved: ["🚀", "พัฒนาสูงสุด", "v"], sla100: ["⏱️", "SLA 100%", "g"], skill: ["🧩", "ทักษะใหม่", "b"],
+    doc: ["📝", "Resolution ครบ", "b"], streak: ["🔥", "Top 5 สามเดือน", "o"], best: ["⭐", "สถิติส่วนตัว", "o"],
+  };
+  const PART_LABEL = { sla: "SLA", resp: "ตอบสนองเร็ว", work: "ปริมาณงาน", hard: "ความยาก", div: "ทักษะหลากหลาย", back: "งานค้าง / ขยายเวลา", doc: "เอกสาร / Resolution", bonus: "โบนัสทีม" };
+  const PART_TIP = { sla: "ปิดเคสให้ทัน Due", resp: "ตอบเคสแรกเร็วและอัปเดตสม่ำเสมอ", work: "รับเคสเพิ่มตามกำลัง", hard: "รับเคส High/Critical", div: "ทำงานหลาย product / ประเภท", back: "ลดเคสค้างและการขอขยาย", doc: "เขียน Resolution ให้ครบทุกเคส", bonus: "รับเคสจากลูกค้าภายใน 1 ชม." };
+  let rankTimers = [];
+  const rkLater = (fn, ms) => rankTimers.push(setTimeout(fn, matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : ms));
+  function rkCount(el, to, ms = 900) {
+    if (!el) return;
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) return (el.textContent = to.toFixed(1));
+    const t0 = performance.now();
+    const step = (t) => {
+      const k = Math.min(1, (t - t0) / ms);
+      el.textContent = (to * (1 - Math.pow(1 - k, 3))).toFixed(1);
+      if (k < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
+  let fxBits = [];
+  function confettiAt(cv, x, y) {
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches || !cv) return;
+    const ctx = cv.getContext("2d");
+    const r = cv.getBoundingClientRect();
+    cv.width = r.width * devicePixelRatio;
+    cv.height = r.height * devicePixelRatio;
+    const cols = ["#C9971C", "#2F6FDB", "#0E8F7E", "#BE185D", "#7C3AED"];
+    for (let i = 0; i < 90; i++) fxBits.push({ x, y, vx: (Math.random() - 0.5) * 9, vy: -Math.random() * 9 - 3, s: 4 + Math.random() * 5, r: Math.random() * 6, vr: (Math.random() - 0.5) * 0.3, c: cols[i % 5], life: 0 });
+    const tick = () => {
+      if (!cv.isConnected) return (fxBits = []);
+      ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+      ctx.clearRect(0, 0, cv.width, cv.height);
+      fxBits = fxBits.filter((b) => b.life < 120);
+      for (const b of fxBits) {
+        b.life++; b.vy += 0.22; b.x += b.vx; b.y += b.vy; b.r += b.vr; b.vx *= 0.99;
+        ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(b.r); ctx.globalAlpha = Math.max(0, 1 - b.life / 120);
+        ctx.fillStyle = b.c; ctx.fillRect(-b.s / 2, -b.s / 4, b.s, b.s / 2); ctx.restore();
+      }
+      if (fxBits.length) requestAnimationFrame(tick);
+    };
+    tick();
+  }
+  const rkChg = (r) => (r.rank == null ? `<span class="rchip c-same">ยังไม่ครบเกณฑ์</span>` : r.prevRank == null ? `<span class="rchip c-new">ใหม่</span>` : r.delta > 0 ? `<span class="rchip c-up">▲ ${r.delta}</span>` : r.delta < 0 ? `<span class="rchip c-down">▼ ${-r.delta}</span>` : `<span class="rchip c-same">–</span>`);
+  const rkBadges = (r) => r.badges.map((b) => `<span class="rbdg ${BADGE[b][2]}">${BADGE[b][0]} ${BADGE[b][1]}</span>`).join("");
+
+  async function viewRank(params) {
+    setNav("rank");
+    rankTimers.forEach(clearTimeout);
+    rankTimers = [];
+    if (!ME.leaderboard || !ME.leaderboard.visible) {
+      $app.innerHTML = `<div class="empty">อันดับ KPI ยังเปิดให้เฉพาะ Manager ในช่วงทดลอง</div>`;
+      return;
+    }
+    const style = ["podium", "race", "mine"].includes(params.style) ? params.style : "podium";
+    const n = [1, 3, 6, 12].includes(Number(params.n)) ? Number(params.n) : 1;
+    const lb = await api("/kpi/leaderboard?" + qs({ n, team: params.team || "", month: params.month || "" }));
+    const go = (o) => (location.hash = "#/rank?" + qs({ style, n, team: params.team || "", who: params.who || "", ...o }));
+    const seg = (key, cur, opts) => `<span class="seg2" role="group">${opts.map(([v, l]) => `<button type="button" data-${key}="${v}" aria-pressed="${String(v) === String(cur)}">${l}</button>`).join("")}</span>`;
+    const title = { 1: "อันดับประจำเดือน", 3: "อันดับ 3 เดือน", 6: "อันดับ 6 เดือน", 12: "อันดับ 1 ปี" }[n];
+    $app.innerHTML = `
+<div class="head"><div><h1>อันดับ KPI ${lb.settings.visibility === "managers" ? `<span class="chip c-r1" style="vertical-align:middle;font-size:13px">ทดลอง · เห็นเฉพาะ Manager</span>` : ""}</h1>
+<p>${esc(lb.period.label)}${lb.period.current ? " (เดือนนี้ยังไม่จบ คะแนนเปลี่ยนได้)" : ""} · เทียบกับ ${esc(lb.period.prevLabel)} · เกณฑ์จัดอันดับ: อย่างน้อย ${lb.settings.minCases} เคส</p></div>
+<div class="actions"><a class="btn" href="#/kpi">รายละเอียด KPI</a></div></div>
+<div class="rkbar">
+<div><span class="hint">รูปแบบ</span> ${seg("style", style, [["podium", "A · โพเดียม"], ["race", "B · Bar race"], ["mine", "C · การ์ดรายคน"]])}</div>
+<div><span class="hint">ช่วงเวลา</span> ${seg("n", n, [[1, "เดือนนี้"], [3, "3 เดือน"], [6, "6 เดือน"], [12, "1 ปี"]])}</div>
+<label class="f" style="flex:0 1 200px"><span class="sr">ทีม</span><select id="rk-team"><option value="">ทุกทีม</option>${lb.teams.map((t) => `<option value="${esc(t.code)}" ${t.code === lb.team ? "selected" : ""}>${esc(t.label)}</option>`).join("")}</select></label>
+<button type="button" class="btn" id="rk-replay">▶ เล่นอีกครั้ง</button></div>
+<section class="card rkstage" id="rk-stage"><canvas class="rkfx" id="rk-fx" aria-hidden="true"></canvas><div id="rk-view"></div></section>
+${lb.isManager ? `<p class="hint">ตอนเปิดให้ทุกคนเห็น: หน้ารวมแสดงถึงอันดับ ${lb.settings.publicTop} ส่วนอันดับอื่นแต่ละคนเห็นเฉพาะของตัวเอง ${can("settings_manage") ? `· <a href="#/settings">ตั้งค่าการแสดงผล</a>` : ""}</p>` : lb.hidden ? `<p class="hint">แสดงอันดับ 1–${lb.settings.publicTop} และของคุณ</p>` : ""}`;
+    $app.querySelectorAll("[data-style]").forEach((b) => (b.onclick = () => go({ style: b.dataset.style })));
+    $app.querySelectorAll("[data-n]").forEach((b) => (b.onclick = () => go({ n: b.dataset.n })));
+    document.getElementById("rk-team").onchange = (e) => go({ team: e.target.value });
+    const view = document.getElementById("rk-view");
+    const cv = document.getElementById("rk-fx");
+    const stageXY = (el) => {
+      const a = el.getBoundingClientRect();
+      const s = document.getElementById("rk-stage").getBoundingClientRect();
+      return [a.left - s.left + a.width / 2, a.top - s.top + a.height / 2];
+    };
+    const rows = lb.rows;
+    if (!rows.length) {
+      view.innerHTML = `<div class="empty">ยังไม่มีเคสในช่วงนี้</div>`;
+      return;
+    }
+
+    const drawPodium = () => {
+      const ranked = rows.filter((r) => r.rank);
+      const top = ranked.slice(0, 3);
+      const rest = rows.filter((r) => !top.includes(r));
+      const improved = rows.find((r) => r.badges.includes("improved"));
+      const me = rows.find((r) => r.id === ME.user.id);
+      const pod = (r, k) => (r ? `<div class="pd p${k}"><div class="who pre">${k === 1 ? '<span class="crown" aria-hidden="true">👑</span>' : ""}${avHtml(r, "lg")}
+<div class="nm">${esc(r.name)}</div><div class="sc mono"><span data-to="${r.score}">0</span></div><div>${rkChg(r)}</div></div><div class="block pre">${k}</div></div>` : `<div></div>`);
+      view.innerHTML = `<h2 style="text-align:center">${title}</h2>
+${top.length ? `<div class="podium">${pod(top[1], 2)}${pod(top[0], 1)}${pod(top[2], 3)}</div>` : `<div class="empty">ยังไม่มีใครครบเกณฑ์ในช่วงนี้</div>`}
+<div class="spot">${improved ? `<div class="s pre">🚀 พัฒนาขึ้นมากที่สุด <b>${esc(improved.name)}</b> +${improved.scoreDelta} คะแนน</div>` : ""}
+${me && me.rank && me.rank > 1 ? `<div class="s pre">👤 คุณอยู่อันดับ <b>${me.rank}</b> อีก <b class="mono">${(ranked[me.rank - 2].score - me.score + 0.1).toFixed(1)}</b> คะแนนแซงอันดับ ${me.rank - 1}</div>` : ""}</div>
+<div class="rkrows">${rest.map((r) => `<a class="rkrow pre ${r.id === ME.user.id ? "me" : ""}" href="#/rank?${qs({ style: "mine", n, team: lb.team, who: r.id })}"><span class="rk mono">${r.rank ?? "–"}</span>${avHtml(r)}
+<span class="nm">${esc(r.name)}${r.id === ME.user.id ? " (คุณ)" : ""}<small>${esc(r.teams.join(", "))} · ${r.cases} เคส</small></span>
+<span class="bd">${rkChg(r)}${rkBadges(r)}</span><span class="sc mono">${r.score.toFixed(1)}</span></a>`).join("")}</div>`;
+      [".p3", ".p2", ".p1"].forEach((sel, i) => rkLater(() => view.querySelector(sel + " .block")?.classList.remove("pre"), 150 + i * 280));
+      [".p3", ".p2", ".p1"].forEach((sel, i) => rkLater(() => {
+        const w = view.querySelector(sel + " .who");
+        if (!w) return;
+        w.classList.remove("pre");
+        const s = w.querySelector("[data-to]");
+        rkCount(s, Number(s.dataset.to));
+        if (sel === ".p1") rkLater(() => confettiAt(cv, ...stageXY(w.querySelector(".uav"))), 350);
+      }, 700 + i * 320));
+      rkLater(() => view.querySelectorAll(".spot .s").forEach((x) => x.classList.remove("pre")), 1700);
+      view.querySelectorAll(".rkrow").forEach((x, i) => rkLater(() => x.classList.remove("pre"), 1800 + i * 90));
+    };
+
+    const drawRace = () => {
+      const H = 46;
+      const byId = Object.fromEntries(rows.map((r) => [r.id, r]));
+      const ids = rows.map((r) => r.id);
+      const frames = lb.frames;
+      view.innerHTML = `<h2>คะแนนสะสมเดือนต่อเดือน</h2><p class="hint" style="margin:2px 0 0">${lb.frames.length === 1 ? "ช่วง 1 เดือนมีเฟรมเดียว เลือก 3 เดือนขึ้นไปเพื่อดูการแซง" : `${lb.frames.length} เดือน · ${esc(lb.period.label)}`}</p>
+<div class="race" style="height:${ids.length * H + 10}px">${ids.map((id, i) => `<div class="lane ${id === ME.user.id ? "me" : ""}" data-id="${id}" style="transform:translateY(${i * H}px)"><div class="ln">${avHtml(byId[id], "sm")}<span>${esc(byId[id].name.split(" ")[0])}</span></div><div class="track"><div class="fill" style="width:0;background:${AV_COLORS[id % AV_COLORS.length]}"><span>0</span></div></div></div>`).join("")}<div class="month" id="rk-mo"></div></div>
+<div class="race-ctl"><span class="hint" id="rk-fl"></span><div class="prog" aria-hidden="true"><i id="rk-pg"></i></div></div>`;
+      const lanes = new Map([...view.querySelectorAll(".lane")].map((l) => [Number(l.dataset.id), l]));
+      const max = Math.max(60, ...frames.flatMap((f) => f.rows.map((r) => r.score)));
+      const draw = (f, idx) => {
+        const seen = new Set();
+        f.rows.forEach((r, i) => {
+          const l = lanes.get(r.id);
+          if (!l) return;
+          seen.add(r.id);
+          l.style.transform = `translateY(${i * H}px)`;
+          l.style.opacity = 1;
+          const fill = l.querySelector(".fill");
+          fill.style.width = `${Math.max(8, (r.score / max) * 100)}%`;
+          fill.querySelector("span").textContent = r.score.toFixed(1);
+        });
+        let k = f.rows.length;
+        lanes.forEach((l, id) => { if (!seen.has(id)) { l.style.transform = `translateY(${k++ * H}px)`; l.style.opacity = 0.35; } });
+        document.getElementById("rk-mo").textContent = f.label;
+        document.getElementById("rk-fl").textContent = `ถึงเดือน ${f.label}`;
+        document.getElementById("rk-pg").style.width = `${((idx + 1) / frames.length) * 100}%`;
+      };
+      frames.forEach((f, i) => rkLater(() => draw(f, i), 300 + i * 900));
+      rkLater(() => {
+        const last = frames[frames.length - 1].rows[0];
+        const l = last && lanes.get(last.id);
+        if (l) {
+          const [x, y] = stageXY(l.querySelector(".fill"));
+          confettiAt(cv, x + l.querySelector(".fill").offsetWidth / 2 - 10, y);
+        }
+      }, 300 + frames.length * 900);
+    };
+
+    const drawMine = () => {
+      const pickable = lb.isManager ? rows : rows.filter((r) => r.id === ME.user.id);
+      const who = Number(params.who) || (rows.find((r) => r.id === ME.user.id) || rows[0]).id;
+      const me = pickable.find((r) => r.id === who) || pickable[0];
+      if (!me) {
+        view.innerHTML = `<div class="empty">คุณยังไม่มีเคสในช่วงนี้</div>`;
+        return;
+      }
+      const ranked = rows.filter((r) => r.rank);
+      const ahead = me.rank && me.rank > 1 ? ranked[me.rank - 2] : null;
+      const need = ahead ? Math.max(0.1, ahead.score - me.score + 0.1) : 0;
+      const parts = Object.entries(lb.partMax).filter(([k]) => me.parts[k] != null);
+      const ratio = parts.map(([k, mx]) => me.parts[k] / mx);
+      const strong = parts[ratio.indexOf(Math.max(...ratio))]?.[0];
+      const gapPts = parts.map(([k, mx]) => mx - me.parts[k]);
+      const weak = parts[gapPts.indexOf(Math.max(...gapPts))]?.[0];
+      const tmax = Math.max(60, ...me.trend.map((t) => t.score || 0));
+      view.innerHTML = `<div class="rkmine-head"><h2>${lb.isManager ? "การ์ดรายคน" : "การ์ดของฉัน"}</h2>
+${lb.isManager ? `<label class="f" style="flex:0 1 240px"><span class="sr">เลือกคน</span><select id="rk-who">${rows.map((r) => `<option value="${r.id}" ${r.id === me.id ? "selected" : ""}>${esc(r.name)}</option>`).join("")}</select></label>` : ""}
+${me.personalBest ? `<span class="chip c-r1">⭐ สถิติดีที่สุด</span>` : ""}</div>
+<div class="rkmine">
+<div class="mc"><div class="bigrank">${avHtml(me, "xl")}<span class="n">#${me.rank ?? "–"}</span><span class="hint">${me.rank ? `จาก ${ranked.length} คน` : "ยังไม่ครบเกณฑ์จัดอันดับ"} ${rkChg(me)}</span></div>
+<div><span class="mono" style="font-size:28px;font-weight:700" id="rk-msc">0</span> <span class="hint">คะแนน ${me.scoreDelta != null ? (me.scoreDelta >= 0 ? `<span class="rchip c-up">+${me.scoreDelta}</span>` : `<span class="rchip c-down">${me.scoreDelta}</span>`) + ` เทียบ ${esc(lb.period.prevLabel)}` : ""} · ${me.cases} เคส${me.slaPct != null ? ` · SLA ${me.slaPct}%` : ""}</span></div>
+${ahead ? `<div class="rkgap"><div>อีก <b class="mono">${need.toFixed(1)}</b> คะแนน แซง <b>${esc(ahead.name)}</b> ขึ้นอันดับ ${me.rank - 1}</div><div class="meter" aria-hidden="true"><i id="rk-mt"></i></div></div>` : me.rank === 1 ? `<div class="rkgap"><div>🏆 อันดับ 1 ของช่วงนี้</div></div>` : ""}
+<div class="parts">${parts.map(([k, mx]) => `<div class="pt ${k === strong ? "best" : k === weak ? "weak" : ""}"><span>${PART_LABEL[k]}${k === strong ? " · จุดแข็ง" : k === weak ? " · เพิ่มได้มากสุด" : ""}</span><div class="m"><i data-w="${Math.min(100, (me.parts[k] / mx) * 100)}"></i></div><span class="v mono">${me.parts[k]}/${mx}</span></div>`).join("")}</div>
+${weak ? `<p class="hint" style="margin:0">เพิ่มคะแนนได้มากสุดที่ “${PART_LABEL[weak]}” (อีก ${(lb.partMax[weak] - me.parts[weak]).toFixed(1)} คะแนน): ${PART_TIP[weak]}</p>` : ""}</div>
+<div class="mc"><h3>คะแนน 6 เดือน</h3>
+<div class="trend">${me.trend.map((t, i) => `<div class="${i === 5 ? "cur" : ""}"><b class="mono">${t.score ?? "–"}</b><span class="col"><i data-h="${t.score ? Math.max(6, (t.score / tmax) * 100) : 0}"></i></span><span>${esc(t.label)}</span></div>`).join("")}</div>
+<h3>เหรียญ</h3>
+<div class="medals">${Object.entries(BADGE).map(([k, [ic, t]]) => `<div class="medal pre ${me.badges.includes(k) ? "" : "locked"}"><span class="ic" aria-hidden="true">${ic}</span><b>${t}</b><span>${me.badges.includes(k) ? "ได้แล้ว" : "ยังไม่ได้"}</span></div>`).join("")}</div>
+${me.sr ? `<p class="hint" style="margin:0">ทำคำขอบริการภายในเสร็จ ${me.sr} งาน (นับเป็นทักษะ)</p>` : ""}</div></div>`;
+      const w = document.getElementById("rk-who");
+      if (w) w.onchange = () => go({ who: w.value });
+      rkCount(document.getElementById("rk-msc"), me.score, 1000);
+      rkLater(() => { const m = document.getElementById("rk-mt"); if (m) m.style.width = `${Math.max(8, 100 - need * 10)}%`; }, 500);
+      view.querySelectorAll(".pt .m i").forEach((x, i) => rkLater(() => (x.style.width = x.dataset.w + "%"), 400 + i * 90));
+      view.querySelectorAll(".trend i").forEach((x, i) => rkLater(() => (x.style.height = x.dataset.h + "%"), 600 + i * 110));
+      view.querySelectorAll(".medal").forEach((x, i) => rkLater(() => x.classList.remove("pre"), 1100 + i * 160));
+      if (me.personalBest || me.rank === 1) rkLater(() => confettiAt(cv, ...stageXY(view.querySelector(".bigrank .uav"))), 900);
+    };
+
+    const run = () => {
+      rankTimers.forEach(clearTimeout);
+      rankTimers = [];
+      fxBits = [];
+      ({ podium: drawPodium, race: drawRace, mine: drawMine })[style]();
+    };
+    document.getElementById("rk-replay").onclick = run;
+    run();
+  }
+
+  function bindLeaderboardSettings() {
+    const el = document.getElementById("lb-card");
+    if (!el) return;
+    api("/kpi/leaderboard?n=1").then((lb) => {
+      const s = lb.settings;
+      el.innerHTML = `<div class="title"><h2>อันดับ KPI</h2><span>ช่วงทดลองให้เห็นเฉพาะ Manager · เปิดให้ทุกคนเมื่อพร้อม</span></div>
+<div class="f"><span>ใครเห็นหน้าอันดับ</span><div class="seg"><label><input type="radio" name="lbv" value="managers" ${s.visibility !== "all" ? "checked" : ""}><span>เฉพาะ Admin / Manager / Observer (ทดลอง)</span></label><label><input type="radio" name="lbv" value="all" ${s.visibility === "all" ? "checked" : ""}><span>ทุกคน</span></label></div>
+<span class="hint">เมื่อเลือก “ทุกคน” Engineer เห็นอันดับ 1–${s.publicTop} และของตัวเองเท่านั้น</span></div>
+<div class="formgrid" style="grid-template-columns:1fr 1fr"><label class="f">แสดงอันดับต่อสาธารณะถึงอันดับ<input type="number" id="lb-top" min="3" max="20" value="${s.publicTop}"></label>
+<label class="f">ต้องมีเคสอย่างน้อย (เคส) จึงจัดอันดับ<input type="number" id="lb-min" min="1" max="50" value="${s.minCases}"></label></div>
+<div class="right"><button class="btn primary" type="button" id="lb-save">บันทึก</button></div>`;
+      document.getElementById("lb-save").onclick = async () => {
+        try {
+          await post("/kpi/leaderboard/settings", { visibility: el.querySelector("input[name=lbv]:checked").value, publicTop: document.getElementById("lb-top").value, minCases: document.getElementById("lb-min").value }, "PUT");
+          toast("บันทึกการตั้งค่าอันดับ KPI แล้ว");
+        } catch (e) {
+          toast(e.message, 6000);
+        }
+      };
+    }).catch(() => (el.hidden = true));
+  }
+
   // ------------------------------------------------------------ router
   async function route() {
     const { parts, params } = (() => {
@@ -3277,6 +3574,7 @@ ${r.status === "info" ? `<label class="f">ข้อความถึง Manager
         case "intake": return parts[1] ? await viewIntakeItem(parts[1]) : await viewIntake(params);
         case "intake-admin": return await viewIntakeAdmin();
         case "kpi": return await viewKpi(params);
+        case "rank": return await viewRank(params);
         case "sr": return parts[1] === "new" ? await viewSrNew() : parts[1] ? await viewSrItem(parts[1]) : await viewSr(params);
         case "profile": return await viewProfile();
         default:

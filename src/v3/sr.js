@@ -672,6 +672,6 @@ function mount(api, { wrap }) {
 }
 
 /** Requests a requester-only account may make (everything else is refused). */
-const REQUESTER_PATHS = [/^\/me$/, /^\/profile$/, /^\/sr(\/|$)/, /^\/sr-files\//];
+const REQUESTER_PATHS = [/^\/me$/, /^\/profile(\/avatar)?$/, /^\/avatar\/\d+$/, /^\/sr(\/|$)/, /^\/sr-files\//];
 
 module.exports = { mount, runReminders, kpiByAssignee, REQUESTER_PATHS, SEV, STATUS, OUTCOME, isWorkday, addWorkdays, workdaysBetween, holidays, profileMissing };

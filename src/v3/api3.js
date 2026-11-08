@@ -50,6 +50,7 @@ const ext = require("./extensions");
 ext.mount(api, { wrap });
 require("./kpi").mount(api, { wrap, need });
 require("./sr").mount(api, { wrap });
+require("./leaderboard").mount(api, { wrap, need });
 
 async function visibleCases(user) {
   return repo.loadCases(user);
@@ -60,7 +61,10 @@ async function teamsList() {
 
 // ------------------------------------------------------------ me / lookups
 api.get("/me", wrap(async (req, res) => {
+  const lb = require("./leaderboard");
+  const lbs = await lb.settings();
   res.json({
+    leaderboard: { visible: lb.canSee(req.user, lbs), visibility: lbs.visibility },
     user: req.user,
     perms: await perms.forUser(req.user),
     teams: await teamsList(),
@@ -185,6 +189,7 @@ api.get("/owner/:id", wrap(async (req, res) => {
   const recent = d.addDays(d.today(), -30);
   res.json({
     id, owner: mine[0].owner, email: mine[0].ownerEmail, sources: [...new Set(mine.map((c) => c.sourceLabel))],
+    user: await one("SELECT id, avatar FROM users WHERE lower(email) = lower($1)", [mine[0].ownerEmail || ""]),
     kpis: { ...stageCounts(mine), sla: slaStats(mine) }, owners,
     cases: mine.filter((c) => c.stage !== "closed" || c.endDate >= recent)
       .sort((a, b) => (a.stage === "closed") - (b.stage === "closed") || (b.age || 0) - (a.age || 0)).map(ser3),
