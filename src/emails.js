@@ -18,13 +18,17 @@ const COLORS = {
   no_start: { bar: "#8A93A3", bg: "#ECEEF2", fg: "#4A5363" },
 };
 
+// Link to the web app in every email footer. BASE_URL (the live address) wins over the old DASHBOARD_URL,
+// so a stale DASHBOARD_URL left in .env (e.g. the old baanpin host) can never leak into emails.
+const dashUrl = () => String(process.env.BASE_URL || config.dashboardUrl || "").replace(/\/$/, "");
+
 function shell(barColor, inner) {
   return `<!doctype html><html><body style="margin:0;padding:24px;background:#E9ECF0;font-family:'Segoe UI',Tahoma,sans-serif;color:#18212E">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:680px;margin:0 auto;background:#FFFFFF;border:1px solid #D9DEE5;border-radius:10px;overflow:hidden">
 <tr><td style="height:6px;background:${barColor};font-size:0;line-height:0">&nbsp;</td></tr>
 <tr><td style="padding:24px 28px;font-size:15px;line-height:1.6">${inner}
 <p style="margin:24px 0 0;padding-top:14px;border-top:1px solid #E2E5EA;font-size:12px;color:#5B6576">Email นี้ส่งอัตโนมัติจาก Sino Case Tracker${
-    config.dashboardUrl ? ` · <a href="${esc(config.dashboardUrl)}" style="color:#1F4FD1">เปิด Dashboard</a>` : ""
+    dashUrl() ? ` · <a href="${esc(dashUrl())}" style="color:#1F4FD1">เปิด Dashboard</a>` : ""
   }</p>
 </td></tr></table></body></html>`;
 }
@@ -95,7 +99,7 @@ ${fieldTable([
       c.caseUrl
         ? button(c.caseUrl, "เปิดเคสเพื่ออัปเดต")
         : button(
-            config.dashboardUrl && `${config.dashboardUrl}/#/owner/${encodeURIComponent(c.ownerEmail || c.owner)}`,
+            dashUrl() && `${dashUrl()}/#/owner/${encodeURIComponent(c.ownerEmail || c.owner)}`,
             "ดูเคสบน Dashboard"
           ) + button(c.fileUrl, "เปิดเอกสาร Case List", false)
     }</p>`

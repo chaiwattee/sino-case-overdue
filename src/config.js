@@ -69,7 +69,7 @@ const config = {
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean),
-  dashboardUrl: env.DASHBOARD_URL || "", // e.g. https://case.baanpin.com
+  dashboardUrl: env.DASHBOARD_URL || "", // legacy; v3 emails use BASE_URL
 
   // SLA
   slaDays: Number(env.SLA_DAYS || 7),
