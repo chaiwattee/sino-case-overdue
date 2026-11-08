@@ -104,6 +104,93 @@
   const statusHelp = (st) => ((LOOKUPS && LOOKUPS.statusHelp) || {})[st] || "";
   const isClosedStatus = (st) => (LOOKUPS && LOOKUPS.closedStatuses ? LOOKUPS.closedStatuses : ["success", "cancel", "n/a", "resolved"]).includes(String(st || "").toLowerCase());
   /** Ask for status + Resolution before closing. Resolves to {status, resolution, root_cause} or null if cancelled. */
+  // ---- RCA from NICE: a case with a CS Number needs the vendor RCA before it can close (not for Cancel / N/A).
+  const needsRca = (cs, status, lk) => !!String(cs || "").trim() && !((lk.rca && lk.rca.exempt) || ["cancel", "n/a"]).includes(String(status || "").toLowerCase());
+  function rcaFieldsHtml(lk, cur = {}) {
+    const R = lk.rca || { min: 30, categories: [] };
+    return `<label class="f"><span class="req">สรุป RCA ตามที่ NICE ส่งมา</span><textarea name="rca_text" rows="4" placeholder="สาเหตุที่แท้จริง (root cause) ตามรายงานของ NICE และสิ่งที่ NICE แนะนำเพื่อไม่ให้เกิดซ้ำ">${esc(cur.rcaText || "")}</textarea><span class="hint" data-rca-count></span></label>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px">
+<label class="f"><span class="req">หมวดสาเหตุ</span><select name="rca_cat"><option value="">เลือกหมวด</option>${R.categories.map((x) => `<option ${x === cur.rcaCategory ? "selected" : ""}>${esc(x)}</option>`).join("")}</select></label>
+<label class="f"><span class="req">วันที่ NICE ส่ง RCA</span><input type="date" name="rca_date" value="${esc(cur.rcaDate || "")}" max="${daysAgo(0)}"></label></div>
+<label class="f">ไฟล์ RCA จาก NICE (ไม่บังคับ · PDF, รูป, .msg/.eml, .docx ไม่เกิน 10 MB)${cur.rcaFileName ? `<span class="hint">ไฟล์เดิม: ${esc(cur.rcaFileName)} (เลือกไฟล์ใหม่เพื่อแทนที่)</span>` : ""}<input type="file" name="rca_file" accept=".pdf,.png,.jpg,.jpeg,.webp,.msg,.eml,.docx"></label>`;
+  }
+  function bindRcaCount(root, lk) {
+    const t = root.querySelector("[name=rca_text]");
+    const cnt = root.querySelector("[data-rca-count]");
+    if (!t || !cnt) return;
+    const min = (lk.rca && lk.rca.min) || 30;
+    const upd = () => {
+      const n = t.value.trim().length;
+      cnt.textContent = `${n} ตัวอักษร · ต้องมีอย่างน้อย ${min} ตัวอักษร`;
+      cnt.style.color = n >= min ? "" : "var(--r2-fg)";
+    };
+    t.addEventListener("input", upd);
+    upd();
+  }
+  /** Read the RCA fields; returns {rca, file} or a string with what is missing. */
+  async function readRca(root, lk) {
+    const min = (lk.rca && lk.rca.min) || 30;
+    const text = root.querySelector("[name=rca_text]").value.trim();
+    const category = root.querySelector("[name=rca_cat]").value;
+    const date = root.querySelector("[name=rca_date]").value;
+    if (text.length < min) return `ใส่สรุป RCA จาก NICE อย่างน้อย ${min} ตัวอักษร`;
+    if (!category) return "เลือกหมวดสาเหตุของ RCA";
+    if (!date) return "ใส่วันที่ NICE ส่ง RCA";
+    const fi = root.querySelector("[name=rca_file]");
+    let file = null;
+    if (fi && fi.files[0]) {
+      const f = fi.files[0];
+      if (f.size > 10 * 1024 * 1024) return "ไฟล์ RCA ต้องไม่เกิน 10 MB";
+      const data = await new Promise((ok, no) => {
+        const r = new FileReader();
+        r.onload = () => ok(String(r.result).replace(/^data:[^,]*,/, ""));
+        r.onerror = () => no(new Error("อ่านไฟล์ไม่ได้"));
+        r.readAsDataURL(f);
+      });
+      file = { name: f.name, data };
+    }
+    return { rca: { text, category, date }, file };
+  }
+  /** Save the RCA (and file) first, then send the case update without it. Used by every close path. */
+  async function saveCaseWithRca(id, body) {
+    const b = { ...body };
+    if (b.rca) {
+      await post(`/case/${id}/rca`, { ...b.rca, file: b.rcaFile || undefined }, "PUT");
+      delete b.rca;
+    }
+    delete b.rcaFile;
+    return post("/case/" + id, b, "PUT");
+  }
+  async function askRca(c) {
+    const lk = await lookups();
+    const dlg = document.getElementById("dlg") || document.body.appendChild(Object.assign(document.createElement("dialog"), { id: "dlg" }));
+    dlg.innerHTML = `<form class="card" method="dialog" id="rcaf" style="min-width:min(560px,90vw)"><h2>${c.rcaText ? "แก้" : "บันทึก"} RCA จาก NICE · ${esc(caseRef(c))}</h2>
+<p class="muted" style="margin:0;font-size:14px">CS Number <span class="mono">${esc(csOf(c))}</span> · ${esc(c.site || "")}</p>
+${rcaFieldsHtml(lk, c)}
+<div class="right"><button class="btn" value="cancel" formnovalidate>ยกเลิก</button><button class="btn primary" value="ok">บันทึก RCA</button></div></form>`;
+    const f = dlg.querySelector("#rcaf");
+    bindRcaCount(f, lk);
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (v) => { if (!done) { done = true; resolve(v); } };
+      f.onsubmit = async (e) => {
+        if (e.submitter && e.submitter.value === "cancel") return finish(null);
+        e.preventDefault();
+        const r = await readRca(f, lk).catch((err) => err.message);
+        if (typeof r === "string") return toast(r);
+        try {
+          await post(`/case/${c.id}/rca`, { ...r.rca, file: r.file || undefined }, "PUT");
+          dlg.close();
+          finish(true);
+        } catch (err) {
+          toast("บันทึก RCA ไม่สำเร็จ: " + err.message, 6000);
+        }
+      };
+      dlg.addEventListener("close", () => finish(null), { once: true });
+      dlg.showModal();
+    });
+  }
+
   async function askResolution(c, { status, edit = false } = {}) {
     const lk = await lookups();
     const min = lk.resolutionMin || 20;
@@ -120,6 +207,7 @@ ${edit ? "" : `<fieldset class="f" style="border:0;padding:0;margin:0"><legend s
 <label class="f"><span class="req">Resolution: แก้ไขอย่างไร / ผลลัพธ์</span><textarea name="res" rows="4" required placeholder="เช่น SMTP relay ของลูกค้าเปลี่ยน IP แก้ค่า relay ใน Scheduler ทดสอบส่ง report 3 รอบ ลูกค้ายืนยันว่าได้รับแล้ว">${esc(edit ? c.resolution || "" : "")}</textarea></label>
 <div class="hint" id="rs-count" style="text-align:right;margin-top:-6px"></div>
 <label class="f">สาเหตุของปัญหา (ไม่บังคับ)<select name="rc"><option value="">-</option>${(lk.rootCauses || []).map((x) => `<option ${x === c.rootCause ? "selected" : ""}>${esc(x)}</option>`).join("")}</select></label>
+${edit || !csOf(c) ? "" : `<div class="rca-sec" id="rca-sec"></div>`}
 <p class="hint" style="margin:0">Resolution บันทึกเป็น Activity ในไทม์ไลน์ แสดงในหน้าเคส ผลค้นหา และ Report Excel (ข้อมูลภายใน ไม่ส่งถึงลูกค้า)</p>
 <div class="right"><button class="btn" value="cancel" formnovalidate>ยกเลิก</button><button class="btn primary" value="ok">${edit ? "บันทึก" : "ปิดเคส"}</button></div></form>`;
     const f = dlg.querySelector("#rsf");
@@ -138,6 +226,29 @@ ${edit ? "" : `<fieldset class="f" style="border:0;padding:0;margin:0"><legend s
     };
     f.querySelectorAll("input[name=st]").forEach((r) => r.addEventListener("change", showHelp));
     showHelp();
+    // RCA section: only when the case has a CS Number, the chosen status needs it, and no RCA is saved yet.
+    const rs = dlg.querySelector("#rca-sec");
+    const curSt = () => { const p = f.querySelector("input[name=st]:checked"); return p ? p.value : st0; };
+    const rcaNeeded = () => rs && needsRca(csOf(c), curSt(), lk);
+    const keep = {};
+    const drawRca = () => {
+      if (!rs) return;
+      ["rca_text", "rca_cat", "rca_date"].forEach((n) => { const el = rs.querySelector(`[name=${n}]`); if (el) keep[n] = el.value; });
+      if (!rcaNeeded()) {
+        rs.className = "rca-sec skip";
+        rs.innerHTML = `<div class="rca-h"><h3>RCA จาก NICE</h3><span class="chip c-normal">ไม่บังคับเมื่อปิดเป็น ${esc(curSt())}</span></div><p class="hint" style="margin:0">ระบุเหตุผลที่ยกเลิก / ไม่ใช่เคสใน Resolution แทน</p>`;
+      } else if (c.rcaText) {
+        rs.className = "rca-sec ok";
+        rs.innerHTML = `<div class="rca-h"><h3>RCA จาก NICE</h3><span class="chip c-normal">ใช้ RCA ที่บันทึกไว้</span></div><div class="resol sm">${esc(c.rcaText)}</div><p class="hint" style="margin:0">${esc(c.rcaCategory)} · NICE ส่ง ${fd(c.rcaDate)}${c.rcaFileName ? " · ไฟล์ " + esc(c.rcaFileName) : ""}</p>`;
+      } else {
+        rs.className = "rca-sec";
+        rs.innerHTML = `<div class="rca-h"><h3>RCA จาก NICE <span class="mono muted" style="font-size:13px;font-weight:500">${esc(csOf(c))}</span></h3><span class="chip c-r2">จำเป็น</span></div>
+<p class="hint" style="margin:0">เคสนี้มี CS Number ต้องใส่ RCA ที่ NICE สรุปมาก่อนจึงจะปิดได้</p>${rcaFieldsHtml(lk, { rcaText: keep.rca_text, rcaCategory: keep.rca_cat, rcaDate: keep.rca_date })}`;
+        bindRcaCount(rs, lk);
+      }
+    };
+    f.querySelectorAll("input[name=st]").forEach((r) => r.addEventListener("change", drawRca));
+    drawRca();
     return new Promise((resolve) => {
       let done = false;
       const finish = (v) => {
@@ -145,7 +256,7 @@ ${edit ? "" : `<fieldset class="f" style="border:0;padding:0;margin:0"><legend s
         done = true;
         resolve(v);
       };
-      f.onsubmit = (e) => {
+      f.onsubmit = async (e) => {
         if (e.submitter && e.submitter.value === "cancel") return finish(null);
         e.preventDefault();
         const text = f.res.value.trim();
@@ -155,8 +266,16 @@ ${edit ? "" : `<fieldset class="f" style="border:0;padding:0;margin:0"><legend s
           return;
         }
         const picked = f.querySelector("input[name=st]:checked");
+        let rcaOut = null;
+        if (!edit && rcaNeeded() && !c.rcaText) {
+          rcaOut = await readRca(rs, lk).catch((err) => err.message);
+          if (typeof rcaOut === "string") {
+            toast(rcaOut);
+            return;
+          }
+        }
         dlg.close();
-        finish({ status: edit ? undefined : picked ? picked.value : st0, resolution: text, root_cause: f.rc.value });
+        finish({ status: edit ? undefined : picked ? picked.value : st0, resolution: text, root_cause: f.rc.value, ...(rcaOut ? { rca: rcaOut.rca, rcaFile: rcaOut.file } : {}) });
       };
       dlg.addEventListener("close", () => finish(null), { once: true });
       dlg.showModal();
@@ -238,6 +357,17 @@ ${edit ? "" : `<fieldset class="f" style="border:0;padding:0;margin:0"><legend s
     return `<div class="age"><div class="track"><div class="f-${c.stage}" style="width:${pct}%"></div></div><small>${txt}</small></div>`;
   }
 
+  function rcaCard(c, permsC) {
+    const closed = c.stage === "closed";
+    const btn = permsC.edit ? `<button class="btn" type="button" id="btn-rca" style="min-height:34px">${c.rcaText ? "แก้ไข" : "บันทึก RCA"}</button>` : "";
+    if (c.rcaText)
+      return `<section class="card"><div class="title"><h2>RCA จาก NICE</h2>${btn}</div><div class="resol">${esc(c.rcaText)}</div>
+<p class="muted" style="margin:0;font-size:13px">${esc(c.rcaCategory)} · NICE ส่ง ${fd(c.rcaDate, true)}${c.rcaFileName ? ` · <a href="api/case/${c.id}/rca/file" target="_blank" rel="noopener">📎 ${esc(c.rcaFileName)}</a>` : ""}<br>บันทึกโดย ${esc(c.rcaBy || "-")}${c.rcaAt ? " · " + fdt(c.rcaAt) : ""}</p></section>`;
+    if (closed) return `<section class="card"><div class="title"><h2>RCA จาก NICE</h2>${btn}</div><div class="resol none">ไม่มี RCA ${["cancel", "n/a"].includes(String(c.status).toLowerCase()) ? `(ปิดเป็น ${esc(c.status)})` : "(ปิดก่อนเริ่มบังคับ)"}</div></section>`;
+    return `<section class="card rca-wait"><div class="title"><h2>RCA จาก NICE</h2><span class="chip c-r1">รอ RCA จาก NICE</span></div>
+<p style="margin:0;font-size:14px">เคสนี้มี CS Number <span class="mono">${esc(csOf(c))}</span> ต้องมี RCA จาก NICE ก่อนจึงจะปิดเคสได้ (ยกเว้นปิดเป็น Cancel หรือ N/A) ถ้า NICE ส่งมาแล้วบันทึกไว้ก่อนได้ ตอนปิดเคสไม่ต้องกรอกซ้ำ</p>${btn ? `<div>${btn}</div>` : ""}</section>`;
+  }
+  const rcaTag = (c) => (c.rcaPending ? ` <span class="chip c-r1" title="มี CS Number ต้องมี RCA จาก NICE ก่อนปิด">รอ RCA</span>` : "");
   function resLine(c, { missing = false } = {}) {
     if (c.stage !== "closed") return "";
     if (c.resolution) return `<div class="resol sm" title="${esc(c.resolution)}">${c.status && !["success", "resolved"].includes(c.status.toLowerCase()) ? `Resolution (${esc(c.status)}): ` : "Resolution: "}${esc(c.resolution)}</div>`;
@@ -259,7 +389,7 @@ ${showOwner ? `<td><a href="#/owner/${encodeURIComponent(c.ownerId)}">${esc(c.ow
 <td>${fd(c.startDate)}</td>
 <td>${c.extCount ? `<span class="muted" style="text-decoration:line-through">${fd(c.origDueDate)}</span>` : fd(c.dueDate)}</td>
 <td>${c.extCount ? `<small class="muted">รวม ${c.totalAge} วัน · ขยายแล้ว</small>` : ageCell(c)}</td>
-<td>${c.extCount ? "" : chip(c.stage)}${extTag(c)}<div class="muted" style="font-size:12px;margin-top:4px">${esc(c.status || "")}</div></td>
+<td>${c.extCount ? "" : chip(c.stage)}${extTag(c)}${rcaTag(c)}<div class="muted" style="font-size:12px;margin-top:4px">${esc(c.status || "")}</div></td>
 </tr>${extRow(c, { before: showOwner ? 6 : 5, after: 1 })}`
       )
       .join("")}</tbody></table></div>`;
@@ -517,7 +647,8 @@ ${caseTable(cases, { missingRes: showRes, empty: "ไม่พบเคสตา
     const tab = params.tab || "open";
     const open = cases.filter((c) => c.stage !== "closed");
     const closed30 = cases.filter((c) => c.stage === "closed" && (c.endDate || "") >= daysAgo(30));
-    let list = tab === "open" ? open : tab === "closed" ? closed30 : cases;
+    const rcaWait = open.filter((c) => c.rcaPending);
+    let list = tab === "open" ? open : tab === "closed" ? closed30 : tab === "rca" ? rcaWait : cases;
     if (params.q) {
       const s = params.q.toLowerCase();
       list = list.filter((c) => [c.caseNo, c.caseNoOld, c.csNumber, c.site, c.task, c.product, c.severity, c.resolution].some((v) => String(v || "").toLowerCase().includes(s)));
@@ -557,7 +688,8 @@ ${srLate.length ? `<div class="banner warn" role="status">คำขอบริ�
 <div class="title"><div class="tabs2" role="tablist">
 <a role="tab" href="#/mine?tab=open" class="${tab === "open" ? "on" : ""}" aria-selected="${tab === "open"}">ยังเปิดอยู่ (${open.length})</a>
 <a role="tab" href="#/mine?tab=closed" class="${tab === "closed" ? "on" : ""}" aria-selected="${tab === "closed"}">ปิดแล้ว 30 วัน (${closed30.length})</a>
-<a role="tab" href="#/mine?tab=all" class="${tab === "all" ? "on" : ""}" aria-selected="${tab === "all"}">ทั้งหมด (${cases.length})</a></div>
+<a role="tab" href="#/mine?tab=all" class="${tab === "all" ? "on" : ""}" aria-selected="${tab === "all"}">ทั้งหมด (${cases.length})</a>
+${rcaWait.length || tab === "rca" ? `<a role="tab" href="#/mine?tab=rca" class="${tab === "rca" ? "on" : ""}" aria-selected="${tab === "rca"}">รอ RCA จาก NICE (${rcaWait.length})</a>` : ""}</div>
 <label style="flex:0 1 280px"><span class="sr">ค้นหาเคส</span><input type="search" id="q" value="${esc(params.q || "")}" placeholder="ค้นหาเลขเคส, CS, ลูกค้า, งาน"></label></div>
 ${list.length ? `<div class="tablewrap"><table style="min-width:1080px"><thead><tr><th>เลขเคส</th><th>ลูกค้า</th><th>Severity</th><th>งาน</th><th>Product</th><th>เปิดเคส</th><th style="width:150px">อายุเคส</th><th style="width:170px">Status</th><th>อัปเดตล่าสุด</th><th></th></tr></thead><tbody>
 ${list.map((c) => `<tr class="click" data-href="#/case/${c.id}">
@@ -568,13 +700,13 @@ ${list.map((c) => `<tr class="click" data-href="#/case/${c.id}">
 <td>${esc(c.product || "-")}</td>
 <td>${fd(c.startDate)}<div class="hint">Due ${c.extCount ? `<s>${fd(c.origDueDate)}</s> ${fd(c.dueDate)}` : fd(c.dueDate)}</div></td>
 <td>${c.extCount ? `<small class="muted">รวม ${c.totalAge} วัน · ขยาย ${c.extCount} ครั้ง</small>` : ageCell(c)}${c.pendingExtId ? `<div><span class="chip c-r1">รออนุมัติขยาย</span></div>` : ""}</td>
-<td>${statusSel(c)}</td>
+<td>${statusSel(c)}${c.rcaPending ? `<div style="margin-top:4px">${rcaTag(c)}</div>` : ""}</td>
 <td style="font-size:13px" class="muted">${fdt(c.updatedAt)}</td>
 <td style="text-align:right"><a href="#/case/${c.id}" style="font-weight:600">แก้ไข</a></td></tr>${extRow(c, { before: 5, after: 3 })}`).join("")}</tbody></table></div>` : `<div class="empty">${tab === "open" ? "ไม่มีเคสที่เปิดอยู่ กด “เปิดเคสใหม่” เพื่อเริ่ม" : "ไม่มีเคส"}</div>`}
 </section>
 <section class="card" id="mine-sr"><div class="title"><h2>คำขอบริการที่ได้รับมอบหมาย (${srMine.length})</h2><span>งานภายในจากทีมอื่น นับตาม Target date ที่ Manager ตั้ง ไม่ใช่ SLA ${cfg.slaDays} วัน · <a href="#/sr?scope=assigned">ดูทั้งหมด</a></span></div>
 ${srWorkTable(srMine)}</section>
-<p class="hint">เปลี่ยน Status ในตารางแล้วบันทึกทันที ถ้าเลือก Success, Resolved, Cancel หรือ N/A ระบบจะให้กรอก Resolution ก่อนปิด แล้วใส่ End date ให้และหยุดแจ้งเตือน</p>`;
+<p class="hint">เปลี่ยน Status ในตารางแล้วบันทึกทันที ถ้าเลือก Success, Resolved, Cancel หรือ N/A ระบบจะให้กรอก Resolution ก่อนปิด แล้วใส่ End date ให้และหยุดแจ้งเตือน เคสที่มี CS Number ต้องใส่ RCA จาก NICE ด้วย (ยกเว้น Cancel / N/A)</p>`;
     bindRowLinks();
     bindIntakeActions($app, () => route());
     bindExtPending($app);
@@ -595,7 +727,7 @@ ${srWorkTable(srMine)}</section>
             }
             body = r;
           }
-          await post(`/case/${sel.dataset.status}`, body, "PUT");
+          await saveCaseWithRca(sel.dataset.status, body);
           toast(isClosedStatus(body.status) && !isClosedStatus(sel.dataset.prev) ? `ปิดเคสด้วย Status ${body.status} แล้ว` : `บันทึก Status เป็น ${body.status} แล้ว`);
           viewMine(params);
         } catch (e) {
@@ -763,6 +895,7 @@ ${slaCard}
 ${closed ? `<section class="card"><div class="title"><h2>Resolution</h2>${permsC.edit && c.resolution ? `<button class="btn" type="button" id="btn-res" style="min-height:34px">แก้ไข</button>` : ""}</div>
 ${c.resolution ? `<div class="resol">${esc(c.resolution)}</div>
 <p class="muted" style="margin:0;font-size:13px">ปิดโดย ${esc(c.resolvedBy || "-")}${c.resolvedAt ? " · " + fdt(c.resolvedAt) : ""} · Status ${esc(c.status)}${c.rootCause ? " · สาเหตุ: " + esc(c.rootCause) : ""}</p>` : `<div class="resol none">ไม่มี Resolution (ปิดก่อนเริ่มบังคับ)</div>${permsC.edit ? `<button class="btn" type="button" id="btn-res" style="align-self:flex-start">เพิ่ม Resolution</button>` : ""}`}</section>` : ""}
+${!isNew && (csOf(c) || c.rcaText) ? rcaCard(c, permsC) : ""}
 ${custFiles.files.length ? `<section class="card"><div class="title"><h2>รูปและไฟล์จากลูกค้า (${custFiles.files.length})</h2><span>จาก email และฟอร์มเพิ่มข้อมูล</span></div>
 <div class="cf-grid">${custFiles.files.map((f) => {
       const u = `api/intake/${f.intake_id}/files/${f.id}`;
@@ -804,7 +937,7 @@ ${actsHtml(data.activities)}</section>`}
       if (!body.task) return toast("กรุณาระบุ Task / Case");
       if (!body.severity) return toast("กรุณาเลือก Severity");
       if (isClosedStatus(body.status) && (isNew || !closed)) {
-        const r = await askResolution(isNew ? { ...c, ...body, stage: "normal", age: 0 } : c, { status: body.status });
+        const r = await askResolution(isNew ? { ...c, ...body, csNumber: body.cs_number, stage: "normal", age: 0 } : { ...c, csNumber: body.cs_number }, { status: body.status });
         if (!r) {
           if (!isNew) f.status.value = c.status;
           return;
@@ -814,11 +947,14 @@ ${actsHtml(data.activities)}</section>`}
       try {
         if (isNew) {
           body.detail = f.detail.value.trim();
+          const rcaFile = body.rcaFile;
+          delete body.rcaFile;
           const r = await post("/case", body);
+          if (rcaFile) await post(`/case/${r.id}/rca`, { ...body.rca, file: rcaFile }, "PUT").catch((err) => toast("เปิดเคสแล้ว แต่แนบไฟล์ RCA ไม่สำเร็จ: " + err.message, 6000));
           toast(r.newSite ? `เปิดเคสแล้ว และเพิ่มลูกค้าใหม่ “${r.newSite}” เข้า dropdown` : "เปิดเคสแล้ว", 5000);
           location.hash = "#/case/" + r.id;
         } else {
-          const r = await post("/case/" + id, body, "PUT");
+          const r = await saveCaseWithRca(id, body);
           toast(r.changed.length ? (body.resolution && !closed ? "ปิดเคสแล้ว" : r.newSite ? `บันทึกแล้ว และเพิ่มลูกค้าใหม่ “${r.newSite}”` : "บันทึกแล้ว") : "ไม่มีอะไรเปลี่ยน", 4000);
           viewCase(id);
         }
@@ -845,11 +981,19 @@ ${actsHtml(data.activities)}</section>`}
         const r = await askResolution(c);
         if (!r) return;
         try {
-          await post("/case/" + id, r, "PUT");
+          await saveCaseWithRca(id, r);
           toast("ปิดเคสแล้ว");
           viewCase(id);
         } catch (err) {
           toast(err.message, 6000);
+        }
+      };
+    const brca = document.getElementById("btn-rca");
+    if (brca)
+      brca.onclick = async () => {
+        if (await askRca(c)) {
+          toast("บันทึก RCA จาก NICE แล้ว");
+          viewCase(id);
         }
       };
     const bcc = document.getElementById("btn-confirm-cust");

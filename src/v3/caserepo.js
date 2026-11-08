@@ -5,9 +5,10 @@ const { config3 } = require("./config3");
 const { withStage, isClosed, STAGES } = require("../cases");
 const d = require("../dates");
 const { q, one, all, tx } = require("./db");
+const rcaMod = () => require("./rca"); // lazy: rca.js has no repo dependency, kept separate for its routes
 
 const CASE_SELECT = `
-  SELECT c.*, t.label AS team_label, u.display_name AS owner_name, u.email AS owner_email, ur.display_name AS resolved_by_name,
+  SELECT c.*, t.label AS team_label, u.display_name AS owner_name, u.email AS owner_email, ur.display_name AS resolved_by_name, urc.display_name AS rca_by_name,
          (SELECT a.detail FROM case_activities a WHERE a.case_id = c.id AND NOT a.is_system
            ORDER BY a.activity_date DESC, a.id DESC LIMIT 1) AS last_activity,
          (SELECT max(a.created_at) FROM case_activities a WHERE a.case_id = c.id) AS last_activity_at,
@@ -19,7 +20,8 @@ const CASE_SELECT = `
   FROM cases c
   JOIN teams t ON t.code = c.team
   LEFT JOIN users u ON u.id = c.owner_id
-  LEFT JOIN users ur ON ur.id = c.resolved_by`;
+  LEFT JOIN users ur ON ur.id = c.resolved_by
+  LEFT JOIN users urc ON urc.id = c.rca_by`;
 
 const ROOT_CAUSES = ["ค่าระบบ / Configuration", "Bug ของ Product", "ฝั่งลูกค้า / Network", "ผู้ใช้ใช้งานไม่ถูกต้อง", "คำขอ / ไม่ใช่ปัญหา", "อื่นๆ"];
 const RESOLUTION_MIN = 20;
@@ -76,6 +78,14 @@ function toCase(r) {
     rootCause: r.root_cause || "",
     resolvedAt: r.resolved_at || null,
     resolvedBy: r.resolved_by_name || "",
+    rcaText: r.rca_text || "",
+    rcaCategory: r.rca_category || "",
+    rcaDate: r.rca_date ? (r.rca_date instanceof Date ? d.toISODate(r.rca_date) : String(r.rca_date).slice(0, 10)) : "",
+    rcaFile: r.rca_file || "",
+    rcaFileName: r.rca_file_name || "",
+    rcaFileMime: r.rca_file_mime || "",
+    rcaBy: r.rca_by_name || "",
+    rcaAt: r.rca_at || null,
   };
   const c = withStage(base);
   c.closedAt = c.endDate;
@@ -193,6 +203,7 @@ async function createCase(user, body, { ownerId, startDate } = {}) {
     const status = clean(body.status, 40) || "In Progress";
     const closed = config.closedStatuses.includes(status.toLowerCase());
     const resolution = closed && !body.legacy_key ? checkResolution(body.resolution) : null;
+    const rca = closed && !body.legacy_key && rcaMod().needsRca(body.cs_number, status) ? rcaMod().checkRca(body.rca) : null;
     const r = await c.query(
       `INSERT INTO cases (team, cs_number, status, site, product, owner_id, task, note, start_date, due_date, end_date,
          closed_at, created_by, legacy_key, start_at, severity)
@@ -205,6 +216,10 @@ async function createCase(user, body, { ownerId, startDate } = {}) {
     const id = r.rows[0].id;
     if (body.customer_unconfirmed) await c.query("UPDATE cases SET customer_unconfirmed = $2 WHERE id = $1", [id, clean(body.customer_unconfirmed, 200)]);
     await addActivity(c, id, user, { date: d.toISODate(start), kind: "เปิดเคส", detail: clean(body.detail) || "เปิดเคส", system: !body.detail });
+    if (rca) {
+      await c.query("UPDATE cases SET rca_text = $2, rca_category = $3, rca_date = $4, rca_by = $5, rca_at = now() WHERE id = $1", [id, rca.text, rca.category, rca.date, user?.id || null]);
+      await addActivity(c, id, user, { kind: "บันทึก RCA จาก NICE", detail: `RCA (${rca.category}, NICE ส่ง ${rca.date}):\n${rca.text}` });
+    }
     if (resolution) {
       await c.query("UPDATE cases SET resolution = $2, root_cause = $3, resolved_by = $4, resolved_at = now() WHERE id = $1", [id, resolution, rootCauseOf(body.root_cause), user?.id || null]);
       await addActivity(c, id, user, { kind: "ปิดเคส", detail: `ปิดเคส (${status})\nResolution: ${resolution}` });
@@ -253,6 +268,20 @@ async function updateCase(user, kase, body, { allowReassign }) {
       const nowClosed = config.closedStatuses.includes(status.toLowerCase());
       let resolution = null;
       if (nowClosed && !wasClosed) resolution = checkResolution(body.resolution);
+      const csNow = body.cs_number !== undefined ? clean(body.cs_number, 60) : kase.csNumber;
+      if (nowClosed && !wasClosed && rcaMod().needsRca(csNow, status)) {
+        if (body.rca) {
+          const r = rcaMod().checkRca(body.rca);
+          set("rca_text", r.text);
+          set("rca_category", r.category);
+          set("rca_date", r.date);
+          set("rca_by", user?.id || null);
+          sets.push("rca_at = now()");
+          await addActivity(c, kase.id, user, { kind: "บันทึก RCA จาก NICE", detail: `RCA (${r.category}, NICE ส่ง ${r.date}):\n${r.text}` });
+        } else if (!kase.rcaText) {
+          throw Object.assign(new Error(`เคสนี้มี CS Number (${csNow}) ต้องบันทึก RCA จาก NICE ก่อนจึงจะปิดเคสได้ (ยกเว้นปิดเป็น Cancel หรือ N/A)`), { status: 400 });
+        }
+      }
       set("status", status);
       if (nowClosed && !wasClosed) {
         set("end_date", d.toISODate(d.today()));

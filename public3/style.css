@@ -608,3 +608,11 @@ label.f[hidden], div.f[hidden] { display: none; }
   .lane { grid-template-columns: 84px minmax(0, 1fr); }
 }
 @media (prefers-reduced-motion: reduce) { .pd .who, .block, .rkrow, .lane, .fill, .medal, .meter i, .pt .m i, .trend i, .spot .s { transition: none !important; } }
+
+/* RCA from NICE */
+.rca-sec { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; background: var(--r1-bg); }
+.rca-sec.ok { background: var(--normal-bg); }
+.rca-sec.skip { background: transparent; border-style: dashed; }
+.rca-h { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rca-h h3 { margin: 0; font-size: 15px; }
+.rca-wait { border-color: var(--r1); }

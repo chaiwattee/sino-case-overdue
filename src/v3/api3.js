@@ -21,7 +21,12 @@ const api = express.Router();
 const jsonSmall = express.json({ limit: "200kb" });
 const jsonFile = express.json({ limit: "4mb" });
 const jsonSr = express.json({ limit: "40mb" }); // service-request attachments (base64, up to 10 files of 10 MB)
-api.use((req, res, next) => (req.path === "/users/import" ? jsonFile : /^\/sr(\/|$)/.test(req.path) && req.method !== "GET" ? jsonSr : jsonSmall)(req, res, next));
+const jsonRca = express.json({ limit: "15mb" }); // RCA file from NICE (base64, up to 10 MB)
+api.use((req, res, next) =>
+  (req.path === "/users/import" ? jsonFile
+    : /^\/sr(\/|$)/.test(req.path) && req.method !== "GET" ? jsonSr
+    : /^\/case\/\d+\/rca$/.test(req.path) ? jsonRca
+    : jsonSmall)(req, res, next));
 api.use(requireUser());
 // Requester (staff from other teams): only their profile and their own service requests.
 api.use((req, res, next) =>
@@ -51,6 +56,7 @@ ext.mount(api, { wrap });
 require("./kpi").mount(api, { wrap, need });
 require("./sr").mount(api, { wrap });
 require("./leaderboard").mount(api, { wrap, need });
+require("./rca").mount(api, { wrap, loadVisible, perms, repo, tx: require("./db").tx, audit });
 
 async function visibleCases(user) {
   return repo.loadCases(user);
@@ -83,6 +89,7 @@ api.get("/lookups", wrap(async (req, res) => {
   out.severity = repo.SEVERITIES;
   out.rootCauses = repo.ROOT_CAUSES;
   out.resolutionMin = repo.RESOLUTION_MIN;
+  out.rca = { min: require("./rca").RCA_MIN, categories: require("./rca").RCA_CATEGORIES, exempt: require("./rca").RCA_EXEMPT };
   out.closedStatuses = config.closedStatuses;
   out.statusHelp = { ...repo.STATUS_HELP, ...(await getSetting("status_help", {})) };
   res.json(out);
@@ -145,7 +152,9 @@ function ser3(c) {
   return { ...ser(c), caseNo: c.caseNo, caseNoOld: c.caseNoOld || "", extCount: c.extCount || 0, origDueDate: iso(c.origDueDate), periodStart: iso(c.periodStart), totalAge: c.totalAge,
     pendingExtId: c.pendingExtId, lastExt: c.lastExt, closedInExtension: c.closedInExtension ?? null, severity: c.severity, id: c.id, team: c.team,
     customerUnconfirmed: c.customerUnconfirmed || "",
-    resolution: c.resolution || "", rootCause: c.rootCause || "", resolvedAt: c.resolvedAt || null, resolvedBy: c.resolvedBy || "", ownerUserId: c.owner_id, updatedAt: c.updatedAt, startAt: c.startAt };
+    resolution: c.resolution || "", rootCause: c.rootCause || "", resolvedAt: c.resolvedAt || null, resolvedBy: c.resolvedBy || "", ownerUserId: c.owner_id, updatedAt: c.updatedAt, startAt: c.startAt,
+    rcaText: c.rcaText || "", rcaCategory: c.rcaCategory || "", rcaDate: c.rcaDate || "", rcaFileName: c.rcaFileName || "", rcaBy: c.rcaBy || "", rcaAt: c.rcaAt || null,
+    rcaPending: !!(c.csNumber && !c.rcaText && c.stage !== "closed") };
 }
 
 api.get("/cases", wrap(async (req, res) => {

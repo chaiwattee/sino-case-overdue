@@ -136,6 +136,10 @@ const CASE_COLUMNS = [
   { header: "เกิน Due (วัน)", key: "daysOverdue", width: 13 },
   { header: "Resolution", key: "resolution", width: 50 },
   { header: "สาเหตุ", key: "rootCause", width: 22 },
+  { header: "RCA จาก NICE", key: "rcaText", width: 50 },
+  { header: "หมวด RCA", key: "rcaCategory", width: 22 },
+  { header: "วันที่ NICE ส่ง RCA", key: "rcaDate", width: 14 },
+  { header: "ไฟล์ RCA", key: "rcaFileName", width: 24 },
 ];
 
 function caseRow(c) {
