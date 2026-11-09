@@ -85,6 +85,12 @@ async function runAlerts({ dryRun = false } = {}) {
       const r = await graph.sendMail({ to, cc, subject: finalSubject, html });
       dry = !!r.dryRun;
       result.sent++;
+      if (c.owner_id)
+        require("./push").send([c.owner_id], {
+          title: x.type === "overdue" ? `เกิน Due ${c.daysOverdue} วัน · ${c.caseNo}` : `${x.type === "r1" ? "แจ้งเตือนรอบ 1" : "แจ้งเตือนรอบ 2"} · ${c.caseNo}`,
+          body: `${c.site || ""} · ${c.task || ""}${x.type === "overdue" ? "" : ` · เหลือ ${c.daysLeft} วัน`}`,
+          url: `/#/case/${c.id}`, tag: `case-${c.id}`,
+        }).catch(() => {});
     } catch (e) {
       ok = false;
       error = String(e.response?.data?.error?.message || e.message).slice(0, 500);
@@ -455,6 +461,10 @@ function startJobs() {
   job("customer-pending", "35 8 * * 1-5", true, () => require("./customers").remindAll());
   // Teams: overdue cases per team channel, workday mornings (only teams that set a Teams link get it).
   job("teams-overdue", "30 8 * * 1-5", true, () => require("./teamsnotify").overdueSummary());
+  // Monthly PDF report to customers that have it turned on (last month), 2nd of the month 09:10.
+  job("customer-report", "10 9 2 * *", j.reports, () => require("./custreport").sendAll());
+  // Preventive maintenance rounds: open the cases that are due, every morning 07:00.
+  job("pm-open", "0 7 * * *", true, () => require("./pm").runDue());
   // Customer intake: hourly "nobody has claimed this yet" reminders (checked every 5 min), chatbot webhooks, cleanup.
   const intake = require("./intake");
   job("intake-reminders", "*/5 * * * *", j.intake, () => intake.runReminders());

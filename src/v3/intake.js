@@ -430,6 +430,8 @@ ${button(intakeUrl(i), "รับเคส / โอนให้ User")}`
   }
   if (!i.is_test) {
     const st = i.site ? await one("SELECT team FROM intake_sites WHERE site = $1", [i.site]).catch(() => null) : null;
+    const push = require("./push");
+    push.send(await push.teamUsers(st && st.team), { title: `เคสใหม่จากลูกค้า · ${customerName(i)}`, body: `${i.severity} · ${i.subject}`, url: `/#/intake/${i.id}`, tag: `intake-${i.id}` }).catch(() => {});
     await require("./teamsnotify").notify(st && st.team, "intake", {
       title: `🆕 ${tag(i)}เคสใหม่จากลูกค้า รอรับเคส · ${i.req_no}`,
       color: i.severity === "Critical" || i.severity === "High" ? "Attention" : "Accent",
@@ -567,6 +569,7 @@ async function claim(user, id, b) {
 async function notifyClaimed(i, kase, by, owner) {
   const s = await settings();
   const transfer = owner.id !== by.id;
+  if (transfer && !i.is_test) require("./push").send([owner.id], { title: `โอนเคสให้คุณ · ${kase.caseNo}`, body: `${kase.site} · ${i.subject} (โดย ${by.display_name})`, url: `/#/case/${kase.id}`, tag: `case-${kase.id}` }).catch(() => {});
   if (transfer && owner.email) {
     await graph
       .sendMail({

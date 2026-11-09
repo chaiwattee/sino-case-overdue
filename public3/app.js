@@ -342,6 +342,7 @@ ${edit || !csOf(c) ? "" : `<div class="rca-sec" id="rca-sec"></div>`}
       ["intake", "#/intake", "เคสจากลูกค้า", true],
       ["owner", "#/owner", "ราย User", true],
       ["customer", "#/customer", "ราย ลูกค้า", true],
+      ["pm", "#/pm", "งาน PM", ME.user.role !== "viewer"],
       ["kpi", "#/kpi", "KPI (ทดลองใช้)", ME.user.role !== "viewer"],
       ["rank", "#/rank", "อันดับ KPI", !!(ME.leaderboard && ME.leaderboard.visible)],
       ["reports", "#/reports", "Report &amp; Export", lvl("export") !== "none" || lvl("reports_manage") !== "none"],
@@ -953,6 +954,7 @@ ${data && data.changes.length ? `<section class="card"><h2>ประวัติ
 <aside class="side">
 ${slaCard}
 ${closed ? "" : `<section class="card sim-card" id="sim-card" hidden></section>`}
+${data ? checklistCard(data.checklist, c, permsC) : ""}
 ${data && data.csat ? csatCard(data.csat) : ""}
 ${closed ? `<section class="card"><div class="title"><h2>Resolution</h2>${permsC.edit && c.resolution ? `<button class="btn" type="button" id="btn-res" style="min-height:34px">แก้ไข</button>` : ""}</div>
 ${c.resolution ? `<div class="resol">${esc(c.resolution)}</div>
@@ -966,6 +968,7 @@ ${custFiles.files.length ? `<section class="card"><div class="title"><h2>รู�
       const img = /^image\/(png|jpe?g|gif|webp)$/.test(f.mime);
       return `<a class="cf" href="${u}" target="_blank" rel="noopener" title="${esc(f.file_name)}">${img ? `<img src="${u}" alt="${esc(f.file_name)}" loading="lazy">` : `<span class="cf-ext">${esc((f.file_name.split(".").pop() || "").toUpperCase())}</span>`}<span class="cf-n">${esc(f.file_name)}</span><span class="cf-d">${fdt(f.created_at)} · ${f.source === "form" ? "ฟอร์ม" : "email"}</span></a>`;
     }).join("")}</div></section>` : ""}
+${data ? teamFilesCard(data.files || [], c, permsC) : ""}
 ${isNew ? "" : extCard(c, extData.extensions, closed, permsC)}
 ${isNew ? `<section class="card"><h2>ก่อนเปิดเคส</h2><p class="muted" style="margin:0;font-size:14px">กรอก Site, Task และ Status ให้ครบ ระบบจะส่ง email เตือน User ในวันที่ ${cfg.alert1Day}, ${cfg.alert2Day} และทุกวันหลังเกิน Due ถ้ายังไม่ปิดเคส</p></section>` : `
 <section class="card"><div><h2>Activity / Detail</h2><div class="hint" style="margin-top:4px">ทุกบันทึกมีวันที่และชื่อผู้บันทึก แก้หรือลบย้อนหลังไม่ได้</div></div>
@@ -979,7 +982,11 @@ ${actsHtml(data.activities)}</section>`}
 </aside></div>
 <dialog id="dlg"></dialog>`;
 
-    if (!isNew) bindExtCard(c, extData.extensions);
+    if (!isNew) {
+      bindExtCard(c, extData.extensions);
+      bindChecklist(c);
+      bindTeamFiles(c);
+    }
     const f = document.getElementById("cf");
     bindCombo(f, "site", lk.site, { newLabel: (v) => `+ ใช้ชื่อใหม่ “${esc(v)}” (ต้องให้ Manager อนุมัติ)` });
     f.status.addEventListener("change", () => (document.getElementById("st-hint").textContent = statusHelp(f.status.value)));
@@ -2969,11 +2976,12 @@ ${sel.insufficient ? `<div class="banner warn">${esc(sel.name)} ปิดเค�
 <div class="kp-g3">
 <section class="card"><h2>คะแนนรวม</h2>
 <div><span class="kp-score">${sel.score}</span>${sel.grade ? `<span class="kp-grade">${sel.grade}</span>` : `<span class="kp-grade na">ข้อมูลไม่พอ</span>`}</div>
-<p class="muted" style="margin:6px 0 0">จาก 100 (+ โบนัส 5)${r.team.avgScore != null ? ` · ทีมเฉลี่ย ${r.team.avgScore}` : ""}</p>
+<p class="muted" style="margin:6px 0 0">จาก 100 (+ โบนัส 10)${r.team.avgScore != null ? ` · ทีมเฉลี่ย ${r.team.avgScore}` : ""}</p>
 <div class="kp-trend" id="kp-trend"><div class="hint">กำลังโหลดแนวโน้ม…</div></div></section>
 <section class="card"><h2>คะแนนแยกตามเกณฑ์</h2>${bars}
 <div class="kp-bar"><span>+ โบนัส รับเคสจากลูกค้า</span><div class="t"><div style="width:${(sel.parts.bonus / 5) * 100}%;background:#7A4FBF"></div></div><b>+${sel.parts.bonus}</b></div>
-<p class="hint" style="margin:6px 0 0">รวม ${Math.round(sel.base)} + โบนัส ${sel.parts.bonus}${sel.adjust ? ` ${sel.adjust.points > 0 ? "+" : ""}${sel.adjust.points} (ปรับโดย ${esc(sel.adjust.by || "-")}: ${esc(sel.adjust.reason)})` : ""} = ${sel.score}</p></section>
+<div class="kp-bar"><span>+ โบนัส ความพึงพอใจลูกค้า</span><div class="t"><div style="width:${((sel.parts.csat || 0) / 5) * 100}%;background:#C2410C"></div></div><b>+${sel.parts.csat || 0}</b></div>
+<p class="hint" style="margin:6px 0 0">รวม ${Math.round(sel.base)} + โบนัส ${sel.parts.bonus + (sel.parts.csat || 0)}${sel.adjust ? ` ${sel.adjust.points > 0 ? "+" : ""}${sel.adjust.points} (ปรับโดย ${esc(sel.adjust.by || "-")}: ${esc(sel.adjust.reason)})` : ""} = ${sel.score}</p></section>
 <section class="card"><h2>ตัวเลขของเดือน</h2><div class="stat2" style="grid-template-columns:1fr 1fr">
 ${stat("ดูแล / ปิดเคส", `${sel.handled} / ${m.closed}`)}
 ${stat("ปิดทัน SLA เดิม", m.slaPct == null ? "-" : `${m.onTime} <span class="muted" style="font-size:14px">(${m.slaPct}%)</span>`)}
@@ -2984,7 +2992,8 @@ ${stat("เคสส่ง NICE", `${m.vendor ?? 0}${m.dedicated ? ' <span class
 ${stat("ขยายเวลา (อนุมัติ)", `${m.extensions} ครั้ง`)}
 ${stat("เกิน Due สิ้นเดือน", `<span class="${m.overdueAtEnd ? "t-over" : ""}">${m.overdueAtEnd}</span>`)}
 ${stat("Critical", m.critical)}
-${stat("รับเคสลูกค้าใน 1 ชม.", m.fastClaims)}</div></section></div>
+${stat("รับเคสลูกค้าใน 1 ชม.", m.fastClaims)}
+${stat("ความพึงพอใจลูกค้า", m.csatCount ? `${m.csatAvg}/5 · ${m.csatCount} คำตอบ` : "-")}</div></section></div>
 
 <div class="kp-g3" style="grid-template-columns:repeat(3,minmax(0,1fr))">
 <section class="card"><h2>ประเภทงานที่ทำ</h2><p class="hint" style="margin:0 0 6px">จัดกลุ่มจากหัวข้อเคสและ Activity ด้วยคำสำคัญ</p>${listBars(sel.types)}</section>
@@ -3019,7 +3028,8 @@ ${owners.map((o) => `<tr class="click" data-href="#/kpi?${qs({ month, owner: o.i
 <tr><td>4. ความหลากหลาย / Skill</td><td class="n">15</td><td>ความกระจายของประเภทงาน Product และลูกค้า (0–1) × 10.5 + Product หรือประเภทงานที่ทำครั้งแรก 1.5 ต่อรายการ (สูงสุด 4.5) · คนที่ตั้งเป็น "ดูแลลูกค้าประจำ" ไม่นับความหลากหลายของลูกค้า</td></tr>
 <tr><td>5. งานค้างและการขยายเวลา</td><td class="n">10</td><td>เริ่ม 10 · หัก 2 ต่อเคสเกิน Due สิ้นเดือน · หัก 1 ต่อการขยายที่อนุมัติ (สูงสุด 3)</td></tr>
 <tr><td>6. คุณภาพการบันทึก</td><td class="n">10</td><td>เคสที่ปิดมีบันทึกสุดท้าย ≥20 ตัวอักษร 5 · Activity ที่มีเนื้อหาเฉลี่ย ≥3 ต่อเคส 5</td></tr>
-<tr><td>+ โบนัส</td><td class="n">5</td><td>รับเคสจากลูกค้าภายใน 1 ชม. ทุก 2 เคสได้ 1 (สูงสุด 5)</td></tr></tbody></table></div>
+<tr><td>+ โบนัส</td><td class="n">5</td><td>รับเคสจากลูกค้าภายใน 1 ชม. ทุก 2 เคสได้ 1 (สูงสุด 5)</td></tr>
+<tr><td>+ โบนัส ความพึงพอใจลูกค้า</td><td class="n">5</td><td>คะแนนแบบสอบถามหลังปิดเคสที่ลูกค้าตอบในเดือนนั้น ต้องมีอย่างน้อย 2 คำตอบ · เฉลี่ย ≥4.5 ได้ 5 · ≥4 ได้ 3 · ≥3.5 ได้ 1 · ให้เพิ่มอย่างเดียว ไม่หักคะแนน (คะแนน 1–2 แจ้ง Manager ให้ติดตามแทน)</td></tr></tbody></table></div>
 <p class="hint">เกรด A ≥85 · A- 80–84 · B+ 75–79 · B 70–74 · C 60–69 · D ต่ำกว่า 60 · ปิดเคสน้อยกว่า 3 เคสไม่ให้เกรด</p></details></section>
 
 ${r.canEditCategories ? `<section class="card noprint"><details><summary style="cursor:pointer;font-weight:600">ตั้งค่าประเภทงาน (คำสำคัญ)</summary>
@@ -3237,8 +3247,12 @@ ${missing.length ? `<div class="banner warn" style="margin:0">${after ? "ก่�
 <label class="f">ตำแหน่ง<input name="job_title" value="${esc(p.job_title || "")}" placeholder="เช่น Account Manager" required maxlength="120"></label></div>
 <label class="f">เบอร์โทรที่ติดต่อได้<input name="phone" value="${esc(p.phone || "")}" placeholder="081-234-5678 หรือ 02-123-4567 ต่อ 105" required maxlength="60"><span class="hint">${["requester"].includes(p.role) ? "ทีมที่รับงานใช้ติดต่อกลับ" : "แสดงใน email ถึงลูกค้าเมื่อคุณรับเคส และในคำขอบริการ"}</span></label>
 <div class="right"><button class="btn primary" type="submit">${after ? "บันทึกแล้วไปต่อ" : "บันทึก"}</button></div></form>
-${after ? "" : `<section class="card" id="av-card" style="max-width:620px;margin-top:16px"></section>`}`;
-    if (!after) avatarPicker(document.getElementById("av-card"));
+${after ? "" : `<section class="card" id="av-card" style="max-width:620px;margin-top:16px"></section>`}
+${after ? "" : `<section class="card" id="app-card" style="max-width:620px;margin-top:16px"></section>`}`;
+    if (!after) {
+      avatarPicker(document.getElementById("av-card"));
+      bindAppCard();
+    }
     const f = document.getElementById("pf");
     const dOther = f.querySelector("[data-dept-other]");
     f.department.onchange = () => {
@@ -3592,8 +3606,8 @@ ${r.status === "info" ? `<label class="f">ข้อความถึง Manager
     improved: ["🚀", "พัฒนาสูงสุด", "v"], sla100: ["⏱️", "SLA 100%", "g"], skill: ["🧩", "ทักษะใหม่", "b"],
     doc: ["📝", "Resolution ครบ", "b"], streak: ["🔥", "Top 5 สามเดือน", "o"], best: ["⭐", "สถิติส่วนตัว", "o"],
   };
-  const PART_LABEL = { sla: "SLA", resp: "ตอบสนองเร็ว", work: "แต้มงาน", div: "ทักษะหลากหลาย", back: "งานค้าง / ขยายเวลา", doc: "เอกสาร / Resolution", bonus: "โบนัสทีม" };
-  const PART_TIP = { sla: "ปิดเคสให้ทัน Due", resp: "ตอบเคสแรกเร็วและอัปเดตสม่ำเสมอ", work: "ปิดเคส โดยเฉพาะเคสยาก (Critical, ส่ง NICE, Onsite)", div: "ทำงานหลาย product / ประเภท", back: "ลดเคสค้างและการขอขยาย", doc: "เขียน Resolution ให้ครบทุกเคส", bonus: "รับเคสจากลูกค้าภายใน 1 ชม." };
+  const PART_LABEL = { sla: "SLA", resp: "ตอบสนองเร็ว", work: "แต้มงาน", div: "ทักษะหลากหลาย", back: "งานค้าง / ขยายเวลา", doc: "เอกสาร / Resolution", bonus: "โบนัสทีม", csat: "ความพึงพอใจลูกค้า" };
+  const PART_TIP = { sla: "ปิดเคสให้ทัน Due", resp: "ตอบเคสแรกเร็วและอัปเดตสม่ำเสมอ", work: "ปิดเคส โดยเฉพาะเคสยาก (Critical, ส่ง NICE, Onsite)", div: "ทำงานหลาย product / ประเภท", back: "ลดเคสค้างและการขอขยาย", doc: "เขียน Resolution ให้ครบทุกเคส", bonus: "รับเคสจากลูกค้าภายใน 1 ชม.", csat: "ให้ลูกค้าพอใจ แจ้งผลและวิธีแก้ให้ชัดก่อนปิดเคส" };
   let rankTimers = [];
   const rkLater = (fn, ms) => rankTimers.push(setTimeout(fn, matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : ms));
   function rkCount(el, to, ms = 900) {
@@ -4037,12 +4051,14 @@ ${x.products.length || x.owners.length ? `<div class="stat2" style="margin-top:6
 ${x.rca.length ? x.rca.map((r) => `<div class="rca-item"><div><a class="mono" href="#/case/${r.id}">${esc(r.caseNo || "#" + r.id)}</a> <span class="muted">${esc(r.csNumber || "")} · ${esc(r.category || "")} · ${fd(r.date)}</span></div><div style="font-size:14px">${esc(r.text)}</div></div>`).join("") : `<div class="empty">ยังไม่มี RCA</div>`}</section>
 <section class="card"><div class="title"><h2>ความเห็นจากลูกค้า</h2><span>แบบสอบถามหลังปิดเคส</span></div>
 ${x.csat.comments.length ? x.csat.comments.map((r) => `<div class="rca-item"><div><span aria-hidden="true">${CSAT_FACE[r.rating]}</span> <b>${r.rating}/5</b> · <a class="mono" href="#/case/${r.case_id}">${esc(r.case_no || "#" + r.case_id)}</a> <span class="muted">${fdt(r.rated_at)}</span></div>${r.comment ? `<div style="font-size:14px">${esc(r.comment)}</div>` : ""}</div>`).join("") : `<div class="empty">ยังไม่มีคำตอบจากลูกค้า</div>`}</section></div>
+<section class="card" id="cr-card"></section>
 <section class="card"><div class="title"><h2>ปิดล่าสุด</h2><span>6 เดือน</span></div>
 ${x.recentClosed.length ? `<div class="tablewrap"><table style="min-width:760px"><thead><tr><th>เลขเคส</th><th>งาน / วิธีแก้</th><th>User</th><th>ปิดเมื่อ</th><th>SLA</th></tr></thead><tbody>
 ${x.recentClosed.map((c) => `<tr class="click" data-href="#/case/${c.id}"><td><a class="mono" href="#/case/${c.id}">${esc(caseRef(c))}</a></td><td style="font-size:13px">${esc(c.task || "")}${c.resolution ? `<div class="muted">${esc(c.resolution)}</div>` : ""}</td><td>${esc(c.owner || "-")}</td><td>${fd(c.closedAt)}</td><td>${c.onTime ? `<span class="chip c-normal">ทัน</span>` : `<span class="chip c-overdue">ไม่ทัน</span>`}</td></tr>`).join("")}
 </tbody></table></div>` : `<div class="empty">ไม่มีเคสที่ปิดใน 6 เดือน</div>`}</section>`;
     document.getElementById("cpick").onchange = (e) => (location.hash = "#/customer?site=" + encodeURIComponent(e.target.value));
     bindRowLinks();
+    bindCustomerReport(x.site);
   }
 
   // ------------------------------------------------------------ settings: Microsoft Teams alerts
@@ -4103,6 +4119,332 @@ ${x.recentClosed.map((c) => `<tr class="click" data-href="#/case/${c.id}"><td><a
     };
   }
 
+  // ------------------------------------------------------------ checklist (PM cases) and team files on the case page
+  function checklistCard(list, c, permsC) {
+    if (!list || !list.length) return "";
+    const left = list.filter((x) => !x.done).length;
+    const canTick = permsC.edit && c.stage !== "closed";
+    return `<section class="card" id="ck-card"><div class="title"><h2>Checklist งาน PM</h2><span>${left ? `เหลือ ${left} จาก ${list.length} ข้อ` : "ครบแล้ว ปิดเคสได้"}</span></div>
+<div class="ck-list">${list
+      .map(
+        (x) => `<label class="ck ${x.done ? "done" : ""}"><input type="checkbox" data-ck="${x.seq}" ${x.done ? "checked" : ""} ${canTick ? "" : "disabled"}><span><span class="ck-t">${x.seq}. ${esc(x.item)}</span>${x.done ? `<span class="ck-m">${esc(x.done_by || "")} · ${fdt(x.done_at)}${x.note ? " · " + esc(x.note) : ""}</span>` : ""}</span></label>`
+      )
+      .join("")}</div>
+${left && canTick ? `<p class="hint" style="margin:0">ปิดเคสได้เมื่อติ๊กครบทุกข้อ ถ้ารอบนี้ไม่ได้ทำ ให้ปิดเป็น Cancel หรือ N/A</p>` : ""}</section>`;
+  }
+  function bindChecklist(c) {
+    document.querySelectorAll("#ck-card [data-ck]").forEach(
+      (el) =>
+        (el.onchange = async () => {
+          let note = "";
+          if (el.checked) note = prompt("หมายเหตุ (ถ้ามี) เช่น ค่าที่วัดได้ หรือสิ่งที่พบ") || "";
+          try {
+            await post(`/case/${c.id}/checklist/${el.dataset.ck}`, { done: el.checked, note }, "PUT");
+            viewCase(c.id);
+          } catch (e) {
+            el.checked = !el.checked;
+            toast(e.message, 6000);
+          }
+        })
+    );
+  }
+
+  /** A phone photo is shrunk to at most 1600 px (JPEG) before upload; other files go as they are. */
+  function readForUpload(file) {
+    return new Promise((resolve, reject) => {
+      const isImg = /^image\/(jpeg|png|webp)$/.test(file.type);
+      const fr = new FileReader();
+      fr.onerror = () => reject(new Error("อ่านไฟล์ไม่ได้"));
+      fr.onload = () => {
+        if (!isImg) return resolve({ name: file.name, mime: file.type || "application/octet-stream", data: String(fr.result).split(",")[1] });
+        const img = new Image();
+        img.onerror = () => resolve({ name: file.name, mime: file.type, data: String(fr.result).split(",")[1] });
+        img.onload = () => {
+          const k = Math.min(1, 1600 / Math.max(img.width, img.height));
+          if (k === 1 && file.size < 1.5 * 1024 * 1024) return resolve({ name: file.name, mime: file.type, data: String(fr.result).split(",")[1] });
+          const cv = document.createElement("canvas");
+          cv.width = Math.round(img.width * k);
+          cv.height = Math.round(img.height * k);
+          cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
+          const name = file.name.replace(/\.(png|webp|jpe?g)$/i, "") + ".jpg";
+          resolve({ name, mime: "image/jpeg", data: cv.toDataURL("image/jpeg", 0.85).split(",")[1] });
+        };
+        img.src = fr.result;
+      };
+      fr.readAsDataURL(file);
+    });
+  }
+  function teamFilesCard(files, c, permsC) {
+    const can = permsC.edit;
+    if (!files.length && !can) return "";
+    return `<section class="card" id="tf-card"><div class="title"><h2>รูปและไฟล์ของทีม${files.length ? ` (${files.length})` : ""}</h2><span>ถ่ายรูปหน้างาน / แนบ log</span></div>
+${can ? `<div class="tf-actions"><label class="btn primary tf-cam"><input type="file" accept="image/*" capture="environment" id="tf-cam" hidden>📷 ถ่ายรูป</label><label class="btn"><input type="file" id="tf-file" multiple hidden>แนบไฟล์</label></div>
+<input type="text" id="tf-cap" placeholder="คำอธิบายรูป (ไม่บังคับ) เช่น หน้าจอ error ที่เครื่อง Agent" maxlength="300">` : ""}
+${files.length ? `<div class="cf-grid">${files
+      .map((f) => {
+        const u = `api/case/${c.id}/files/${f.id}`;
+        const img = /^image\//.test(f.mime);
+        return `<div class="cf-wrap"><a class="cf" href="${u}" target="_blank" rel="noopener" title="${esc(f.file_name)}">${img ? `<img src="${u}" alt="${esc(f.caption || f.file_name)}" loading="lazy">` : `<span class="cf-ext">${esc((f.file_name.split(".").pop() || "").toUpperCase())}</span>`}<span class="cf-n">${esc(f.caption || f.file_name)}</span><span class="cf-d">${fdt(f.created_at)} · ${esc(f.by || "")}</span></a>${f.created_by === ME.user.id || ME.user.role === "admin" ? `<button type="button" class="cf-del" data-delf="${f.id}" aria-label="ลบ ${esc(f.file_name)}">×</button>` : ""}</div>`;
+      })
+      .join("")}</div>` : `<p class="muted" style="margin:0;font-size:14px">ยังไม่มีรูปหรือไฟล์ เปิดจากมือถือแล้วกด “ถ่ายรูป” ได้ทันที</p>`}</section>`;
+  }
+  function bindTeamFiles(c) {
+    const up = async (files) => {
+      const cap = document.getElementById("tf-cap");
+      for (const file of files) {
+        if (file.size > 25 * 1024 * 1024) {
+          toast(`${file.name} ใหญ่เกินไป`);
+          continue;
+        }
+        try {
+          toast(`กำลังอัปโหลด ${file.name}…`, 2000);
+          const x = await readForUpload(file);
+          await post(`/case/${c.id}/files`, { ...x, caption: cap ? cap.value.trim() : "" });
+        } catch (e) {
+          toast(e.message, 6000);
+        }
+      }
+      viewCase(c.id);
+    };
+    ["tf-cam", "tf-file"].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.onchange = () => el.files.length && up([...el.files]);
+    });
+    document.querySelectorAll("#tf-card [data-delf]").forEach(
+      (b) =>
+        (b.onclick = async () => {
+          if (!confirm("ลบไฟล์นี้?")) return;
+          try {
+            await api(`/case/${c.id}/files/${b.dataset.delf}`, { method: "DELETE" });
+            viewCase(c.id);
+          } catch (e) {
+            toast(e.message, 6000);
+          }
+        })
+    );
+  }
+
+  // ------------------------------------------------------------ customer monthly report (customer page)
+  async function bindCustomerReport(site) {
+    const el = document.getElementById("cr-card");
+    if (!el) return;
+    let r;
+    try {
+      r = await api(`/customer/report?site=${encodeURIComponent(site)}`);
+    } catch (e) {
+      el.hidden = true;
+      return;
+    }
+    const s = r.setting;
+    const canDl = r.canEdit || lvl("export") === "all";
+    if (!canDl) return (el.hidden = true);
+    el.innerHTML = `<div class="title"><h2>Report รายเดือนให้ลูกค้า (PDF)</h2><span>ภาษาอังกฤษ · มีเฉพาะเลขเคส หัวข้อ วันที่ ผล SLA และ Resolution ไม่มีบันทึกภายใน</span></div>
+<div class="cr-row"><label class="f" style="flex:0 1 220px">เดือน<select id="cr-month">${r.months.map((ym) => `<option value="${ym}" ${ym === r.defaultMonth ? "selected" : ""}>${esc(ymLabel(ym, true))}</option>`).join("")}</select></label>
+<a class="btn" id="cr-view" target="_blank" rel="noopener">ดูตัวอย่าง PDF</a></div>
+${r.canEdit ? `<div class="formgrid" style="grid-template-columns:1fr 1fr">
+<label class="f">ส่งถึง (อีเมลลูกค้า คั่นด้วย ,)<input id="cr-to" value="${esc(s.recipients || "")}" placeholder="it.manager@customer.co.th"></label>
+<label class="f">CC (เช่น Manager / Sales ของเรา)<input id="cr-cc" value="${esc(s.cc || "")}" placeholder="manager@sinostech.co.th"></label></div>
+<label class="chk"><input type="checkbox" id="cr-on" ${s.enabled ? "checked" : ""}><span>ส่งอัตโนมัติทุกวันที่ 2 ของเดือน 09:10 (Report ของเดือนก่อน)</span></label>
+<p class="hint" style="margin:0">${s.last_sent_at ? `ส่งล่าสุด ${fdt(s.last_sent_at)} (เดือน ${esc(ymLabel(s.last_ym, true))})` : "ยังไม่เคยส่ง"}</p>
+<div class="actions"><button class="btn" type="button" id="cr-send">ส่งเดือนที่เลือกตอนนี้</button><button class="btn primary" type="button" id="cr-save">บันทึก</button></div>` : ""}`;
+    const view = document.getElementById("cr-view");
+    const month = document.getElementById("cr-month");
+    const setHref = () => (view.href = `api/customer/report.pdf?site=${encodeURIComponent(site)}&month=${month.value}`);
+    month.onchange = setHref;
+    setHref();
+    const save = document.getElementById("cr-save");
+    if (save)
+      save.onclick = async () => {
+        try {
+          await post("/customer/report", { site, recipients: document.getElementById("cr-to").value, cc: document.getElementById("cr-cc").value, enabled: document.getElementById("cr-on").checked }, "PUT");
+          toast("บันทึกการส่ง Report ให้ลูกค้าแล้ว");
+          bindCustomerReport(site);
+        } catch (e) {
+          toast(e.message, 6000);
+        }
+      };
+    const send = document.getElementById("cr-send");
+    if (send)
+      send.onclick = async () => {
+        const to = document.getElementById("cr-to").value.trim();
+        if (!to) return toast("ใส่อีเมลผู้รับก่อน");
+        if (!confirm(`ส่ง Report เดือน ${ymLabel(month.value, true)} ถึง ${to} ตอนนี้?`)) return;
+        send.disabled = true;
+        try {
+          const x = await post("/customer/report/send", { site, month: month.value, to, cc: document.getElementById("cr-cc").value });
+          toast(`ส่งแล้วถึง ${x.to.join(", ")}`, 5000);
+          bindCustomerReport(site);
+        } catch (e) {
+          toast(e.message, 6000);
+        } finally {
+          send.disabled = false;
+        }
+      };
+  }
+
+  // ------------------------------------------------------------ PM schedules
+  async function viewPm() {
+    setNav("pm");
+    const [r, lk, us] = await Promise.all([api("/pm"), lookups(), api("/users/options").catch(() => ({ users: [] }))]);
+    const myTeams = ME.user.role === "admin" ? ME.teams.map((t) => t.key) : ME.user.teams;
+    const due = (p) => {
+      const n = Math.round((new Date(String(p.next_date).slice(0, 10)) - new Date(daysAgo(0))) / 86400000);
+      return n <= 0 ? "วันนี้" : n === 1 ? "พรุ่งนี้" : `อีก ${n} วัน`;
+    };
+    $app.innerHTML = `
+<div class="head"><div><h1>งาน PM ตามรอบ</h1><p>ระบบเปิดเคสให้ผู้รับผิดชอบเองทุกเช้า 07:00 ในวันที่ถึงรอบ พร้อม checklist ปิดเคสได้เมื่อติ๊กครบ</p></div>
+<div class="actions">${r.canManage ? `<button class="btn primary" type="button" id="pm-new">+ เพิ่มงาน PM</button>` : ""}</div></div>
+<section class="card">${r.items.length ? `<div class="tablewrap"><table style="min-width:860px"><thead><tr><th>งาน</th><th>ลูกค้า</th><th>ทีม / ผู้รับผิดชอบ</th><th>ทุก</th><th>รอบถัดไป</th><th>เคสล่าสุด</th><th></th></tr></thead><tbody>
+${r.items.map((p) => `<tr class="${p.active ? "" : "off"}"><td style="font-weight:600">${esc(p.title)}<div class="muted" style="font-size:12px;font-weight:400">${p.checklist.length} ข้อใน checklist${p.product ? " · " + esc(p.product) : ""}</div></td>
+<td><a href="#/customer?site=${encodeURIComponent(p.site)}">${esc(p.site)}</a></td>
+<td>${esc(p.team_label || p.team)}<div class="muted" style="font-size:12px">${esc(p.owner_name || "-")}</div></td>
+<td>${p.every_months} เดือน</td>
+<td>${p.active ? `${fd(String(p.next_date).slice(0, 10), true)}<div class="muted" style="font-size:12px">${due(p)}</div>` : `<span class="chip c-closed">หยุดไว้</span>`}</td>
+<td>${p.last_case_id ? `<a class="mono" href="#/case/${p.last_case_id}">${esc(p.last_case_no || "#" + p.last_case_id)}</a>${p.last_closed_at ? ` <span class="chip c-normal">ปิดแล้ว</span>` : ""}` : "-"}</td>
+<td style="text-align:right;white-space:nowrap">${r.canManage ? `<button class="btn" type="button" data-pme="${p.id}" style="min-height:34px">แก้</button> ${p.active ? `<button class="btn" type="button" data-pmo="${p.id}" style="min-height:34px">เปิดเคสรอบนี้เลย</button>` : ""}` : ""}</td></tr>`).join("")}
+</tbody></table></div>` : `<div class="empty">ยังไม่มีงาน PM${r.canManage ? " กด “เพิ่มงาน PM” เพื่อเริ่ม" : ""}</div>`}</section>
+<dialog id="dlg"></dialog>`;
+    const form = (p) => {
+      const dlg = document.getElementById("dlg");
+      const team = p ? p.team : myTeams[0];
+      const userOpts = (t, sel) => us.users.filter((u) => u.teams.includes(t)).map((u) => `<option value="${u.id}" ${u.id === sel ? "selected" : ""}>${esc(u.display_name)}</option>`).join("");
+      dlg.innerHTML = `<form class="card" method="dialog" id="pmf" style="width:min(640px,92vw)">
+<h2>${p ? "แก้งาน PM" : "เพิ่มงาน PM"}</h2>
+<label class="f"><span class="req">ชื่องาน</span><input name="title" value="${esc(p ? p.title : "")}" maxlength="200" placeholder="เช่น ตรวจสุขภาพระบบ NICE Engage รายไตรมาส" required></label>
+<div class="formgrid" style="grid-template-columns:1fr 1fr">
+<label class="f"><span class="req">ลูกค้า</span><select name="site" required><option value="">เลือกลูกค้า</option>${lk.site.map((s) => `<option ${p && p.site === s ? "selected" : ""}>${esc(s)}</option>`).join("")}</select></label>
+<label class="f">Product<select name="product"><option value="">-</option>${lk.product.map((s) => `<option ${p && p.product === s ? "selected" : ""}>${esc(s)}</option>`).join("")}</select></label>
+<label class="f"><span class="req">ทีม</span><select name="team">${ME.teams.filter((t) => myTeams.includes(t.key) || (p && t.key === p.team)).map((t) => `<option value="${t.key}" ${t.key === team ? "selected" : ""}>${esc(t.label)}</option>`).join("")}</select></label>
+<label class="f"><span class="req">ผู้รับผิดชอบ</span><select name="owner_id">${userOpts(team, p ? p.owner_id : ME.user.id)}</select></label>
+<label class="f"><span class="req">ทำทุก</span><select name="every_months">${[1, 2, 3, 4, 6, 12].map((n) => `<option value="${n}" ${(p ? p.every_months : 3) === n ? "selected" : ""}>${n} เดือน</option>`).join("")}</select></label>
+<label class="f"><span class="req">รอบถัดไป (วันที่เปิดเคส)</span><input type="date" name="next_date" value="${p ? String(p.next_date).slice(0, 10) : daysAgo(-1)}" required></label></div>
+<label class="f"><span class="req">Checklist (1 บรรทัด = 1 ข้อ)</span><textarea name="checklist" rows="6" placeholder="ตรวจพื้นที่ดิสก์ของ Logger&#10;ตรวจ backup ล่าสุด&#10;ทดสอบอัดเสียงและเปิดฟัง 3 สาย&#10;ส่งสรุปผลให้ลูกค้า">${esc(p ? p.checklist.join("\n") : "")}</textarea></label>
+<label class="f">หมายเหตุสำหรับผู้รับผิดชอบ<textarea name="note" rows="2" maxlength="1000">${esc(p ? p.note || "" : "")}</textarea></label>
+${p ? `<label class="chk"><input type="checkbox" name="active" ${p.active ? "checked" : ""}><span>ใช้งานอยู่ (เอาติ๊กออกเพื่อหยุดชั่วคราว)</span></label>` : ""}
+<div class="right"><button class="btn" value="cancel" formnovalidate>ยกเลิก</button><button class="btn primary" value="save">บันทึก</button></div></form>`;
+      const f = dlg.querySelector("#pmf");
+      f.team.onchange = () => (f.owner_id.innerHTML = userOpts(f.team.value, ME.user.id));
+      dlg.onclose = async () => {
+        if (dlg.returnValue !== "save") return;
+        const body = { title: f.title.value, site: f.site.value, product: f.product.value, team: f.team.value, owner_id: Number(f.owner_id.value), every_months: Number(f.every_months.value), next_date: f.next_date.value, checklist: f.checklist.value, note: f.note.value, active: f.active ? f.active.checked : true };
+        try {
+          await post(p ? `/pm/${p.id}` : "/pm", body, p ? "PUT" : "POST");
+          toast("บันทึกงาน PM แล้ว");
+          viewPm();
+        } catch (e) {
+          toast(e.message, 6000);
+          setTimeout(() => form({ ...(p || {}), ...body, checklist: String(body.checklist).split("\n"), id: p && p.id }), 50);
+        }
+      };
+      dlg.showModal();
+    };
+    const nb = document.getElementById("pm-new");
+    if (nb) nb.onclick = () => form(null);
+    document.querySelectorAll("[data-pme]").forEach((b) => (b.onclick = () => form(r.items.find((x) => x.id === Number(b.dataset.pme)))));
+    document.querySelectorAll("[data-pmo]").forEach(
+      (b) =>
+        (b.onclick = async () => {
+          if (!confirm("เปิดเคสของรอบนี้ตอนนี้เลย? รอบถัดไปจะเลื่อนตามรอบที่ตั้งไว้")) return;
+          try {
+            const x = await post(`/pm/${b.dataset.pmo}/open-now`, {});
+            toast(`เปิดเคส ${x.caseNo} แล้ว`);
+            location.hash = "#/case/" + x.caseId;
+          } catch (e) {
+            toast(e.message, 6000);
+          }
+        })
+    );
+  }
+
+  // ------------------------------------------------------------ installable app + notifications on this device
+  let installPrompt = null;
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    installPrompt = e;
+  });
+  function registerSw() {
+    if (!("serviceWorker" in navigator) || !window.isSecureContext) return;
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  }
+  const b64u = (s) => {
+    const p = "=".repeat((4 - (s.length % 4)) % 4);
+    const raw = atob((s + p).replace(/-/g, "+").replace(/_/g, "/"));
+    return Uint8Array.from(raw, (ch) => ch.charCodeAt(0));
+  };
+  async function bindAppCard() {
+    const el = document.getElementById("app-card");
+    if (!el) return;
+    const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    const standalone = matchMedia("(display-mode: standalone)").matches || navigator.standalone;
+    const pushOk = "serviceWorker" in navigator && "PushManager" in window && window.isSecureContext;
+    let info = { enabled: false, devices: 0 };
+    try {
+      info = await api("/push");
+    } catch (e) {}
+    let sub = null;
+    if (pushOk) {
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        sub = await reg.pushManager.getSubscription();
+      } catch (e) {}
+    }
+    const perm = "Notification" in window ? Notification.permission : "unsupported";
+    el.innerHTML = `<div class="title"><h2>ใช้บนมือถือเหมือนแอป</h2><span>ติดตั้งไอคอน และรับแจ้งเตือนบนเครื่องนี้</span></div>
+<div class="app-row"><div><b>ติดตั้งเป็นแอป</b><div class="hint">${standalone ? "เปิดจากแอปอยู่แล้ว" : ios ? "iPhone / iPad: เปิดใน Safari กดปุ่มแชร์ ⬆︎ แล้วเลือก “เพิ่มไปยังหน้าจอโฮม”" : "Android / Chrome / Edge: กดปุ่มด้านขวา หรือเมนู ⋮ → “ติดตั้งแอป”"}</div></div>
+${!standalone && !ios ? `<button class="btn" type="button" id="app-install" ${installPrompt ? "" : "disabled"}>ติดตั้ง</button>` : ""}</div>
+<div class="app-row"><div><b>การแจ้งเตือนบนเครื่องนี้</b><div class="hint">${
+      !info.enabled ? "Admin ยังไม่ได้เปิดใช้ (ต้องตั้ง VAPID key ที่ server)"
+      : !pushOk ? (ios && !standalone ? "iPhone: ติดตั้งเป็นแอปก่อน แล้วเปิดจากไอคอนบนหน้าจอโฮม จึงเปิดแจ้งเตือนได้" : "เบราว์เซอร์นี้ไม่รองรับ")
+      : perm === "denied" ? "เครื่องนี้ปิดการแจ้งเตือนของเว็บนี้ไว้ เปิดได้ที่การตั้งค่าของเบราว์เซอร์"
+      : sub ? "เปิดอยู่: เคสใหม่ของทีม เคสที่โอนให้คุณ แจ้งเตือนรอบ 1–2 / เกิน Due งาน PM และคำขอบริการ"
+      : "ยังไม่เปิด"
+    }${info.devices ? ` · เปิดไว้ ${info.devices} เครื่อง` : ""}</div></div>
+${info.enabled && pushOk && perm !== "denied" ? (sub ? `<span style="display:flex;gap:8px"><button class="btn" type="button" id="push-test">ทดสอบ</button><button class="btn" type="button" id="push-off">ปิด</button></span>` : `<button class="btn primary" type="button" id="push-on">เปิดแจ้งเตือน</button>`) : ""}</div>`;
+    const ib = document.getElementById("app-install");
+    if (ib)
+      ib.onclick = async () => {
+        if (!installPrompt) return;
+        installPrompt.prompt();
+        await installPrompt.userChoice.catch(() => {});
+        installPrompt = null;
+        bindAppCard();
+      };
+    const on = document.getElementById("push-on");
+    if (on)
+      on.onclick = async () => {
+        try {
+          if ((await Notification.requestPermission()) !== "granted") return toast("ไม่ได้รับอนุญาตให้แจ้งเตือน");
+          const reg = await navigator.serviceWorker.ready;
+          const s = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64u(info.publicKey) });
+          await post("/push/subscribe", s.toJSON());
+          toast("เปิดการแจ้งเตือนบนเครื่องนี้แล้ว");
+        } catch (e) {
+          toast("เปิดการแจ้งเตือนไม่สำเร็จ: " + e.message, 6000);
+        }
+        bindAppCard();
+      };
+    const off = document.getElementById("push-off");
+    if (off)
+      off.onclick = async () => {
+        try {
+          await post("/push/unsubscribe", { endpoint: sub.endpoint });
+          await sub.unsubscribe();
+        } catch (e) {}
+        toast("ปิดการแจ้งเตือนบนเครื่องนี้แล้ว");
+        bindAppCard();
+      };
+    const t = document.getElementById("push-test");
+    if (t)
+      t.onclick = async () => {
+        try {
+          const x = await post("/push/test", {});
+          toast(x.sent ? "ส่งแล้ว ดูการแจ้งเตือนบนเครื่อง" : "ส่งไม่สำเร็จ ลองปิดแล้วเปิดใหม่", 5000);
+        } catch (e) {
+          toast(e.message, 6000);
+        }
+      };
+  }
+
   // ------------------------------------------------------------ router
   async function route() {
     const { parts, params } = (() => {
@@ -4120,6 +4462,7 @@ ${x.recentClosed.map((c) => `<tr class="click" data-href="#/case/${c.id}"><td><a
           if (parts[2] === "meeting") return await viewMeeting(decodeURIComponent(parts[1]), params);
           return await viewOwner(parts[1] ? decodeURIComponent(parts[1]) : null, params);
         case "customer": return await viewCustomer(params);
+        case "pm": return await viewPm();
         case "reports": return await viewReports(params);
         case "audit": return await viewAudit(params);
         case "cases": return await viewCases(params);
@@ -4171,5 +4514,6 @@ ${x.recentClosed.map((c) => `<tr class="click" data-href="#/case/${c.id}"><td><a
     refreshSrBadge();
     window.addEventListener("hashchange", route);
     route();
+    registerSw();
   })();
 })();

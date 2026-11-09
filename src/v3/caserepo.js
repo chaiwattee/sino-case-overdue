@@ -280,6 +280,7 @@ async function updateCaseTx(user, kase, body, { allowReassign }) {
       let resolution = null;
       if (nowClosed && !wasClosed) {
         resolution = checkResolution(body.resolution);
+        await require("./pm").checkClose(kase.id, status);
         await require("./customers").checkClose(body.site !== undefined ? clean(body.site, 120) : kase.site);
       }
       const csNow = body.cs_number !== undefined ? clean(body.cs_number, 60) : kase.csNumber;

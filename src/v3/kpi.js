@@ -1,9 +1,9 @@
 // Monthly KPI per owner, computed from what is already in the system (cases, activities, extensions,
 // customer requests). Work types are found with an admin-editable keyword list, so no case text leaves the server.
 //
-// Score (100 + bonus 5):
+// Score (100 + bonus 10):
 //  1 SLA 30 · 2 Responsiveness 15 · 3 Weighted workload 15 · 4 Difficulty 10
-//  5 Diversity/skill 10 (internal service requests count here as work types / new skills, nothing else) · 6 Backlog & extensions 10 · 7 Documentation 10 · + Team bonus 5
+//  5 Diversity/skill 10 (internal service requests count here as work types / new skills, nothing else) · 6 Backlog & extensions 10 · 7 Documentation 10 · + Team bonus 5 · + Customer satisfaction bonus 5
 const { config } = require("../config");
 const d = require("../dates");
 const { q, one, all, getSetting, setSetting, audit } = require("./db");
@@ -105,6 +105,11 @@ async function compute(ym) {
   );
   const intakes = await all(
     `SELECT claimed_by, created_at, claimed_at FROM intakes WHERE status = 'claimed' AND NOT is_test AND claimed_at >= $1 AND claimed_at < $2`,
+    [R.fromIso, nextIso]
+  ).catch(() => []);
+  // Customer satisfaction ratings answered in the month, by the owner of the case.
+  const csat = await all(
+    `SELECT c.owner_id, s.rating FROM case_csat s JOIN cases c ON c.id = s.case_id WHERE s.rating IS NOT NULL AND s.rated_at >= $1 AND s.rated_at < $2`,
     [R.fromIso, nextIso]
   ).catch(() => []);
   // Products each owner handled before this month (to spot new skills).
@@ -252,11 +257,19 @@ async function compute(ym) {
     m.fastClaims = fast;
     const sBonus = Math.min(5, Math.floor(fast / 2));
 
+    // + Customer satisfaction bonus (5): only rewards, never deducts (few customers answer, and some scores are about the product).
+    //   Needs at least 2 answers in the month: average ≥4.5 → 5 · ≥4 → 3 · ≥3.5 → 1.
+    const mine = csat.filter((x) => x.owner_id === o.id).map((x) => Number(x.rating));
+    m.csatCount = mine.length;
+    m.csatAvg = mine.length ? Math.round((mine.reduce((a, b) => a + b, 0) / mine.length) * 10) / 10 : null;
+    m.csatLow = mine.filter((x) => x <= 2).length;
+    const sCsat = mine.length >= 2 ? (m.csatAvg >= 4.5 ? 5 : m.csatAvg >= 4 ? 3 : m.csatAvg >= 3.5 ? 1 : 0) : 0;
+
     owners.push({
       id: o.id, name: o.name, email: o.email, active: o.active,
       handled: handled.length, metrics: m,
       types: typeCount, products: prodCount, sites: siteCount, kinds: kindCount,
-      parts: { sla: sSla, resp: sResp, work: null, div: sDiv, back: sBack, doc: sDoc, bonus: sBonus },
+      parts: { sla: sSla, resp: sResp, work: null, div: sDiv, back: sBack, doc: sDoc, bonus: sBonus, csat: sCsat },
     });
   }
 
@@ -281,7 +294,7 @@ async function compute(ym) {
     const a = adj.find((x) => x.user_id === o.id);
     o.adjust = a ? { points: a.points, reason: a.reason, by: a.by_name, at: a.updated_at } : null;
     o.base = r1(base);
-    o.score = Math.round(clamp(base + p.bonus + (a ? a.points : 0), 0, 105));
+    o.score = Math.round(clamp(base + p.bonus + p.csat + (a ? a.points : 0), 0, 110));
     o.insufficient = o.metrics.closed < 3;
     o.grade = o.insufficient ? null : grade(o.score);
     Object.keys(p).forEach((k) => (p[k] = p[k] == null ? null : r1(p[k])));
@@ -314,9 +327,11 @@ function summarize(o, all) {
   if (m.newSkills.length) good.push(`ทำ ${m.newSkills.join(", ")} เป็นครั้งแรก`);
   if (m.sr && m.sr.count) good.push(`ทำคำขอบริการภายในเสร็จ ${m.sr.count} งาน (ทันกำหนด ${m.sr.onTime}) นับเป็นทักษะ ไม่มีคะแนนแยก`);
   if (m.fastClaims) good.push(`รับเคสจากลูกค้าภายใน 1 ชม. ${m.fastClaims} เคส`);
+  if (m.csatCount >= 2 && m.csatAvg >= 4) good.push(`ลูกค้าให้คะแนนพึงพอใจเฉลี่ย ${m.csatAvg}/5 (${m.csatCount} คำตอบ)`);
   if (m.slaPct != null && m.slaPct < 70) work.push(`ปิดทัน SLA เพียง ${m.slaPct}%`);
   if (m.overdueAtEnd) work.push(`มีเคสเกิน Due ณ สิ้นเดือน ${m.overdueAtEnd} เคส`);
   if (m.extensions >= 2) work.push(`ขอขยายเวลา ${m.extensions} ครั้ง`);
+  if (m.csatLow) work.push(`ลูกค้าให้คะแนนพึงพอใจต่ำ (1–2) ${m.csatLow} ครั้ง`);
   if (m.updateEveryDays != null && m.updateEveryDays > 3) work.push(`อัปเดตเคสห่าง (ทุก ${m.updateEveryDays} วัน)`);
   if (m.diversity < 0.35 && o.handled >= 4) work.push("งานกระจุกอยู่ไม่กี่ประเภท");
   const types = top(o.types).filter((t) => t !== OTHER);

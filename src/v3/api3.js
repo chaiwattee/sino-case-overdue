@@ -26,6 +26,7 @@ api.use((req, res, next) =>
   (req.path === "/users/import" ? jsonFile
     : /^\/sr(\/|$)/.test(req.path) && req.method !== "GET" ? jsonSr
     : /^\/case\/\d+\/rca$/.test(req.path) ? jsonRca
+    : /^\/case\/\d+\/files$/.test(req.path) ? jsonRca // photos / files up to 10 MB (base64)
     : req.path === "/profile/avatar" ? jsonFile // a photo up to 400 KB arrives as ~540 KB of base64
     : jsonSmall)(req, res, next));
 api.use(requireUser());
@@ -66,6 +67,10 @@ api.put("/profile/lang", wrap(async (req, res) => {
 require("./customers").mount(api, { wrap });
 require("./teamsnotify").mount(api, { wrap, need });
 require("./insights").mount(api, { wrap });
+require("./custreport").mount(api, { wrap, need, perms });
+require("./pm").mount(api, { wrap, loadVisible });
+require("./push").mount(api, { wrap });
+require("./casefiles").mount(api, { wrap, loadVisible, perms, jsonFile });
 require("./rca").mount(api, { wrap, loadVisible, perms, repo, tx: require("./db").tx, audit });
 
 async function visibleCases(user) {
@@ -310,6 +315,8 @@ api.get("/case/:id", wrap(async (req, res) => {
     case: ser3(c),
     intake: intakeRow,
     csat: await require("./csat").forCase(c.id),
+    checklist: await require("./pm").checklistFor(c.id),
+    files: await require("./casefiles").list(c.id),
     activities: acts,
     alerts,
     changes,
@@ -362,6 +369,8 @@ api.put("/case/:id", wrap(async (req, res) => {
   }
   const r = await repo.updateCase(u, c, b, { allowReassign });
   if (r.newSite) await require("./customers").onNewSite(u, r.newSite, { id: c.id, case_no: c.caseNo, team: b.team || c.team });
+  if (r.changed.includes("owner_id") && Number(b.owner_id) !== u.id)
+    require("./push").send([Number(b.owner_id)], { title: `โอนเคสให้คุณ · ${c.caseNo}`, body: `${c.site || ""} · ${c.task || ""} (โดย ${u.display_name})`, url: `/#/case/${c.id}`, tag: `case-${c.id}` }).catch(() => {});
   // Status and owner changes are already in case_changes; record the other edited fields here.
   const other = (r.changed || []).filter((f) => !["status", "owner", "owner_id", "end_date", "closed_at", "resolved_by"].includes(f));
   if (other.length) await audit(u, "case_update", `${c.caseNo || c.csNumber || "#" + c.id} · ${c.site || ""}`, { case_id: c.id, fields: other });

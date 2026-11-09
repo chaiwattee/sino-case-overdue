@@ -1,0 +1,23 @@
+{
+  "name": "Sino Case SLA",
+  "short_name": "Case SLA",
+  "description": "ติดตามเคสและ SLA ของทีม Support · SINO S-TECH",
+  "id": "/",
+  "start_url": "/#/mine",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0F1521",
+  "theme_color": "#1F5FBF",
+  "lang": "th",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "เคสของฉัน", "url": "/#/mine", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "เปิดเคสใหม่", "url": "/#/case/new", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "เคสจากลูกค้า", "url": "/#/intake", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}

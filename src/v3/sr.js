@@ -217,6 +217,7 @@ async function notifySubmitted(s) {
     body(s, `${today ? "<strong style='color:#B3263A'>ด่วนมาก ผู้ขอต้องการงานภายในวันนี้ ผู้ขอจะโทรหาคุณเพื่อขออนุมัติ</strong><br>" : ""}มีคำขอบริการใหม่รอคุณอนุมัติ ตรวจรายละเอียด ปรับวันที่ส่งงานได้ และเลือกผู้รับผิดชอบ<br><span style='color:#5B6675;font-size:13px'>ถ้ายังไม่อนุมัติภายใน 1 วันทำการ ระบบเตือนซ้ำ</span>`,
       [["วันที่ต้องการ", thaiDay(s.requested_date)], ["รายละเอียด", s.detail.slice(0, 600)]], { button: "ตรวจและอนุมัติ" }));
   await tg(`${today ? "🚨 ด่วนมาก ต้องการวันนี้ · " : ""}📝 คำขอบริการรออนุมัติ\n${s.sr_no} ${s.title}\nจาก ${s.requester_name}${s.requester_department ? ` (${s.requester_department})` : ""} · ทีม ${s.team_label} · ${SEV[s.severity]} · ต้องการ ${thai(s.requested_date)}`);
+  require("./push").send(mgrs.map((m) => m.id), { title: `${today ? "ด่วนมาก · " : ""}คำขอบริการรออนุมัติ · ${s.sr_no}`, body: `${s.title} · จาก ${s.requester_name}`, url: `/#/sr/${s.id}`, tag: `sr-${s.id}` }).catch(() => {});
   await require("./teamsnotify").notify(s.team, "sr", {
     title: `${today ? "🚨 ด่วนมาก ต้องการวันนี้ · " : "📝 "}คำขอบริการรออนุมัติ · ${s.sr_no}`,
     color: today ? "Attention" : "Warning",
@@ -236,6 +237,7 @@ async function notifyApproved(s, by) {
       ...(s.manager_note ? [["หมายเหตุ", s.manager_note]] : []),
       ["รายละเอียด", s.detail.slice(0, 600)],
     ]));
+  if (s.assignee_id) require("./push").send([s.assignee_id], { title: `งานใหม่ให้คุณ · ${s.sr_no}`, body: `${s.title} · Target ${thai(s.target_date)}`, url: `/#/sr/${s.id}`, tag: `sr-${s.id}` }).catch(() => {});
   await tg(`✅ อนุมัติคำขอบริการ ${s.sr_no} ${s.title}\nผู้รับผิดชอบ ${s.assignee_name} · Target ${thai(s.target_date)} · โดย ${by.display_name}`);
 }
 async function notifyInfo(s, by, note) {
@@ -691,6 +693,6 @@ function mount(api, { wrap }) {
 }
 
 /** Requests a requester-only account may make (everything else is refused). */
-const REQUESTER_PATHS = [/^\/me$/, /^\/departments$/, /^\/profile(\/avatar|\/lang)?$/, /^\/avatar\/\d+$/, /^\/sr(\/|$)/, /^\/sr-files\//];
+const REQUESTER_PATHS = [/^\/me$/, /^\/departments$/, /^\/profile(\/avatar|\/lang)?$/, /^\/push(\/subscribe|\/unsubscribe|\/test)?$/, /^\/avatar\/\d+$/, /^\/sr(\/|$)/, /^\/sr-files\//];
 
 module.exports = { mount, runReminders, kpiByAssignee, REQUESTER_PATHS, SEV, STATUS, OUTCOME, isWorkday, addWorkdays, workdaysBetween, holidays, profileMissing };

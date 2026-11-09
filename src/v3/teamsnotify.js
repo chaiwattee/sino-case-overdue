@@ -13,8 +13,9 @@ const EVENTS = {
   ext: "คำขอขยายเวลารออนุมัติ",
   customer: "ลูกค้าใหม่รออนุมัติชื่อ",
   csat: "ลูกค้าให้คะแนนพึงพอใจ 1–2",
+  due: "เคสใกล้ Due (วันนี้ / พรุ่งนี้) แท็กชื่อผู้รับผิดชอบ ทุกเช้า 08:30",
 };
-const DEFAULT_EVENTS = ["intake", "overdue", "sr", "csat"];
+const DEFAULT_EVENTS = ["intake", "overdue", "due", "sr", "csat"];
 const HOST_OK = /(^|\.)(logic\.azure\.com|powerplatform\.com|powerautomate\.com)$/i;
 
 function validUrl(u) {
@@ -50,7 +51,12 @@ async function targets(team, event) {
 }
 
 /** Adaptive card payload for a Teams workflow. facts = [[label, value]], actions = [[title, url]]. */
-function payload({ title, color = "Default", text, facts = [], actions = [] }) {
+// lines: markdown lines shown as a list; mentions: [{name, email}] tagged where "<at>name</at>" appears in a line.
+function payload({ title, color = "Default", text, facts = [], lines = [], mentions = [], actions = [] }) {
+  const seen = new Set();
+  const entities = mentions
+    .filter((m) => m && m.email && m.name && !seen.has(m.email.toLowerCase()) && seen.add(m.email.toLowerCase()))
+    .map((m) => ({ type: "mention", text: `<at>${m.name}</at>`, mentioned: { id: m.email, name: m.name } }));
   return {
     type: "message",
     attachments: [
@@ -60,11 +66,12 @@ function payload({ title, color = "Default", text, facts = [], actions = [] }) {
           $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
           type: "AdaptiveCard",
           version: "1.4",
-          msteams: { width: "Full" },
+          msteams: { width: "Full", ...(entities.length ? { entities } : {}) },
           body: [
             { type: "TextBlock", text: title, weight: "Bolder", size: "Medium", color, wrap: true },
             ...(text ? [{ type: "TextBlock", text, wrap: true, spacing: "Small" }] : []),
             ...(facts.length ? [{ type: "FactSet", facts: facts.map(([t, v]) => ({ title: String(t), value: String(v ?? "-") })) }] : []),
+            ...lines.map((l, i) => ({ type: "TextBlock", text: l, wrap: true, spacing: i ? "Small" : "Medium" })),
           ],
           actions: actions.map(([t, url]) => ({ type: "Action.OpenUrl", title: t, url })),
         },
@@ -95,24 +102,43 @@ async function notify(team, event, card) {
 
 const link = (hash) => `${config3.baseUrl}/${hash}`;
 
-/** Morning summary of overdue cases, one card per team channel. */
+const md = (x) => String(x || "-").replace(/([*_\[\]<>])/g, "\\$1");
+const tag = (c) => (c.ownerEmail && c.owner ? `<at>${c.owner}</at>` : md(c.owner));
+const who = (list) => list.filter((c) => c.ownerEmail && c.owner).map((c) => ({ name: c.owner, email: c.ownerEmail }));
+const caseLine = (c, tail) => `**[${md(c.caseNo || "#" + c.id)}](${link("#/case/" + c.id)})** ${md(c.site)} · ${md(c.task)} · ${tag(c)} · ${tail}`;
+
+/** Morning cards per team channel: cases past Due, and cases due today / tomorrow with their owners tagged. */
 async function overdueSummary() {
   const repo = require("./caserepo");
   const teams = await all("SELECT code, label FROM teams ORDER BY sort");
-  const cases = (await repo.loadCases(null)).filter((c) => c.stage === "overdue");
-  let sent = 0;
+  const open = (await repo.loadCases(null)).filter((c) => c.stage !== "closed");
+  const out = { overdue: 0, due: 0 };
   for (const t of teams) {
-    const list = cases.filter((c) => c.team === t.code).sort((a, b) => (b.daysOverdue || 0) - (a.daysOverdue || 0));
-    if (!list.length) continue;
-    sent += await notify(t.code, "overdue", {
-      title: `⏰ เคสเกิน Due วันนี้ ${list.length} เคส · ${t.label}`,
-      color: "Attention",
-      facts: list.slice(0, 10).map((c) => [c.caseNo || "#" + c.id, `${c.site || "-"} · ${c.task || "-"} · ${c.owner || "-"} · เกิน ${c.daysOverdue} วัน`]),
-      text: list.length > 10 ? `และอีก ${list.length - 10} เคส` : "",
-      actions: [["เปิดภาพรวม", link(`#/?source=${encodeURIComponent(t.code)}`)]],
-    });
+    const mine = open.filter((c) => c.team === t.code);
+    const over = mine.filter((c) => c.stage === "overdue").sort((a, b) => (b.daysOverdue || 0) - (a.daysOverdue || 0));
+    if (over.length) {
+      const shown = over.slice(0, 15);
+      out.overdue += await notify(t.code, "overdue", {
+        title: `⏰ เคสเกิน Due วันนี้ ${over.length} เคส · ${t.label}`,
+        color: "Attention",
+        lines: [...shown.map((c) => caseLine(c, `เกิน ${c.daysOverdue} วัน`)), ...(over.length > 15 ? [`และอีก ${over.length - 15} เคส`] : [])],
+        mentions: who(shown),
+        actions: [["เปิดภาพรวม", link(`#/?source=${encodeURIComponent(t.code)}`)]],
+      });
+    }
+    const soon = mine.filter((c) => c.stage !== "overdue" && c.daysLeft != null && c.daysLeft <= 1 && !(c.periodStart && c.periodStart > new Date())).sort((a, b) => a.daysLeft - b.daysLeft);
+    if (soon.length) {
+      out.due += await notify(t.code, "due", {
+        title: `📅 เคสครบ Due วันนี้ / พรุ่งนี้ ${soon.length} เคส · ${t.label}`,
+        color: "Warning",
+        text: "ปิดเคสหรือขอขยายเวลาก่อนเกิน Due",
+        lines: soon.slice(0, 15).map((c) => caseLine(c, c.daysLeft === 0 ? "**ครบวันนี้**" : "ครบพรุ่งนี้")),
+        mentions: who(soon.slice(0, 15)),
+        actions: [["เปิดเคสของฉัน", link("#/mine")]],
+      });
+    }
   }
-  return { teams: sent };
+  return out;
 }
 
 function mount(api, { wrap, need }) {
@@ -147,4 +173,4 @@ function mount(api, { wrap, need }) {
   }));
 }
 
-module.exports = { mount, notify, overdueSummary, link, EVENTS };
+module.exports = { mount, notify, overdueSummary, link, payload, EVENTS };

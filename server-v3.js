@@ -101,6 +101,11 @@ const pub = path.join(__dirname, "public3");
 const noCache = { setHeaders: (res) => res.setHeader("Cache-Control", "no-cache") };
 // Login page and its assets are public; everything else needs a session.
 app.get(["/login.html", "/style.css", "/login.js", "/intake-form.js", "/update-form.js", "/sinostech-logo.png"], express.static(pub, noCache));
+// Installable app (PWA): manifest, icons and the service worker must load before sign-in.
+app.get(["/manifest.webmanifest", "/sw.js", "/icons/:f"], (req, res, next) => {
+  if (req.path === "/manifest.webmanifest") res.type("application/manifest+json");
+  next();
+}, express.static(pub, noCache));
 app.get("/u/:token", (req, res) => {
   res.set("Cache-Control", "no-store");
   res.set("X-Robots-Tag", "noindex, nofollow");

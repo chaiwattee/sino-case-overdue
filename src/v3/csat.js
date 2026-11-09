@@ -170,6 +170,8 @@ async function alertLow(s) {
       html: shell("#B3263A", `<p style="margin:0 0 12px">ลูกค้าให้คะแนนความพึงพอใจ <strong>${s.rating}/5</strong> ควรโทรติดตามลูกค้าภายใน 1 วันทำการ</p>${fieldTable(facts)}<p style="margin:16px 0 0">${button(url, "เปิดเคส")}</p>`),
     });
   await require("./teamsnotify").notify(s.team, "csat", { title: `😞 ลูกค้าให้คะแนนพึงพอใจ ${s.rating}/5 · ${s.site || ""}`, color: "Attention", facts, actions: [["เปิดเคส", url]] });
+  const push = require("./push");
+  push.send(await push.teamManagerIds(s.team), { title: `ลูกค้าให้คะแนนพึงพอใจ ${s.rating}/5`, body: `${s.site || ""} · ${s.case_no || ""}${s.comment ? ` · ${s.comment}` : ""}`, url: `/#/case/${s.case_id}`, tag: `case-${s.case_id}` }).catch(() => {});
   await q("UPDATE case_csat SET alerted_at = now() WHERE id = $1", [s.id]);
 }
 

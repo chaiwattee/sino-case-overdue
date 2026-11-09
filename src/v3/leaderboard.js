@@ -151,7 +151,7 @@ async function build({ n, endYm, team, viewer }) {
     rows: visible,
     hidden: rows.length - visible.length,
     frames: frames.map((f) => ({ ...f, rows: f.rows.filter((r) => ids.has(r.id)) })),
-    partMax: { sla: 30, resp: 15, work: 20, div: 15, back: 10, doc: 10, bonus: 5 },
+    partMax: { sla: 30, resp: 15, work: 20, div: 15, back: 10, doc: 10, bonus: 5, csat: 5 },
   };
 }
 
