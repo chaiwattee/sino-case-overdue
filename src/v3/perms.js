@@ -1,6 +1,6 @@
 // Role → permission matrix. Values: "all" | "own" | "none".
 // Stored in settings.permissions so an admin can change it; these are the defaults.
-const { getSetting } = require("./db");
+const { getSetting, all, one } = require("./db");
 
 const PERMS = [
   { key: "view", label: "ดูภาพรวมและรายการเคส", hint: "Dashboard, SLA runway, ราย Owner" },
@@ -102,4 +102,26 @@ async function can(user, perm, kase) {
   return false;
 }
 
-module.exports = { PERMS, ROLES, DEFAULTS, OBSERVER_LOCKED, PER_USER, seesAllTeams, matrix, grants, forUser, level, can, invalidate };
+// ---- Team scope: managers (and engineers) see and assign only people of their own teams; admin / observer see everyone.
+/** Teams `user` works in, or null when they see every team. */
+const teamScope = (user) => (seesAllTeams(user) ? null : user.teams || []);
+/** Ids of active users who share a team with `user` (always includes `user`), or null = everyone. */
+async function teamMateIds(user) {
+  const t = teamScope(user);
+  if (!t) return null;
+  const rows = await all("SELECT DISTINCT user_id FROM user_teams WHERE team = ANY($1)", [t]);
+  return new Set([user.id, ...rows.map((r) => r.user_id)]);
+}
+/** Is user `id` a member of `team`? */
+async function inTeam(id, team) {
+  return !!(await one("SELECT 1 FROM user_teams WHERE user_id = $1 AND team = $2", [Number(id), team]));
+}
+/** Throws 403 unless `user` may give work in `team` to user `ownerId`: the team must be theirs and the owner a member of it. */
+async function checkAssign(user, team, ownerId) {
+  const t = teamScope(user);
+  if (!t) return;
+  if (!t.includes(team)) throw Object.assign(new Error("มอบหมายงานได้เฉพาะในทีมของคุณ"), { status: 403 });
+  if (Number(ownerId) !== user.id && !(await inTeam(ownerId, team))) throw Object.assign(new Error("เลือก Owner จากสมาชิกทีมนี้ (ผู้ใช้นี้ไม่ได้อยู่ในทีม)"), { status: 403 });
+}
+
+module.exports = { PERMS, ROLES, DEFAULTS, OBSERVER_LOCKED, PER_USER, seesAllTeams, teamScope, teamMateIds, inTeam, checkAssign, matrix, grants, forUser, level, can, invalidate };

@@ -101,7 +101,9 @@ api.get("/users/options", wrap(async (req, res) => {
      FROM users u LEFT JOIN user_teams t ON t.user_id = u.id WHERE u.active
      GROUP BY u.id ORDER BY u.display_name`
   );
-  res.json({ users: rows });
+  // Managers and engineers pick people from their own teams only.
+  const mates = await perms.teamMateIds(req.user);
+  res.json({ users: mates ? rows.filter((r) => mates.has(r.id)) : rows });
 }));
 
 // ------------------------------------------------------------ dashboard (same shapes as v2)
@@ -304,6 +306,7 @@ api.post("/case", wrap(async (req, res) => {
   if (b.owner_id && Number(b.owner_id) !== u.id) {
     if (!(await perms.can(u, "case_reassign"))) throw bad("ไม่มีสิทธิ์เปิดเคสในชื่อคนอื่น", 403);
     ownerIdNum = Number(b.owner_id);
+    await perms.checkAssign(u, team, ownerIdNum);
   }
   const closedStatus = config.closedStatuses.includes(String(b.status || "").toLowerCase());
   if (closedStatus && !(await perms.can(u, "case_close"))) throw bad("ไม่มีสิทธิ์ปิดเคส", 403);
@@ -323,6 +326,7 @@ api.put("/case/:id", wrap(async (req, res) => {
   const allowReassign = await perms.can(u, "case_reassign", c);
   if ((b.owner_id && Number(b.owner_id) !== c.owner_id) || (b.team && b.team !== c.team)) {
     if (!allowReassign) throw bad("ไม่มีสิทธิ์เปลี่ยน Owner หรือทีม", 403);
+    await perms.checkAssign(u, b.team || c.team, b.owner_id ? Number(b.owner_id) : c.owner_id);
   }
   const r = await repo.updateCase(u, c, b, { allowReassign });
   // Status and owner changes are already in case_changes; record the other edited fields here.

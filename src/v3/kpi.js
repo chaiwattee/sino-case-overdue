@@ -333,15 +333,37 @@ async function trend(userId, ym, n = 6) {
 
 // ------------------------------------------------------------ monthly email to managers
 async function sendMonthly({ month } = {}) {
-  const graph = require("../graph");
-  const { config3 } = require("./config3");
-  const { esc, shell, button } = require("../emails");
   const t = d.today();
   const last = new Date(t.getFullYear(), t.getMonth() - 1, 1);
   const ym = month || `${last.getFullYear()}-${String(last.getMonth() + 1).padStart(2, "0")}`;
   const r = await compute(ym);
-  const to = (await all("SELECT email FROM users WHERE active AND role IN ('manager','admin') AND email IS NOT NULL")).map((u) => u.email);
-  if (!to.length || !r.owners.length) return { ok: true, skipped: true, month: ym };
+  const recips = await all(
+    `SELECT u.id, u.email, u.role, array_remove(array_agg(t.team), NULL) AS teams FROM users u LEFT JOIN user_teams t ON t.user_id = u.id
+     WHERE u.active AND u.role IN ('manager','admin') AND u.email IS NOT NULL GROUP BY u.id`
+  );
+  if (!recips.length || !r.owners.length) return { ok: true, skipped: true, month: ym };
+  // Admins get every owner; each manager gets the owners of their own teams. Same owner list = one email.
+  const groups = new Map();
+  for (const u of recips) {
+    const mates = await require("./perms").teamMateIds(u);
+    const owners = mates ? r.owners.filter((o) => mates.has(o.id)) : r.owners;
+    if (!owners.length) continue;
+    const key = owners.map((o) => o.id).join(",");
+    if (!groups.has(key)) groups.set(key, { owners, to: [] });
+    groups.get(key).to.push(u.email);
+  }
+  let sent = 0;
+  for (const g of groups.values()) {
+    await mailMonthly({ ym, r: { ...r, owners: g.owners }, to: g.to });
+    sent += g.to.length;
+  }
+  return { ok: true, month: ym, to: sent, owners: r.owners.length };
+}
+
+async function mailMonthly({ ym, r, to }) {
+  const graph = require("../graph");
+  const { config3 } = require("./config3");
+  const { esc, shell, button } = require("../emails");
   const [y, m] = ym.split("-").map(Number);
   const label = `${["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."][m - 1]} ${y + 543}`;
   const td = (v, right) => `<td style="padding:8px 10px;border-bottom:1px solid #EEF0F3;${right ? "text-align:right" : ""}">${v}</td>`;
@@ -358,7 +380,6 @@ async function sendMonthly({ month } = {}) {
 ${button(`${config3.baseUrl}/#/kpi?month=${ym}`, "เปิดหน้า KPI")}`
   );
   await graph.sendMail({ to, cc: [], subject: `[Sino Case SLA] KPI ราย Owner ${label} (ทดลองใช้)`, html });
-  return { ok: true, month: ym, to: to.length, owners: r.owners.length };
 }
 
 // ------------------------------------------------------------ routes
@@ -368,11 +389,17 @@ function mount(api, { wrap, need }) {
   api.get("/kpi", wrap(async (req, res) => {
     const r = await compute(req.query.month);
     if (!canAll(req.user)) r.owners = r.owners.filter((o) => o.id === req.user.id);
+    else {
+      const mates = await require("./perms").teamMateIds(req.user); // a manager sees the engineers of their own teams
+      if (mates) r.owners = r.owners.filter((o) => mates.has(o.id));
+    }
     res.json({ ...r, canAll: canAll(req.user), canAdjust: canAdjust(req.user), canEditCategories: req.user.role === "admin" });
   }));
   api.get("/kpi/trend/:id(\\d+)", wrap(async (req, res) => {
     const id = Number(req.params.id);
     if (!canAll(req.user) && id !== req.user.id) return res.status(403).json({ error: "ดูได้เฉพาะ KPI ของตัวเอง" });
+    const mates = await require("./perms").teamMateIds(req.user);
+    if (mates && !mates.has(id)) return res.status(403).json({ error: "ดูได้เฉพาะ KPI ของคนในทีมคุณ" });
     res.json({ trend: await trend(id, req.query.month) });
   }));
   api.put("/kpi/adjust", wrap(async (req, res) => {
@@ -384,6 +411,8 @@ function mount(api, { wrap, need }) {
     const reason = String(b.reason || "").trim().slice(0, 500);
     if (points && reason.length < 5) return res.status(400).json({ error: "กรุณาระบุเหตุผลที่ปรับคะแนน" });
     if (Number(b.userId) === req.user.id && req.user.role !== "admin") return res.status(400).json({ error: "ปรับคะแนนของตัวเองไม่ได้" });
+    const mates = await require("./perms").teamMateIds(req.user);
+    if (mates && !mates.has(Number(b.userId))) return res.status(403).json({ error: "ปรับคะแนนได้เฉพาะคนในทีมคุณ" });
     if (!points) await q("DELETE FROM kpi_adjustments WHERE month = $1 AND user_id = $2", [month, b.userId]);
     else
       await q(

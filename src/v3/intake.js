@@ -508,6 +508,7 @@ async function claim(user, id, b) {
     const ss = await siteSettings(site);
     const team = clean(b.team, 40) || (ss && ss.team) || (owner.teams || [])[0];
     if (!team) throw bad("กรุณาเลือกทีม");
+    if (owner.id !== user.id) await require("./perms").checkAssign(user, team, owner.id);
     const files = await all("SELECT id, file_name FROM intake_files WHERE intake_id = $1", [i.id]);
     const head = [
       `เคสจากลูกค้า ${i.req_no}`,

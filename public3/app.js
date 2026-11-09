@@ -27,7 +27,7 @@
   const STAGE = { normal: "ปกติ", r1: "แจ้งรอบ 1", r2: "แจ้งรอบ 2", overdue: "เกิน Due", no_start: "ไม่มี Start date", closed: "ปิดแล้ว" };
   const ALERT = { r1: "แจ้งรอบ 1", r2: "แจ้งรอบ 2", overdue: "เกิน Due" };
   const ROLE = { admin: "Admin", manager: "Manager", observer: "Observer", engineer: "Engineer", viewer: "Viewer", requester: "ผู้ขอบริการ" };
-  const ROLE_HINT = { admin: "ทำได้ทุกอย่าง รวมถึงจัดการผู้ใช้และตั้งค่าระบบ", manager: "ดูและแก้เคสของทีม อนุมัติขยายเวลา ส่ง Report ปรับคะแนน KPI", observer: "ดูได้ทุกทีมทุกหน้า (ภาพรวม เคส ราย Owner KPI Report ประวัติแก้ไข) แก้ไขอะไรไม่ได้", engineer: "เปิด แก้ และปิดเคสของตัวเอง เห็น KPI ของตัวเอง", viewer: "ดูภาพรวมและเคสของทีมตัวเองอย่างเดียว", requester: "พนักงานทีมอื่น ส่งคำขอบริการและดูได้เฉพาะคำขอของตัวเอง ไม่เห็นเคสลูกค้า (ระบบสร้างให้อัตโนมัติเมื่อ login ด้วยบัญชี Microsoft ของบริษัท)" };
+  const ROLE_HINT = { admin: "ทำได้ทุกอย่าง รวมถึงจัดการผู้ใช้และตั้งค่าระบบ", manager: "ดูและแก้เคสของทีม อนุมัติขยายเวลา ส่ง Report ปรับคะแนน KPI เห็นและมอบงานได้เฉพาะคนในทีมตัวเอง", observer: "ดูได้ทุกทีมทุกหน้า (ภาพรวม เคส ราย Owner KPI Report ประวัติแก้ไข) แก้ไขอะไรไม่ได้", engineer: "เปิด แก้ และปิดเคสของตัวเอง เห็น KPI ของตัวเอง", viewer: "ดูภาพรวมและเคสของทีมตัวเองอย่างเดียว", requester: "พนักงานทีมอื่น ส่งคำขอบริการและดูได้เฉพาะคำขอของตัวเอง ไม่เห็นเคสลูกค้า (ระบบสร้างให้อัตโนมัติเมื่อ login ด้วยบัญชี Microsoft ของบริษัท)" };
   document.addEventListener("change", (e) => {
     const t = e.target;
     if (t && t.name === "role" && t.tagName === "SELECT") {

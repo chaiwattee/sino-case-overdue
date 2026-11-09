@@ -90,7 +90,14 @@ async function build({ n, endYm, team, viewer }) {
   const teamsOf = new Map();
   for (const r of await all("SELECT user_id, array_agg(team ORDER BY team) AS teams FROM user_teams GROUP BY user_id")) teamsOf.set(r.user_id, r.teams);
   const users = new Map((await all("SELECT id, display_name, avatar, role, active FROM users")).map((u) => [u.id, u]));
-  const inTeam = (id) => !team || (teamsOf.get(id) || []).includes(team);
+  // Managers and engineers rank only within their own teams; admin / observer see every team.
+  const scope = require("./perms").teamScope(viewer);
+  if (scope && team && !scope.includes(team)) team = "";
+  const inTeam = (id) => {
+    const ts = teamsOf.get(id) || [];
+    if (team) return ts.includes(team);
+    return !scope || ts.some((t) => scope.includes(t));
+  };
 
   const filt = (rows) => {
     const out = rows.filter((r) => inTeam(r.id) && users.get(r.id)?.active !== false);
@@ -140,7 +147,7 @@ async function build({ n, endYm, team, viewer }) {
   return {
     period: { n, months: ms, label: periodLabel(ms), prevLabel: periodLabel(prevMs), current: endYm === nowYm },
     settings: s, isManager: isMgr, viewerId: viewer.id, team: team || "",
-    teams: await all("SELECT code, label FROM teams ORDER BY sort"),
+    teams: (await all("SELECT code, label FROM teams ORDER BY sort")).filter((t) => !scope || scope.includes(t.code)),
     rows: visible,
     hidden: rows.length - visible.length,
     frames: frames.map((f) => ({ ...f, rows: f.rows.filter((r) => ids.has(r.id)) })),
