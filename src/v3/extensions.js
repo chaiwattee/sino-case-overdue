@@ -54,6 +54,13 @@ async function request(user, kase, b) {
   await audit(user, "case_ext_request", `${kase.caseNo} · ${kase.site || ""}`, { case_id: kase.id, seq: ext.seq, approver: approver.display_name, reason });
   const row = await one(`${EXT_SELECT} WHERE e.id = $1`, [ext.id]);
   mailRequest(row, kase).catch((e) => console.error("[ext] mail:", e.message));
+  require("./teamsnotify").notify(kase.team, "ext", {
+    title: `⏳ ขอขยายเวลาเคส ${kase.caseNo || "#" + kase.id} (ครั้งที่ ${ext.seq})`,
+    color: "Warning",
+    text: reason,
+    facts: [["ลูกค้า", kase.site || "-"], ["งาน", kase.task || "-"], ["ผู้ขอ", user.display_name], ["Due", `${th(oldDue)} → ${th(newDue)}`], ["ผู้อนุมัติ", approver.display_name]],
+    actions: [["เปิดเคส", `${require("./config3").config3.baseUrl}/#/case/${kase.id}`]],
+  });
   return { ok: true, id: ext.id, seq: ext.seq, newDue };
 }
 

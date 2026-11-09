@@ -453,6 +453,8 @@ function startJobs() {
   job("kpi-monthly", "20 8 1 * *", j.reports, () => require("./kpi").sendMonthly());
   // New customer names still waiting for a manager: remind every workday morning.
   job("customer-pending", "35 8 * * 1-5", true, () => require("./customers").remindAll());
+  // Teams: overdue cases per team channel, workday mornings (only teams that set a Teams link get it).
+  job("teams-overdue", "30 8 * * 1-5", true, () => require("./teamsnotify").overdueSummary());
   // Customer intake: hourly "nobody has claimed this yet" reminders (checked every 5 min), chatbot webhooks, cleanup.
   const intake = require("./intake");
   job("intake-reminders", "*/5 * * * *", j.intake, () => intake.runReminders());

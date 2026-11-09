@@ -59,6 +59,13 @@ ${first ? button(`${config3.baseUrl}/#/case/${first.id}`, "ตรวจชื่
     })
     .catch((e) => console.error("[customers] notify:", e.message));
   await q("UPDATE lookups SET reminded_at = now() WHERE id = $1", [l.id]);
+  await require("./teamsnotify").notify(l.team, "customer", {
+    title: `🏢 ${reminder ? "เตือน: " : ""}ลูกค้าใหม่รออนุมัติ · ${l.value}`,
+    color: "Warning",
+    text: "เคสทำงานต่อได้ แต่ปิดเคสไม่ได้จนกว่า Manager จะอนุมัติชื่อ",
+    facts: [["เปิดโดย", user ? user.display_name : "-"], ["เคส", cases.map((c) => c.case_no || c.caseNo || "#" + c.id).join(", ") || "-"], ["ชื่อใกล้เคียง", sim.map((s) => s.value).join(", ") || "ไม่มี"]],
+    actions: first ? [["ตรวจชื่อลูกค้า", `${config3.baseUrl}/#/case/${first.id}`]] : [],
+  });
 }
 
 /** Throws when a case cannot close because its customer is still waiting for approval. */

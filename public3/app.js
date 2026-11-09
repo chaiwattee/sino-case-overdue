@@ -341,6 +341,7 @@ ${edit || !csOf(c) ? "" : `<div class="rca-sec" id="rca-sec"></div>`}
       ["mine", "#/mine", "เคสของฉัน", lvl("case_create") !== "none" || lvl("case_edit") !== "none"],
       ["intake", "#/intake", "เคสจากลูกค้า", true],
       ["owner", "#/owner", "ราย User", true],
+      ["customer", "#/customer", "ราย ลูกค้า", true],
       ["kpi", "#/kpi", "KPI (ทดลองใช้)", ME.user.role !== "viewer"],
       ["rank", "#/rank", "อันดับ KPI", !!(ME.leaderboard && ME.leaderboard.visible)],
       ["reports", "#/reports", "Report &amp; Export", lvl("export") !== "none" || lvl("reports_manage") !== "none"],
@@ -915,7 +916,7 @@ ${allowNew ? `<span class="hint">${newHint}</span>` : ""}</div>`;
 
     $app.innerHTML = `
 <div class="crumb">${lvl("case_edit") === "none" && lvl("case_create") === "none" ? `<a href="#/">ภาพรวม</a>` : `<a href="#/mine">เคสของฉัน</a>`} / ${isNew ? "เปิดเคสใหม่" : esc(caseRef(c))}</div>
-<div class="head"><div><h1>${isNew ? "เปิดเคสใหม่" : `เคส <span class="mono" style="font-size:26px">${esc(caseRef(c))}</span> <span class="muted" style="font-size:16px;font-weight:500">${esc(c.site || "")}${csOf(c) ? " · " + esc(csOf(c)) : ""}</span>`}</h1>
+<div class="head"><div><h1>${isNew ? "เปิดเคสใหม่" : `เคส <span class="mono" style="font-size:26px">${esc(caseRef(c))}</span> <span class="muted" style="font-size:16px;font-weight:500">${c.site && !c.customerUnconfirmed ? `<a href="#/customer?site=${encodeURIComponent(c.site)}" title="ดูภาพรวมลูกค้า">${esc(c.site)}</a>` : esc(c.site || "")}${csOf(c) ? " · " + esc(csOf(c)) : ""}</span>`}</h1>
 <p>${isNew ? "Start date จะบันทึกเป็นวันนี้อัตโนมัติ และ Due = Start date + " + cfg.slaDays + " วัน" : `${esc(c.sourceLabel)} · User ${esc(c.owner || "-")} · ${chip(c.stage)} ${sevChip(c.severity)}`}</p></div>
 <div class="actions">
 ${!isNew && c.site && !c.customerUnconfirmed && lvl("export") === "all" ? `<a class="btn" href="#/reports?site=${encodeURIComponent(c.site)}">Export เคสของ ${esc(c.site)}</a>` : ""}
@@ -951,6 +952,8 @@ ${data && data.changes.length ? `<section class="card"><h2>ประวัติ
 </form>
 <aside class="side">
 ${slaCard}
+${closed ? "" : `<section class="card sim-card" id="sim-card" hidden></section>`}
+${data && data.csat ? csatCard(data.csat) : ""}
 ${closed ? `<section class="card"><div class="title"><h2>Resolution</h2>${permsC.edit && c.resolution ? `<button class="btn" type="button" id="btn-res" style="min-height:34px">แก้ไข</button>` : ""}</div>
 ${c.resolution ? `<div class="resol">${esc(c.resolution)}</div>
 <p class="muted" style="margin:0;font-size:13px">ปิดโดย ${esc(c.resolvedBy || "-")}${c.resolvedAt ? " · " + fdt(c.resolvedAt) : ""} · Status ${esc(c.status)}${c.rootCause ? " · สาเหตุ: " + esc(c.rootCause) : ""}</p>` : `<div class="resol none">ไม่มี Resolution (ปิดก่อนเริ่มบังคับ)</div>${permsC.edit ? `<button class="btn" type="button" id="btn-res" style="align-self:flex-start">เพิ่ม Resolution</button>` : ""}`}</section>` : ""}
@@ -980,6 +983,7 @@ ${actsHtml(data.activities)}</section>`}
     const f = document.getElementById("cf");
     bindCombo(f, "site", lk.site, { newLabel: (v) => `+ ใช้ชื่อใหม่ “${esc(v)}” (ต้องให้ Manager อนุมัติ)` });
     f.status.addEventListener("change", () => (document.getElementById("st-hint").textContent = statusHelp(f.status.value)));
+    if (!closed) bindSimilar(f, isNew ? null : c);
     f.onsubmit = async (e) => {
       e.preventDefault();
       if (ro) return;
@@ -1950,6 +1954,7 @@ ${(() => {
       return `<div class="banner ${w.error ? "warn" : bad ? "err" : "ok"}" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><span style="flex:1">${w.error ? `ตรวจคำเตือนของ Chrome ไม่สำเร็จ: ${esc(w.error)}` : bad ? `Google ติดธงเว็บนี้ว่าไม่ปลอดภัย (${bad} URL) ผู้ใช้ Chrome จะเห็นคำเตือน · แก้ที่ Google Search Console → Security issues → Request review` : w.at ? `Google ไม่ติดธงเว็บนี้ (ตรวจล่าสุด ${fdt(w.at)} ด้วย ${esc(w.api || "")})` : "ยังไม่เคยตรวจ"}</span><button class="btn" type="button" id="wr-check" style="min-height:34px">ตรวจตอนนี้</button></div>`;
     })()}
 ${newSites.length ? `<div class="banner warn">มีรายการที่ผู้ใช้เพิ่มใหม่ ${newSites.length} รายการ รอตรวจ (มีป้าย “ใหม่”) กด “แก้” เพื่อยืนยัน แก้ชื่อ หรือรวมกับรายการเดิม</div>` : ""}
+<section class="card" id="tn-card"><div class="title"><h2>แจ้งเตือนผ่าน Microsoft Teams</h2><span>แต่ละทีมส่งเข้าช่อง Teams ของตัวเอง</span></div><div id="tn-body">กำลังโหลด…</div></section>
 <section class="card" id="dept-card"><div class="title"><h2>หน่วยงาน</h2><span>รายการให้ผู้ใช้เลือกในบัญชีของฉัน</span></div><div id="dept-body">กำลังโหลด…</div></section>
 <section class="card" id="lb-card"><div class="title"><h2>อันดับ KPI</h2><span>กำลังโหลด…</span></div></section>
 <section class="card" id="hol-card"><div class="title"><h2>วันหยุดบริษัท</h2><span>กำลังโหลด…</span></div></section>
@@ -2025,6 +2030,7 @@ ${s.annualReports.map((a) => `<tr><td style="font-weight:600">${a.year + 543} ($
     bindHolidays();
     bindLeaderboardSettings();
     bindDepartments();
+    bindTeamsNotify();
     document.getElementById("ae-save").onclick = async () => {
       const ccTypes = [...document.querySelectorAll("input[name=cct]:checked")].map((x) => x.value);
       try {
@@ -3918,6 +3924,185 @@ ${me.sr ? `<p class="hint" style="margin:0">ทำคำขอบริการ
     }).catch(() => (el.hidden = true));
   }
 
+  // ------------------------------------------------------------ similar closed cases (case form / open case)
+  function simHtml(items) {
+    if (!items.length) return "";
+    return `<div class="title"><h2>เคสคล้ายกันที่เคยปิดแล้ว</h2><span>${items.length} เคส · ดูวิธีแก้ก่อนเริ่มงาน</span></div>
+<div class="sim-list">${items
+      .map(
+        (s) => `<article class="sim">
+<div class="sim-h"><a class="mono" href="#/case/${s.id}" target="_blank" rel="noopener">${esc(s.caseNo || "#" + s.id)}</a><span class="sim-score" title="ความคล้าย">${s.score}%</span></div>
+<div class="sim-m">${esc(s.site || "-")}${s.product ? " · " + esc(s.product) : ""} · ${sevChip(s.severity)} · ปิด ${fd(s.closedAt)} · ${esc(s.owner || "-")}${s.sameSite ? ` <span class="chip c-normal">ลูกค้าเดียวกัน</span>` : ""}</div>
+<div class="sim-t">${esc(s.task)}</div>
+${s.resolution ? `<div class="sim-r"><b>วิธีแก้</b> ${esc(s.resolution)}</div>` : `<div class="sim-r none">ไม่มี Resolution</div>`}
+${s.rca ? `<div class="sim-r rca"><b>RCA${s.rcaCategory ? " · " + esc(s.rcaCategory) : ""}</b> ${esc(s.rca)}</div>` : ""}
+${s.matched.length ? `<div class="sim-w">คำที่ตรง: ${s.matched.map((w) => `<span data-no-i18n>${esc(w)}</span>`).join("")}</div>` : ""}
+</article>`
+      )
+      .join("")}</div>`;
+  }
+  function bindSimilar(f, c) {
+    const box = document.getElementById("sim-card");
+    if (!box || !f) return;
+    let timer = null;
+    let last = "";
+    const run = async () => {
+      const q = [f.task.value, f.detail ? f.detail.value : ""].join(" ").trim();
+      const key = [q, f.site.value, f.product.value].join("|");
+      if (key === last) return;
+      last = key;
+      if (q.length < 4) return (box.hidden = true);
+      try {
+        const r = await api(`/cases/similar?${qs({ q, site: f.site.value.trim(), product: f.product.value, exclude: c ? c.id : "" })}`);
+        box.innerHTML = simHtml(r.items);
+        box.hidden = !r.items.length;
+      } catch (e) {
+        box.hidden = true;
+      }
+    };
+    const later = () => {
+      clearTimeout(timer);
+      timer = setTimeout(run, 600);
+    };
+    ["task", "detail", "site"].forEach((n) => f[n] && f[n].addEventListener("input", later));
+    f.product.addEventListener("change", later);
+    if (c) run();
+  }
+
+  // ------------------------------------------------------------ customer satisfaction on the case page
+  const CSAT_FACE = ["", "😞", "🙁", "😐", "🙂", "😄"];
+  function csatCard(s) {
+    if (!s) return "";
+    const ch = s.channel === "email" ? "ตอบใน email เดิมของลูกค้า" : s.channel === "line" ? "LINE (ผ่าน chatbot)" : "email";
+    return `<section class="card"><div class="title"><h2>ความพึงพอใจของลูกค้า</h2><span>ส่งเมื่อปิดเคส</span></div>
+${s.rating ? `<div class="csat-big ${s.rating <= 2 ? "low" : s.rating >= 4 ? "good" : ""}"><span aria-hidden="true">${CSAT_FACE[s.rating]}</span><b>${s.rating}/5</b></div>
+${s.comment ? `<div class="resol">${esc(s.comment)}</div>` : ""}
+<p class="muted" style="margin:0;font-size:13px">ลูกค้าตอบ ${fdt(s.rated_at)}</p>` : `<p class="muted" style="margin:0;font-size:14px">ส่งแบบสอบถามแล้ว ${fdt(s.sent_at)} ทาง ${ch} · ลูกค้ายังไม่ตอบ (ลิงก์ใช้ได้ถึง ${fd(String(s.expires_at).slice(0, 10))})</p>`}
+</section>`;
+  }
+
+  // ------------------------------------------------------------ customer page
+  const HEALTH = { ok: ["ปกติ", "c-normal"], warn: ["ต้องติดตาม", "c-r1"], bad: ["ต้องระวัง", "c-overdue"] };
+  async function viewCustomer(params) {
+    setNav("customer");
+    const site = params.site || "";
+    const list = (await api("/customer")).list;
+    if (!site) {
+      $app.innerHTML = `
+<div class="head"><div><h1>ราย ลูกค้า</h1><p>ภาพรวมของลูกค้าแต่ละราย จากเคสที่คุณเห็นได้ (12 เดือนล่าสุด) เรียงจากเคสเกิน Due มากสุด</p></div></div>
+<section class="card">${list.length ? `<div class="tablewrap"><table style="min-width:520px"><thead><tr><th>ลูกค้า</th><th style="text-align:right">ยังไม่ปิด</th><th style="text-align:right">เกิน Due</th><th style="text-align:right">เคสทั้งหมด</th></tr></thead><tbody>
+${list.map((x) => `<tr class="click" data-href="#/customer?site=${encodeURIComponent(x.site)}"><td style="font-weight:600"><a href="#/customer?site=${encodeURIComponent(x.site)}">${esc(x.site)}</a></td><td style="text-align:right">${x.open}</td><td style="text-align:right">${x.overdue ? `<span class="chip c-overdue">${x.overdue}</span>` : "0"}</td><td style="text-align:right">${x.total}</td></tr>`).join("")}
+</tbody></table></div>` : `<div class="empty">ยังไม่มีเคส</div>`}</section>`;
+      bindRowLinks();
+      return;
+    }
+    const x = await api(`/customer?site=${encodeURIComponent(site)}`);
+    const st = x.stats;
+    const [hl, hc] = HEALTH[x.health];
+    const maxM = Math.max(1, ...x.months.map((m) => Math.max(m.opened, m.onTime + m.late)));
+    const maxT = Math.max(1, ...x.types.map((t) => t.n));
+    const opts = list.some((l) => l.site.toLowerCase() === site.toLowerCase()) ? list : [{ site }, ...list];
+    $app.innerHTML = `
+<div class="crumb"><a href="#/customer">ราย ลูกค้า</a> / ${esc(x.site)}</div>
+<section class="card owner-head" style="flex-direction:row">
+<div><h1 style="font-size:24px">${esc(x.site)} <span class="chip ${hc}" style="vertical-align:middle">${hl}</span></h1><div class="muted" style="font-size:14px">เคสทั้งหมด ${x.total} เคส · ข้อมูล 6 เดือนล่าสุด</div></div>
+<div class="actions"><label class="f" style="flex:0 1 260px;flex-direction:row;align-items:center;gap:8px">เปลี่ยนลูกค้า
+<select id="cpick">${opts.map((l) => `<option value="${esc(l.site)}" ${l.site.toLowerCase() === site.toLowerCase() ? "selected" : ""}>${esc(l.site)}${l.open ? ` (${l.open})` : ""}</option>`).join("")}</select></label>
+${lvl("export") === "all" ? `<a class="btn" href="#/reports?site=${encodeURIComponent(x.site)}">Export เคสของลูกค้านี้</a>` : ""}</div></section>
+<div class="banner ${x.health === "bad" ? "err" : x.health === "warn" ? "warn" : "ok"} health-reasons"><strong>สุขภาพลูกค้า: ${hl}</strong><ul>${x.reasons.map((r) => `<li>${esc(r.text)}</li>`).join("")}</ul></div>
+<div class="kpis">
+<div class="kpi k-all"><div class="l">ยังไม่ปิด</div><div class="v">${st.open}</div></div>
+<div class="kpi k-overdue"><div class="l">เกิน Due</div><div class="v">${st.overdue}</div></div>
+<div class="kpi k-closed"><div class="l">ปิดทัน SLA · 6 เดือน</div><div class="v">${st.slaPct == null ? "-" : st.slaPct + "%"}</div><div class="s">ปิด ${st.closed6} เคส · เปิดใหม่ ${st.opened6}</div></div>
+<div class="kpi k-normal"><div class="l">ใช้เวลาปิดเฉลี่ย</div><div class="v">${st.avgDays == null ? "-" : st.avgDays}</div><div class="s">วัน</div></div>
+<div class="kpi k-sr"><div class="l">ความพึงพอใจ</div><div class="v">${x.csat.avg == null ? "-" : x.csat.avg}</div><div class="s">${x.csat.rated ? `จาก ${x.csat.rated} คำตอบ (ส่ง ${x.csat.sent})` : x.csat.sent ? `ส่ง ${x.csat.sent} ยังไม่มีคำตอบ` : "ยังไม่มีแบบสอบถาม"}</div></div>
+</div>
+<section class="card"><div class="title"><h2>เคสที่ยังไม่ปิด (${x.open.length})</h2><span>เรียงจากเกิน Due มากสุด</span></div>
+${x.open.length ? `<div class="tablewrap"><table style="min-width:760px"><thead><tr><th>เลขเคส</th><th>Severity</th><th>งาน</th><th>User</th><th>เปิดเคส</th><th>Due</th><th>สถานะ</th></tr></thead><tbody>
+${x.open.map((c) => `<tr class="click" data-href="#/case/${c.id}"><td><a class="mono" href="#/case/${c.id}">${esc(caseRef(c))}</a>${c.csNumber ? `<div class="muted" style="font-size:12px">${esc(c.csNumber)}</div>` : ""}</td><td>${sevChip(c.severity)}</td><td style="font-size:13px">${esc(c.task || "")}</td><td>${esc(c.owner || "-")}</td><td>${fd(c.startDate)}</td><td>${fd(c.dueDate)}</td><td>${chip(c.stage)}${c.stage === "overdue" ? ` <small class="muted">${c.daysOverdue} วัน</small>` : ""}</td></tr>`).join("")}
+</tbody></table></div>` : `<div class="empty">ไม่มีเคสค้าง</div>`}</section>
+<div class="grid2">
+<section class="card"><div class="title"><h2>เคสรายเดือน</h2><span>เปิดใหม่ เทียบกับปิดทัน / ไม่ทัน SLA</span></div>
+<div class="mbars">${x.months.map((m) => `<div class="mb"><div class="mb-cols">
+<div class="mb-o" style="height:${(m.opened / maxM) * 100}%" title="เปิดใหม่ ${m.opened}"></div>
+<div class="mb-c" style="height:${((m.onTime + m.late) / maxM) * 100}%">${m.late ? `<div style="flex:${m.late};background:var(--over)" title="ปิดไม่ทัน ${m.late}"></div>` : ""}${m.onTime ? `<div style="flex:${m.onTime};background:var(--normal)" title="ปิดทัน ${m.onTime}"></div>` : ""}</div></div>
+<div class="mb-n">${m.opened} / ${m.onTime + m.late}</div><div class="mb-l">${esc(ymLabel(m.ym))}</div></div>`).join("")}</div>
+<div class="legend"><span><span class="dot" style="background:#9DB7E8" aria-hidden="true"></span>เปิดใหม่</span><span><span class="dot d-normal" aria-hidden="true"></span>ปิดทัน SLA</span><span><span class="dot d-overdue" aria-hidden="true"></span>ปิดเกิน Due</span></div></section>
+<section class="card"><div class="title"><h2>ประเภทงาน</h2><span>6 เดือนล่าสุด รวมเคสที่ยังเปิด</span></div>
+${x.types.length ? `<div class="hbars">${x.types.map((t) => `<div class="hb"><span class="hb-l">${esc(t.name)}</span><span class="hb-b"><i style="width:${(t.n / maxT) * 100}%"></i></span><span class="hb-n">${t.n}</span></div>`).join("")}</div>` : `<div class="empty">ไม่มีข้อมูล</div>`}
+${x.products.length || x.owners.length ? `<div class="stat2" style="margin-top:6px"><div><div class="k">Product</div><div style="font-size:14px">${x.products.map((p) => `${esc(p.name)} (${p.n})`).join(", ") || "-"}</div></div><div><div class="k">ใครดูแลบ่อย</div><div style="font-size:14px">${x.owners.map((p) => `${esc(p.name)} (${p.n})`).join(", ") || "-"}</div></div></div>` : ""}
+</section></div>
+<div class="grid2">
+<section class="card"><div class="title"><h2>RCA ล่าสุดจาก NICE</h2><span>${x.rca.length} รายการ</span></div>
+${x.rca.length ? x.rca.map((r) => `<div class="rca-item"><div><a class="mono" href="#/case/${r.id}">${esc(r.caseNo || "#" + r.id)}</a> <span class="muted">${esc(r.csNumber || "")} · ${esc(r.category || "")} · ${fd(r.date)}</span></div><div style="font-size:14px">${esc(r.text)}</div></div>`).join("") : `<div class="empty">ยังไม่มี RCA</div>`}</section>
+<section class="card"><div class="title"><h2>ความเห็นจากลูกค้า</h2><span>แบบสอบถามหลังปิดเคส</span></div>
+${x.csat.comments.length ? x.csat.comments.map((r) => `<div class="rca-item"><div><span aria-hidden="true">${CSAT_FACE[r.rating]}</span> <b>${r.rating}/5</b> · <a class="mono" href="#/case/${r.case_id}">${esc(r.case_no || "#" + r.case_id)}</a> <span class="muted">${fdt(r.rated_at)}</span></div>${r.comment ? `<div style="font-size:14px">${esc(r.comment)}</div>` : ""}</div>`).join("") : `<div class="empty">ยังไม่มีคำตอบจากลูกค้า</div>`}</section></div>
+<section class="card"><div class="title"><h2>ปิดล่าสุด</h2><span>6 เดือน</span></div>
+${x.recentClosed.length ? `<div class="tablewrap"><table style="min-width:760px"><thead><tr><th>เลขเคส</th><th>งาน / วิธีแก้</th><th>User</th><th>ปิดเมื่อ</th><th>SLA</th></tr></thead><tbody>
+${x.recentClosed.map((c) => `<tr class="click" data-href="#/case/${c.id}"><td><a class="mono" href="#/case/${c.id}">${esc(caseRef(c))}</a></td><td style="font-size:13px">${esc(c.task || "")}${c.resolution ? `<div class="muted">${esc(c.resolution)}</div>` : ""}</td><td>${esc(c.owner || "-")}</td><td>${fd(c.closedAt)}</td><td>${c.onTime ? `<span class="chip c-normal">ทัน</span>` : `<span class="chip c-overdue">ไม่ทัน</span>`}</td></tr>`).join("")}
+</tbody></table></div>` : `<div class="empty">ไม่มีเคสที่ปิดใน 6 เดือน</div>`}</section>`;
+    document.getElementById("cpick").onchange = (e) => (location.hash = "#/customer?site=" + encodeURIComponent(e.target.value));
+    bindRowLinks();
+  }
+
+  // ------------------------------------------------------------ settings: Microsoft Teams alerts
+  async function bindTeamsNotify() {
+    const host = document.getElementById("tn-body");
+    if (!host) return;
+    let s;
+    try {
+      s = await api("/teams-notify");
+    } catch (e) {
+      host.closest("section").hidden = true;
+      return;
+    }
+    const rows = [{ code: "_default", label: "ช่องกลาง (ทีมที่ไม่ได้ตั้งลิงก์ของตัวเอง)" }, ...s.teams];
+    host.innerHTML = `<p class="hint" style="margin:0 0 10px">ใน Teams ของแต่ละทีม: ช่อง (Channel) → ••• → Workflows → “Post to a channel when a webhook request is received” → คัดลอกลิงก์มาวางที่นี่ ไม่ต้องให้สิทธิ์ Microsoft Graph เพิ่ม ลิงก์เป็นความลับ ใครมีลิงก์ก็ส่งข้อความเข้าช่องได้</p>
+<div class="stack" style="gap:12px">${rows
+      .map((t) => {
+        const ch = s.channels[t.code] || {};
+        const ev = ch.url ? ch.events || [] : s.defaultEvents;
+        return `<details class="tn-row" data-code="${esc(t.code)}" ${ch.url || t.code === "_default" ? "open" : ""}><summary class="tn-h"><b>${esc(t.label)}</b>${ch.url ? `<span class="chip c-normal">ตั้งแล้ว</span>` : `<span class="muted" style="font-size:13px">ยังไม่ตั้ง</span>`}</summary>
+<div style="display:flex;gap:8px"><input type="url" class="tn-url mono" value="${esc(ch.url || "")}" placeholder="https://….logic.azure.com/workflows/… หรือ ….powerplatform.com/…" style="flex:1;min-width:0" autocomplete="off" spellcheck="false"><button class="btn" type="button" data-tntest style="min-height:40px">ทดสอบ</button></div>
+<div class="tn-ev">${Object.entries(s.events).map(([k, l]) => `<label class="chk"><input type="checkbox" value="${k}" ${ev.includes(k) ? "checked" : ""}><span>${esc(l)}</span></label>`).join("")}</div></details>`;
+      })
+      .join("")}</div>
+<div class="right" style="margin-top:12px"><button class="btn primary" type="button" id="tn-save">บันทึกการแจ้งเตือน Teams</button></div>`;
+    const collect = () => {
+      const channels = {};
+      host.querySelectorAll(".tn-row").forEach((r) => {
+        const url = r.querySelector(".tn-url").value.trim();
+        if (url) channels[r.dataset.code] = { url, events: [...r.querySelectorAll(".tn-ev input:checked")].map((x) => x.value) };
+      });
+      return channels;
+    };
+    host.querySelectorAll("[data-tntest]").forEach(
+      (b) =>
+        (b.onclick = async () => {
+          const url = b.closest(".tn-row").querySelector(".tn-url").value.trim();
+          if (!url) return toast("วางลิงก์ Workflows ก่อน");
+          b.disabled = true;
+          try {
+            const r = await post("/teams-notify/test", { url });
+            toast(r.dryRun ? "โหมดทดสอบ (DRY RUN): ไม่ได้ส่งจริง" : "ส่งข้อความทดสอบแล้ว ดูในช่อง Teams", 5000);
+          } catch (e) {
+            toast(e.message, 7000);
+          } finally {
+            b.disabled = false;
+          }
+        })
+    );
+    document.getElementById("tn-save").onclick = async () => {
+      try {
+        await post("/teams-notify", { channels: collect() }, "PUT");
+        toast("บันทึกการแจ้งเตือน Teams แล้ว");
+        bindTeamsNotify();
+      } catch (e) {
+        toast(e.message, 7000);
+      }
+    };
+  }
+
   // ------------------------------------------------------------ router
   async function route() {
     const { parts, params } = (() => {
@@ -3934,6 +4119,7 @@ ${me.sr ? `<p class="hint" style="margin:0">ทำคำขอบริการ
         case "owner":
           if (parts[2] === "meeting") return await viewMeeting(decodeURIComponent(parts[1]), params);
           return await viewOwner(parts[1] ? decodeURIComponent(parts[1]) : null, params);
+        case "customer": return await viewCustomer(params);
         case "reports": return await viewReports(params);
         case "audit": return await viewAudit(params);
         case "cases": return await viewCases(params);

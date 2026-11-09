@@ -428,6 +428,16 @@ ${button(intakeUrl(i), "รับเคส / โอนให้ User")}`
       )
       .catch((e) => console.error("[intake] telegram:", e.message));
   }
+  if (!i.is_test) {
+    const st = i.site ? await one("SELECT team FROM intake_sites WHERE site = $1", [i.site]).catch(() => null) : null;
+    await require("./teamsnotify").notify(st && st.team, "intake", {
+      title: `🆕 ${tag(i)}เคสใหม่จากลูกค้า รอรับเคส · ${i.req_no}`,
+      color: i.severity === "Critical" || i.severity === "High" ? "Attention" : "Accent",
+      text: i.subject,
+      facts: [["ลูกค้า", customerName(i)], ["Severity", `${i.severity} · ${i.product || "-"}`], ["ผู้ติดต่อ", `${i.contact_name} · ${i.channel === "email" ? i.contact_email : phoneOf(i)}`], ...(ro ? [["ดูแลเคสล่าสุด", ro.display_name]] : [])],
+      actions: [["รับเคส / โอนให้ User", intakeUrl(i)]],
+    });
+  }
 }
 
 async function notifyBurst() {
@@ -481,6 +491,13 @@ async function runReminders({ now = new Date() } = {}) {
         .sendText(`⏰ ยังไม่มีคนรับเคสจากลูกค้า ${pending.length} เคส\n\n${pending.map((i) => `${SEV_ICON[i.severity] || ""} ${i.req_no} · ${customerName(i)} · รอ ${waited(i, now)}\n${i.subject}`).join("\n\n")}\n\nรับเคส: ${config3.baseUrl}/#/intake`)
         .catch((e) => console.error("[intake] reminder telegram:", e.message));
     }
+    if (!isTest)
+      await require("./teamsnotify").notify(null, "intake", {
+        title: `⏰ ยังไม่มีคนรับเคสจากลูกค้า ${pending.length} เคส`,
+        color: "Warning",
+        facts: pending.slice(0, 10).map((i) => [i.req_no, `${i.severity} · ${customerName(i)} · รอ ${waited(i, now)}`]),
+        actions: [["เปิดรายการรอรับเคส", `${config3.baseUrl}/#/intake`]],
+      });
     await q("UPDATE intakes SET last_reminded_at = $2, reminder_count = reminder_count + 1 WHERE id = ANY($1)", [pending.map((i) => i.id), now]);
     if (!isTest) await audit(null, "intake_reminder", null, { count: pending.length });
     out[isTest ? "test" : "sent"] = pending.length;
@@ -1016,6 +1033,6 @@ function mountInternal(api, { need, wrap: w }) {
 }
 
 module.exports = {
-  apiV1, publicApi, mountInternal, createLink, submit, claim, reject, runReminders, deliver, runRetention, matchCustomer, norm, settings, nextReqNo,
+  apiV1, publicApi, mountInternal, enqueue, createLink, submit, claim, reject, runReminders, deliver, runRetention, matchCustomer, norm, settings, nextReqNo,
   FILE_EXT, unknownCustomerLabel, storeIntakeFile, removeStored, notifyNew, isAfterHours, businessHours, hotline, hotlineForCustomers, teamRecipients, customerName, intakeUrl, SEV_COLOR, siteList,
 };

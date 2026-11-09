@@ -64,6 +64,8 @@ api.put("/profile/lang", wrap(async (req, res) => {
   res.json({ ok: true, lang });
 }));
 require("./customers").mount(api, { wrap });
+require("./teamsnotify").mount(api, { wrap, need });
+require("./insights").mount(api, { wrap });
 require("./rca").mount(api, { wrap, loadVisible, perms, repo, tx: require("./db").tx, audit });
 
 async function visibleCases(user) {
@@ -307,6 +309,7 @@ api.get("/case/:id", wrap(async (req, res) => {
   res.json({
     case: ser3(c),
     intake: intakeRow,
+    csat: await require("./csat").forCase(c.id),
     activities: acts,
     alerts,
     changes,

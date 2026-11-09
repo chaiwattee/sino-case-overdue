@@ -95,4 +95,23 @@ ${note ? `<p style="margin:0 0 14px;padding:12px 14px;background:#F6F7F9;border-
   );
 }
 
-module.exports = { layout, ackHtml, ackSubject, claimedHtml, claimedSubject, closedHtml, closedMessage, linkEmailHtml, testTag };
+/** Case resolved: summary and a 1–5 rating (each number opens the survey page with that score picked). */
+function resolvedHtml(i, kase, { rateUrl, days }) {
+  const faces = ["", "😞", "🙁", "😐", "🙂", "😄"];
+  const labels = ["", "Very poor", "Poor", "OK", "Good", "Excellent"];
+  const cells = [1, 2, 3, 4, 5]
+    .map((n) => `<td style="padding:0 4px"><a href="${esc(rateUrl(n))}" style="display:block;width:76px;padding:10px 0;border:1px solid #D9DFE8;border-radius:10px;text-align:center;text-decoration:none;color:#18212F"><span style="font-size:26px;line-height:1.2">${faces[n]}</span><br><strong>${n}</strong><br><span style="font-size:11px;color:${GREY}">${labels[n]}</span></a></td>`)
+    .join("");
+  return layout(
+    GREEN,
+    `${greet(i)}<p style="margin:0 0 14px">Your case has been resolved.</p>
+${fieldTable([["Reference", `${i.req_no} → ${kase.caseNo}${kase.csNumber ? ` (${kase.csNumber})` : ""}`], ["Subject", i.subject], ["Engineer", kase.owner || "-"], ...(kase.resolution ? [["Resolution", kase.resolution]] : [])])}
+<p style="margin:20px 0 8px;font-weight:700">How satisfied are you with our support on this case?</p>
+<table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:0 0 10px"><tr>${cells}</tr></table>
+<p style="margin:0 0 14px;font-size:13px;color:${GREY}">Click a number, then press Submit on the page that opens. You can add a comment. The link works for ${days} days.</p>
+<p style="margin:0">If the problem comes back, simply reply to this email.</p>`
+  );
+}
+const resolvedSubject = (i, kase, base) => `${testTag(i)}[${i.req_no} → ${kase.caseNo}] Resolved: ${base}`;
+
+module.exports = { layout, ackHtml, ackSubject, claimedHtml, claimedSubject, closedHtml, closedMessage, linkEmailHtml, testTag, resolvedHtml, resolvedSubject };

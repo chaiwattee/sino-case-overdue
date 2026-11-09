@@ -111,6 +111,8 @@ app.get("/r/:token", (req, res) => {
   res.set("X-Robots-Tag", "noindex, nofollow");
   res.sendFile(path.join(pub, "intake.html"));
 });
+// Customer satisfaction survey (link in the "resolved" message), no login.
+require("./src/v3/csat").attach(app);
 app.use(async (req, res, next) => {
   if (req.method !== "GET") return next();
   const s = auth.verify(String(req.headers.cookie || "").match(/(?:^|;\s*)sid=([^;]+)/)?.[1] && decodeURIComponent(String(req.headers.cookie).match(/(?:^|;\s*)sid=([^;]+)/)[1]));

@@ -234,6 +234,13 @@ async function createCase(user, body, { ownerId, startDate } = {}) {
 
 /** Update editable fields. Returns list of changed field names. */
 async function updateCase(user, kase, body, { allowReassign }) {
+  const r = await updateCaseTx(user, kase, body, { allowReassign });
+  // Customer cases: ask the customer for a rating once the change is saved.
+  if (r.closedNow) setImmediate(() => require("./csat").onCaseClosed(kase.id));
+  return r;
+}
+async function updateCaseTx(user, kase, body, { allowReassign }) {
+  let closedNow = false;
   return tx(async (c) => {
     const sets = [];
     const vals = [];
@@ -291,6 +298,7 @@ async function updateCase(user, kase, body, { allowReassign }) {
       }
       set("status", status);
       if (nowClosed && !wasClosed) {
+        closedNow = true;
         set("end_date", d.toISODate(d.today()));
         vals.push(new Date());
         sets.push(`closed_at = $${vals.length}`);
@@ -342,7 +350,7 @@ async function updateCase(user, kase, body, { allowReassign }) {
       vals.push(kase.id);
       await c.query(`UPDATE cases SET ${sets.join(", ")} WHERE id = $${vals.length}`, vals);
     }
-    return { changed, newSite };
+    return { changed, newSite, closedNow };
   });
 }
 

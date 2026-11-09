@@ -407,6 +407,16 @@ async function onClosed(i, message) {
   return true;
 }
 
+/** Case resolved: ask for a rating in the customer's thread. Returns false when it could not. */
+async function onResolved(i, subjectFor, html) {
+  if (i.channel !== "email") return false;
+  const e = await emailSettings();
+  const o = await originOf(i);
+  if (!o || !e.mailbox) return false;
+  await replyInThread(e, o.message_id, { subject: subjectFor(baseSubject(o.subject) || i.subject), html });
+  return true;
+}
+
 // ------------------------------------------------------------ team notifications
 async function notifyHeld(i) {
   const { to } = await intake().teamRecipients({ is_test: i.is_test });
@@ -569,6 +579,6 @@ async function retry(user, id) {
 }
 
 module.exports = {
-  emailSettings, saveEmailSettings, poll, cleanup, simulate, status, retry, onReleased, onClaimed, onClosed,
+  emailSettings, saveEmailSettings, poll, cleanup, simulate, status, retry, onReleased, onClaimed, onClosed, onResolved,
   processMessage, bodyText, guessSeverity, siteForDomain, PUBLIC_DOMAINS, baseSubject, phonesIn,
 };
