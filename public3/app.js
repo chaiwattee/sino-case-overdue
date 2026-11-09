@@ -1996,6 +1996,7 @@ ${(() => {
     })()}
 ${newSites.length ? `<div class="banner warn">มีรายการที่ผู้ใช้เพิ่มใหม่ ${newSites.length} รายการ รอตรวจ (มีป้าย “ใหม่”) กด “แก้” เพื่อยืนยัน แก้ชื่อ หรือรวมกับรายการเดิม</div>` : ""}
 <section class="card" id="tn-card"><div class="title"><h2>แจ้งเตือนผ่าน Microsoft Teams</h2><span>แต่ละทีมส่งเข้าช่อง Teams ของตัวเอง</span></div><div id="tn-body">กำลังโหลด…</div></section>
+<section class="card" id="team-card"><div class="title"><h2>ทีม</h2><span>เพิ่ม เปลี่ยนชื่อ และเรียงลำดับทีม</span></div><div id="team-body">กำลังโหลด…</div></section>
 <section class="card" id="dept-card"><div class="title"><h2>หน่วยงาน</h2><span>รายการให้ผู้ใช้เลือกในบัญชีของฉัน</span></div><div id="dept-body">กำลังโหลด…</div></section>
 <section class="card" id="lb-card"><div class="title"><h2>อันดับ KPI</h2><span>กำลังโหลด…</span></div></section>
 <section class="card" id="hol-card"><div class="title"><h2>วันหยุดบริษัท</h2><span>กำลังโหลด…</span></div></section>
@@ -2072,6 +2073,7 @@ ${s.annualReports.map((a) => `<tr><td style="font-weight:600">${a.year + 543} ($
     bindLeaderboardSettings();
     bindDepartments();
     bindTeamsNotify();
+    bindTeamAdmin();
     document.getElementById("ae-save").onclick = async () => {
       const ccTypes = [...document.querySelectorAll("input[name=cct]:checked")].map((x) => x.value);
       try {
@@ -3917,6 +3919,90 @@ ${me.sr ? `<p class="hint" style="margin:0">ทำคำขอบริการ
     };
     document.getElementById("rk-replay").onclick = run;
     run();
+  }
+
+  async function bindTeamAdmin() {
+    const host = document.getElementById("team-body");
+    if (!host) return;
+    let teams = (await api("/teams-admin")).teams;
+    let changed = false;
+    const draw = () => {
+      host.innerHTML = `<div class="tablewrap"><table style="min-width:640px"><thead><tr><th style="width:60px">ลำดับ</th><th>ชื่อทีม</th><th>รหัส</th><th style="text-align:right">ผู้ใช้</th><th style="text-align:right">เคสเปิดอยู่ / ทั้งหมด</th><th></th></tr></thead><tbody>
+${teams.map((t, i) => `<tr><td style="white-space:nowrap"><button class="btn" type="button" data-up="${i}" ${i ? "" : "disabled"} aria-label="เลื่อนขึ้น" style="min-height:30px;padding:0 8px">↑</button><button class="btn" type="button" data-down="${i}" ${i < teams.length - 1 ? "" : "disabled"} aria-label="เลื่อนลง" style="min-height:30px;padding:0 8px">↓</button></td>
+<td><input value="${esc(t.label)}" data-label="${esc(t.code)}" maxlength="60" aria-label="ชื่อทีม ${esc(t.label)}" style="width:100%"></td>
+<td class="mono" data-no-i18n>${esc(t.code)}</td><td style="text-align:right">${t.users}</td><td style="text-align:right">${t.open_cases} / ${t.cases}</td>
+<td style="text-align:right;white-space:nowrap"><button class="btn" type="button" data-save="${esc(t.code)}" style="min-height:32px">บันทึกชื่อ</button>${t.cases || t.requests ? "" : ` <button class="btn danger" type="button" data-del="${esc(t.code)}" style="min-height:32px">ลบ</button>`}</td></tr>`).join("")}
+</tbody></table></div>
+<div class="formgrid" style="grid-template-columns:2fr 1fr auto;align-items:end;margin-top:12px">
+<label class="f">ชื่อทีมใหม่<input id="tm-label" maxlength="60" placeholder="เช่น Genesys Cloud"></label>
+<label class="f">รหัส (ไม่บังคับ)<input id="tm-code" maxlength="20" placeholder="สร้างจากชื่อให้" class="mono" style="text-transform:uppercase"></label>
+<button class="btn primary" type="button" id="tm-add" style="min-height:44px">เพิ่มทีม</button></div>
+<p class="hint" style="margin:6px 0 0">รหัสทีมเปลี่ยนไม่ได้หลังสร้าง (ใช้ในข้อมูลเคส) เปลี่ยนได้เฉพาะชื่อ · ลบได้เฉพาะทีมที่ยังไม่มีเคสหรือคำขอบริการ · หลังเพิ่มทีม ไปที่ “จัดการผู้ใช้” เพื่อใส่สมาชิกและ Manager ของทีม${changed ? ` · <b>หน้าเว็บจะโหลดใหม่เพื่อแสดงทีมล่าสุดเมื่อออกจากหน้านี้</b>` : ""}</p>`;
+      const move = async (i, d) => {
+        const order = teams.map((t) => t.code);
+        [order[i], order[i + d]] = [order[i + d], order[i]];
+        try {
+          teams = (await post("/teams-admin-order", { order }, "PUT")).teams;
+          changed = true;
+          draw();
+        } catch (e) {
+          toast(e.message, 6000);
+        }
+      };
+      host.querySelectorAll("[data-up]").forEach((b) => (b.onclick = () => move(Number(b.dataset.up), -1)));
+      host.querySelectorAll("[data-down]").forEach((b) => (b.onclick = () => move(Number(b.dataset.down), 1)));
+      host.querySelectorAll("[data-save]").forEach(
+        (b) =>
+          (b.onclick = async () => {
+            const code = b.dataset.save;
+            const label = host.querySelector(`[data-label="${code}"]`).value.trim();
+            try {
+              teams = (await post(`/teams-admin/${encodeURIComponent(code)}`, { label }, "PUT")).teams;
+              changed = true;
+              toast("บันทึกชื่อทีมแล้ว");
+              draw();
+            } catch (e) {
+              toast(e.message, 6000);
+            }
+          })
+      );
+      host.querySelectorAll("[data-del]").forEach(
+        (b) =>
+          (b.onclick = async () => {
+            const t = teams.find((x) => x.code === b.dataset.del);
+            if (!confirm(`ลบทีม “${t.label}”?${t.users ? ` ผู้ใช้ ${t.users} คนจะถูกเอาออกจากทีมนี้` : ""}`)) return;
+            try {
+              teams = (await api(`/teams-admin/${encodeURIComponent(t.code)}`, { method: "DELETE" })).teams;
+              changed = true;
+              toast("ลบทีมแล้ว");
+              draw();
+            } catch (e) {
+              toast(e.message, 6000);
+            }
+          })
+      );
+      document.getElementById("tm-add").onclick = async () => {
+        const label = document.getElementById("tm-label").value.trim();
+        const code = document.getElementById("tm-code").value.trim().toUpperCase();
+        if (!label) return toast("ใส่ชื่อทีม");
+        try {
+          const r = await post("/teams-admin", { label, code: code || undefined });
+          teams = r.teams;
+          changed = true;
+          toast(`เพิ่มทีม “${label}” แล้ว (รหัส ${r.code})`, 5000);
+          draw();
+        } catch (e) {
+          toast(e.message, 6000);
+        }
+      };
+    };
+    draw();
+    // The team lists everywhere else come from the page's start-up data: refresh once the admin leaves Settings.
+    const onLeave = () => {
+      window.removeEventListener("hashchange", onLeave);
+      if (changed) location.reload();
+    };
+    window.addEventListener("hashchange", onLeave);
   }
 
   async function bindDepartments() {
