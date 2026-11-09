@@ -26,6 +26,7 @@ api.use((req, res, next) =>
   (req.path === "/users/import" ? jsonFile
     : /^\/sr(\/|$)/.test(req.path) && req.method !== "GET" ? jsonSr
     : /^\/case\/\d+\/rca$/.test(req.path) ? jsonRca
+    : req.path === "/profile/avatar" ? jsonFile // a photo up to 400 KB arrives as ~540 KB of base64
     : jsonSmall)(req, res, next));
 api.use(requireUser());
 // Requester (staff from other teams): only their profile and their own service requests.
