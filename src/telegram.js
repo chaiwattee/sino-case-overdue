@@ -87,6 +87,7 @@ async function sendDailySummary(opts = {}) {
   msg += `\n📁 แยกตามเอกสาร\n`;
   for (const s of sources) {
     const o = open.filter((c) => c.source === s.key);
+    if (!o.length && !cases.some((c) => c.source === s.key)) continue; // a team with no cases yet (e.g. a new team) adds only noise
     msg += `• ${s.label}: ${o.length} (เกิน Due ${o.filter((c) => c.stage === "overdue").length})\n`;
   }
 
