@@ -51,10 +51,11 @@ const rootCauseOf = (v, note) => {
   return t ? `${OTHER_CAUSE}: ${t}` : OTHER_CAUSE;
 };
 
-// "Deploy" = planned patch / upgrade work; the team sets it, customers never see or choose it.
-const SEVERITIES = ["Critical", "High", "Medium", "Low", "Request information", "Deploy"];
+// "Deploy …" = planned patch work (a product patch, or Microsoft patches); the team sets it, customers never see or choose it.
+const DEPLOY_SEVERITIES = ["Deploy Product Patch", "Deploy MS Patch"];
+const SEVERITIES = ["Critical", "High", "Medium", "Low", "Request information", ...DEPLOY_SEVERITIES];
 const severityOf = (v) => SEVERITIES.find((x) => x.toLowerCase() === String(v || "").trim().toLowerCase()) || null;
-const CUSTOMER_SEVERITIES = SEVERITIES.filter((x) => x !== "Deploy");
+const CUSTOMER_SEVERITIES = SEVERITIES.filter((x) => !DEPLOY_SEVERITIES.includes(x));
 const customerSeverityOf = (v) => CUSTOMER_SEVERITIES.find((x) => x.toLowerCase() === String(v || "").trim().toLowerCase()) || null;
 
 function toCase(r) {

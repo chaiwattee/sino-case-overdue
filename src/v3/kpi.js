@@ -8,8 +8,8 @@ const { config } = require("../config");
 const d = require("../dates");
 const { q, one, all, getSetting, setSetting, audit } = require("./db");
 
-// Deploy = planned patch / upgrade: prepared ahead and done in a window, weighted like Medium (+0.3 more when a "Deploy Patch" activity is logged).
-const SEV_W = { Critical: 3, High: 2, Medium: 1.5, Low: 1, "Request information": 0.5, Deploy: 1.5 };
+// Deploy cases: a product patch (test plan, maintenance window, rollback) weighs like Medium; Microsoft patches are routine, like Low.
+const SEV_W = { Critical: 3, High: 2, Medium: 1.5, Low: 1, "Request information": 0.5, "Deploy Product Patch": 1.5, "Deploy MS Patch": 1 };
 const DEFAULT_CATEGORIES = [
   { name: "Login / สิทธิ์ผู้ใช้", keywords: "login, log in, เข้าระบบ, password, รหัสผ่าน, สิทธิ์, permission, account, sso, user, ผู้ใช้, lock" },
   { name: "Report / Dashboard", keywords: "report, รายงาน, dashboard, export, ยอด, สถิติ, refresh" },
@@ -33,10 +33,16 @@ const MEETING_KINDS = [MEETING_ONSITE, MEETING_ONLINE, MEETING];
 const MEETING_MIN = 30;
 const MEET_W = { [MEETING_ONSITE]: 0.4, [MEETING_ONLINE]: 0.2, [MEETING]: 0.2 };
 const isMeeting = (a) => MEETING_KINDS.includes(a.kind) && String(a.detail || "").trim().length >= MEETING_MIN;
-// Deploying a patch / upgrade on the customer's system (with a real summary: version, systems, result, rollback): +0.3 once per case.
-const DEPLOY = "Deploy Patch";
+// Deploying a patch on the customer's system (with a real summary: version, systems, result, rollback), once per case:
+// a product patch +0.3, Microsoft patches +0.15 (more routine). "Deploy Patch" is the older single kind: counted as a product patch.
+const DEPLOY = "Deploy Patch"; // the skill name
+const DEPLOY_PRODUCT = "Deploy Product Patch";
+const DEPLOY_MS = "Deploy MS Patch";
+const DEPLOY_W = { [DEPLOY_PRODUCT]: 0.3, [DEPLOY_MS]: 0.15, [DEPLOY]: 0.3 };
+const DEPLOY_KINDS = Object.keys(DEPLOY_W);
 const DEPLOY_TYPE = "Upgrade / Patch"; // the work type it counts as
-const isDeploy = (a) => a.kind === DEPLOY && String(a.detail || "").trim().length >= MEETING_MIN;
+const isDeploy = (a) => DEPLOY_KINDS.includes(a.kind) && String(a.detail || "").trim().length >= MEETING_MIN;
+const deployBonus = (acts) => Math.max(0, ...acts.filter(isDeploy).map((a) => DEPLOY_W[a.kind]));
 /** Extra work multiplier for a case's meetings: the 2 heaviest count (onsite 0.4, online 0.2), at most 0.6. */
 const meetingBonus = (acts) => {
   const w = acts.filter(isMeeting).map((a) => MEET_W[a.kind]).sort((x, y) => y - x).slice(0, 2);
@@ -157,8 +163,8 @@ async function compute(ym) {
     (
       await all(
         `SELECT DISTINCT c.owner_id FROM case_activities a JOIN cases c ON c.id = a.case_id
-          WHERE a.kind = $1 AND NOT a.is_system AND length(trim(a.detail)) >= $2 AND a.activity_date < $3`,
-        [DEPLOY, MEETING_MIN, R.fromIso]
+          WHERE a.kind = ANY($1) AND NOT a.is_system AND length(trim(a.detail)) >= $2 AND a.activity_date < $3`,
+        [DEPLOY_KINDS, MEETING_MIN, R.fromIso]
       ).catch(() => [])
     ).map((r) => r.owner_id)
   );
@@ -232,7 +238,7 @@ async function compute(ym) {
       // Customer meetings: onsite +0.4, online +0.2, the 2 heaviest count (at most +0.6), so meetings can't be padded.
       // "Remote / Onsite" technical work keeps its own +0.3; an onsite meeting is not counted twice.
       const onsiteWork = h.some((a) => /onsite/i.test(a.kind || "") && !MEETING_KINDS.includes(a.kind));
-      const auto = 1 + (c.cs_number ? 0.5 : 0) + (onsiteWork ? 0.3 : 0) + meetingBonus(h) + (h.some(isDeploy) ? 0.3 : 0) + (c.end_date && d.daysBetween(d.fromISODate(c.start_date), d.fromISODate(c.end_date)) > 7 ? 0.2 : 0);
+      const auto = 1 + (c.cs_number ? 0.5 : 0) + (onsiteWork ? 0.3 : 0) + meetingBonus(h) + deployBonus(h) + (c.end_date && d.daysBetween(d.fromISODate(c.start_date), d.fromISODate(c.end_date)) > 7 ? 0.2 : 0);
       return (SEV_W[c.severity] || 1) * auto * (c.complexity ? Number(c.complexity) : 1);
     };
     m.points = r1(closed.reduce((a, c) => a + casePoints(c), 0));

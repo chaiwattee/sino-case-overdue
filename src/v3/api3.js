@@ -246,7 +246,7 @@ api.get("/owner/:id", wrap(async (req, res) => {
 }));
 
 // One-page meeting view of an owner's cases with every activity (for presenting / printing).
-const SEV_RANK = { Critical: 0, High: 1, Medium: 2, Deploy: 2.5, Low: 3, "Request information": 4 };
+const SEV_RANK = { Critical: 0, High: 1, Medium: 2, "Deploy Product Patch": 2.4, "Deploy MS Patch": 2.6, Low: 3, "Request information": 4 };
 api.get("/owner/:id/meeting", wrap(async (req, res) => {
   const cases = await visibleCases(req.user);
   const id = String(req.params.id).toLowerCase();

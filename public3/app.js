@@ -37,9 +37,9 @@
   });
   const ROLE_CHIP = { admin: "overdue", manager: "r1", observer: "r2", engineer: "ok", viewer: "closed" };
   const MEETINGS = ["Meeting Onsite กับลูกค้า", "Meeting Online กับลูกค้า"];
-  const DEPLOY = "Deploy Patch";
-  const KINDS = ["ดำเนินการ", "ติดต่อลูกค้า", ...MEETINGS, DEPLOY, "เปิดเคส Vendor", "Remote / Onsite", "รอข้อมูล"];
-  const SEV_CHIP = { Critical: "overdue", High: "r2", Medium: "r1", Low: "normal", "Request information": "closed", Deploy: "deploy" };
+  const DEPLOYS = ["Deploy Product Patch", "Deploy MS Patch"];
+  const KINDS = ["ดำเนินการ", "ติดต่อลูกค้า", ...MEETINGS, ...DEPLOYS, "เปิดเคส Vendor", "Remote / Onsite", "รอข้อมูล"];
+  const SEV_CHIP = { Critical: "overdue", High: "r2", Medium: "r1", Low: "normal", "Request information": "closed", "Deploy Product Patch": "deploy", "Deploy MS Patch": "deploy" };
   const SEV_SHORT = { "Request information": "Request info" };
   const sevChip = (v) => (v ? `<span class="chip c-${SEV_CHIP[v] || "closed"} sev" title="Severity: ${esc(v)}">${esc(SEV_SHORT[v] || v)}</span>` : "");
   // Case number CASE-2026-11-0001 (every case) with the vendor CS Number underneath.
@@ -1030,7 +1030,7 @@ ${permsC.edit ? `<form id="af" class="stack">
 <label class="f">วันที่ทำ<input type="date" name="date" value="${daysAgo(0)}" max="${daysAgo(0)}" required></label>
 <label class="f">ประเภท<select name="kind">${KINDS.map((k) => `<option>${k}</option>`).join("")}</select></label></div>
 <label class="f">รายละเอียด<textarea name="detail" rows="3" placeholder="วันนี้ทำอะไรไป ผลเป็นอย่างไร ขั้นต่อไปคืออะไร" required></textarea></label>
-<p class="hint" id="af-deploy" hidden style="margin:-4px 0 0">สรุป Deploy: Patch / เวอร์ชัน ระบบหรือเครื่องที่ลง ผลการทดสอบ และแผน rollback อย่างน้อย 30 ตัวอักษร จึงนับเป็นงานใน KPI (นับ 1 ครั้งต่อเคส)</p>
+<p class="hint" id="af-deploy" hidden style="margin:-4px 0 0">สรุป Deploy: Patch / เวอร์ชัน ระบบหรือเครื่องที่ลง ผลการทดสอบ และแผน rollback อย่างน้อย 30 ตัวอักษร จึงนับเป็นงานใน KPI (นับ 1 ครั้งต่อเคส · Product Patch นับมากกว่า MS Patch)</p>
 <p class="hint" id="af-meet" hidden style="margin:-4px 0 0">สรุป Meeting: ผู้เข้าร่วมฝั่งลูกค้า หัวข้อ ข้อตกลง และขั้นต่อไป อย่างน้อย 30 ตัวอักษร จึงนับเป็นงานใน KPI · Onsite (ไปที่ลูกค้า) นับมากกว่า Online · นับสูงสุด 2 ครั้งต่อเคส</p>
 <div class="right"><button class="btn primary" type="submit">เพิ่ม Activity</button></div></form>` : ""}
 ${actsHtml(data.activities)}</section>`}
@@ -1094,7 +1094,7 @@ ${actsHtml(data.activities)}</section>`}
       const meetHint = document.getElementById("af-meet");
       const syncMeet = () => {
         const m = MEETINGS.includes(af.kind.value);
-        const dp = af.kind.value === DEPLOY;
+        const dp = DEPLOYS.includes(af.kind.value);
         meetHint.hidden = !m;
         document.getElementById("af-deploy").hidden = !dp;
         af.detail.placeholder = dp ? "เช่น ลง Hotfix 7.2.3 ที่ Logger 2 เครื่อง (LOG01, LOG02) ทดสอบอัดเสียงและเล่นกลับ 5 สาย ผ่าน · rollback: snapshot VM ก่อนลง" : m ? "เช่น ประชุมกับคุณสมศรี (IT Manager) และทีม QA ของลูกค้า สรุปแผน upgrade เป็นเวอร์ชันใหม่ เลือกทำวันที่ 20 ลูกค้าขอ test plan ก่อน 15" : "วันนี้ทำอะไรไป ผลเป็นอย่างไร ขั้นต่อไปคืออะไร";
@@ -1107,7 +1107,7 @@ ${actsHtml(data.activities)}</section>`}
         e.preventDefault();
         if (af.detail.value.trim().length < 3) return toast("กรุณาใส่รายละเอียด");
         if (MEETINGS.includes(af.kind.value) && af.detail.value.trim().length < 30 && !confirm("สรุป Meeting สั้นกว่า 30 ตัวอักษร จะไม่นับใน KPI บันทึกต่อไหม?")) return;
-        if (af.kind.value === DEPLOY && af.detail.value.trim().length < 30 && !confirm("สรุป Deploy สั้นกว่า 30 ตัวอักษร จะไม่นับใน KPI บันทึกต่อไหม?")) return;
+        if (DEPLOYS.includes(af.kind.value) && af.detail.value.trim().length < 30 && !confirm("สรุป Deploy สั้นกว่า 30 ตัวอักษร จะไม่นับใน KPI บันทึกต่อไหม?")) return;
         try {
           await post(`/case/${id}/activity`, { date: af.date.value, kind: af.kind.value, detail: af.detail.value });
           toast("เพิ่ม Activity แล้ว");
@@ -3097,7 +3097,7 @@ ${owners.map((o) => `<tr class="click" data-href="#/kpi?${qs({ month, owner: o.i
 <div class="tablewrap" style="margin-top:10px"><table><thead><tr><th>เกณฑ์</th><th class="n">คะแนน</th><th>วิธีคิด</th></tr></thead><tbody>
 <tr><td>1. ปิดทัน SLA</td><td class="n">30</td><td>% เคสที่ปิดทัน Due เดิม (ก่อนขยาย) · ปิดทันเวลาที่ขยายได้ครึ่งหนึ่ง · Critical นับ 2 เท่า</td></tr>
 <tr><td>2. ความเร็วตอบสนอง</td><td class="n">15</td><td>Activity แรกหลังเปิดเคส ≤4 ชม. 8 · ≤8 ชม. 6 · ≤24 ชม. 4 · ≤48 ชม. 2 และอัปเดตเคสที่เปิดอยู่ทุก ≤2 วัน 7 · ≤3 วัน 5 · ≤5 วัน 3</td></tr>
-<tr><td>3. แต้มงาน (ปริมาณ × ความยาก)</td><td class="n">20</td><td>แต้มต่อเคสที่ปิด = Severity (Critical 3, High 2, Medium 1.5, Deploy 1.5, Low 1, ขอข้อมูล 0.5) × (1 + ส่ง NICE/มี CS Number 0.5 + Onsite 0.3 + Meeting Onsite 0.4 / Meeting Online 0.2 ต่อครั้ง นับ 2 ครั้งที่มากสุด ไม่เกิน 0.6 + Deploy Patch 0.3 + เปิดนานเกิน 7 วัน 0.2) × ความยากที่ Manager ปรับ (0.8–1.5) · เทียบค่ากลางของทีมเดียวกันแบบรากที่สอง: 20 × √(แต้ม ÷ ค่ากลาง) ÷ 1.3 สูงสุด 20 · เคสมากขึ้น 4 เท่าได้คะแนนเพิ่มประมาณ 2 เท่า</td></tr>
+<tr><td>3. แต้มงาน (ปริมาณ × ความยาก)</td><td class="n">20</td><td>แต้มต่อเคสที่ปิด = Severity (Critical 3, High 2, Medium 1.5, Deploy Product Patch 1.5, Low 1, Deploy MS Patch 1, ขอข้อมูล 0.5) × (1 + ส่ง NICE/มี CS Number 0.5 + Onsite 0.3 + Meeting Onsite 0.4 / Meeting Online 0.2 ต่อครั้ง นับ 2 ครั้งที่มากสุด ไม่เกิน 0.6 + Deploy Product Patch 0.3 / Deploy MS Patch 0.15 (ครั้งเดียวต่อเคส) + เปิดนานเกิน 7 วัน 0.2) × ความยากที่ Manager ปรับ (0.8–1.5) · เทียบค่ากลางของทีมเดียวกันแบบรากที่สอง: 20 × √(แต้ม ÷ ค่ากลาง) ÷ 1.3 สูงสุด 20 · เคสมากขึ้น 4 เท่าได้คะแนนเพิ่มประมาณ 2 เท่า</td></tr>
 <tr><td>4. ความหลากหลาย / Skill</td><td class="n">15</td><td>ความกระจายของประเภทงาน Product และลูกค้า (0–1) × 10.5 + Product หรือประเภทงานที่ทำครั้งแรก 1.5 ต่อรายการ (สูงสุด 4.5) · Meeting กับลูกค้านับเป็นประเภทงานหนึ่ง Deploy Patch นับเป็นงาน Upgrade / Patch และครั้งแรกของทั้งสองอย่างนับเป็น Skill ใหม่ · คนที่ตั้งเป็น "ดูแลลูกค้าประจำ" ไม่นับความหลากหลายของลูกค้า</td></tr>
 <tr><td>5. งานค้างและการขยายเวลา</td><td class="n">10</td><td>เริ่ม 10 · หัก 2 ต่อเคสเกิน Due สิ้นเดือน · หัก 1 ต่อการขยายที่อนุมัติ (สูงสุด 3)</td></tr>
 <tr><td>6. คุณภาพการบันทึก</td><td class="n">10</td><td>เคสที่ปิดมีบันทึกสุดท้าย ≥20 ตัวอักษร 5 · Activity ที่มีเนื้อหาเฉลี่ย ≥3 ต่อเคส 5</td></tr>
@@ -3356,6 +3356,12 @@ ${after ? "" : `<section class="card" id="app-card" style="max-width:620px;margi
     $app.innerHTML = `<div class="pagehead"><div><a href="#/sr" class="muted">← คำขอบริการ</a><h1>ส่งคำขอบริการ</h1></div></div>
 <form class="card" id="srf" style="max-width:820px">
 <div class="f"><span>ขอจากทีม</span>${seg("team", m.teams.map((t) => ({ key: t.code, label: t.label })), m.teams.length === 1 ? m.teams[0].code : "")}<span class="hint" id="sr-appr">เลือกทีมเพื่อดูผู้อนุมัติ</span></div>
+<div class="f"><span>ประเภทคำขอ</span>${seg("requestKind", [{ key: "general", label: "งาน / ข้อมูล" }, { key: "meeting", label: "ขอให้ทีมเข้าร่วม Meeting" }], "general")}</div>
+<div class="sr-meet" id="sr-meet" hidden>
+<div class="banner warn" style="margin:0"><div><strong>Meeting กับลูกค้าเป็นงาน routine อยู่แล้ว</strong><br><span style="font-size:14px">ขอให้ทีมเข้าร่วมเมื่อจำเป็นต้องใช้ความรู้ด้านเทคนิคจริง และระบุเหตุผลให้ Manager ใช้ประกอบการอนุมัติ</span></div></div>
+<div class="f"><span class="req">รูปแบบ Meeting</span>${seg("meetingMode", [{ key: "onsite", label: "Onsite (ที่ลูกค้า)" }, { key: "online", label: "Online" }], "")}</div>
+<label class="f"><span class="req">เหตุผลที่ต้องให้ทีมเข้าร่วม</span><textarea name="meetingReason" rows="3" maxlength="1000" placeholder="เช่น ลูกค้าขอคุยเรื่องปัญหาเสียงหายใน Recording ที่เกิดซ้ำ ต้องการ Engineer อธิบายสาเหตุและแผนแก้ไขเชิงเทคนิค ฝั่ง Sales ตอบเองไม่ได้"></textarea><span class="hint" id="sr-mrc"></span></label>
+</div>
 <label class="f">หัวข้อ<input name="title" required minlength="5" maxlength="200" placeholder="เช่น ขอ report การโทรของ call center KTB เดือน ต.ค."></label>
 <label class="f">รายละเอียดงานที่ต้องการ<textarea name="detail" rows="5" required minlength="20" maxlength="5000" placeholder="ต้องการอะไร ใช้ทำอะไร รูปแบบที่ต้องการ (เช่น Excel แยกรายวัน) ช่วงข้อมูล"></textarea></label>
 <div class="formgrid" style="grid-template-columns:1.2fr 1fr">
@@ -3367,6 +3373,24 @@ ${fileBox(m)}
 <div class="right"><a class="btn" href="#/sr">ยกเลิก</a><button class="btn primary" type="submit">ส่งคำขอ</button></div></form>`;
     const f = document.getElementById("srf");
     const fp = filePicker(f, m);
+    const meetBox = document.getElementById("sr-meet");
+    const mrc = document.getElementById("sr-mrc");
+    const syncKind = () => {
+      const on = f.requestKind.value === "meeting";
+      meetBox.hidden = !on;
+      f.meetingReason.required = on;
+      f.querySelectorAll("input[name=meetingMode]").forEach((x) => (x.required = on));
+      f.title.placeholder = on ? "เช่น ขอ Engineer เข้าประชุมกับ KTB เรื่องเสียงหายใน Recording" : "เช่น ขอ report การโทรของ call center KTB เดือน ต.ค.";
+    };
+    const syncMrc = () => {
+      const n = f.meetingReason.value.trim().length;
+      mrc.textContent = `${n} ตัวอักษร · อย่างน้อย 40`;
+      mrc.style.color = n >= 40 ? "" : "var(--r2-fg)";
+    };
+    f.querySelectorAll("input[name=requestKind]").forEach((x) => (x.onchange = syncKind));
+    f.meetingReason.addEventListener("input", syncMrc);
+    syncKind();
+    syncMrc();
     f.querySelectorAll("input[name=team]").forEach((x) => (x.onchange = () => (document.getElementById("sr-appr").textContent = `ผู้อนุมัติ: ${(m.managers[x.value] || []).join(", ") || "Admin"}`)));
     // "Very urgent" may ask for today, with a reminder to phone the team's Manager for approval.
     const syncUrgent = () => {
@@ -3401,7 +3425,13 @@ ${fileBox(m)}
       const btn = f.querySelector("button[type=submit]");
       btn.disabled = true;
       try {
-        const body = { team: f.team.value, title: f.title.value, detail: f.detail.value, severity: f.severity.value, requestedDate: f.requestedDate.value, customer: f.customer.value, files: await fp.get() };
+        if (f.requestKind.value === "meeting" && f.meetingReason.value.trim().length < 40) {
+          btn.disabled = false;
+          f.meetingReason.focus();
+          return toast("ใส่เหตุผลที่ต้องให้ทีมเข้าร่วม Meeting อย่างน้อย 40 ตัวอักษร");
+        }
+        const meet = f.requestKind.value === "meeting" ? { requestKind: "meeting", meetingMode: f.meetingMode.value, meetingReason: f.meetingReason.value } : { requestKind: "general" };
+        const body = { team: f.team.value, title: f.title.value, detail: f.detail.value, severity: f.severity.value, requestedDate: f.requestedDate.value, customer: f.customer.value, ...meet, files: await fp.get() };
         const r = await post("/sr", body);
         toast(body.severity === "urgent_high" && body.requestedDate === (m.today || daysAgo(0)) ? `ส่งคำขอ ${r.srNo} แล้ว อย่าลืมโทรหา Manager เพื่อขออนุมัติ` : `ส่งคำขอ ${r.srNo} แล้ว ระบบส่ง email ยืนยันให้คุณ`, 8000);
         location.hash = "#/sr/" + r.id;
@@ -3512,6 +3542,7 @@ ${infoEv ? `<div class="banner warn"><b>${esc(infoEv.by_name)} ขอข้อ�
 ${r.status === "overdue" ? `<div class="banner err">เลย Target มาแล้ว ${r.overdueDays} วันทำการ</div>` : ""}
 ${extBanner}
 <div class="cols"><div class="main">
+${r.requestKind === "meeting" ? `<section class="card sr-meet-card"><div class="title"><h2>ขอให้ทีมเข้าร่วม Meeting</h2><span class="chip c-deploy">${esc(r.meetingModeLabel)}</span></div><div class="k" style="font-size:13px;color:var(--muted)">เหตุผลที่ต้องให้ทีมเข้าร่วม</div><div class="srtext">${esc(r.meetingReason)}</div></section>` : ""}
 <section class="card"><h2>รายละเอียด</h2><div class="srtext">${esc(r.detail)}</div></section>
 ${approvePanel}
 <section class="card"><h2>ประวัติ</h2><ul class="srtl">${data.events.map((e) => srEventLine(e, data.files)).join("")}</ul>

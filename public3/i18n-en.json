@@ -2250,5 +2250,15 @@
 "Meeting Online กับลูกค้า": "Online customer meeting",
 "สรุป Meeting: ผู้เข้าร่วมฝั่งลูกค้า หัวข้อ ข้อตกลง และขั้นต่อไป อย่างน้อย 30 ตัวอักษร จึงนับเป็นงานใน KPI · Onsite (ไปที่ลูกค้า) นับมากกว่า Online · นับสูงสุด 2 ครั้งต่อเคส": "Meeting summary: customer attendees, topic, agreements and next steps; at least 30 characters to count in KPI · onsite (at the customer) counts more than online · at most 2 per case",
 "สรุป Deploy: Patch / เวอร์ชัน ระบบหรือเครื่องที่ลง ผลการทดสอบ และแผน rollback อย่างน้อย 30 ตัวอักษร จึงนับเป็นงานใน KPI (นับ 1 ครั้งต่อเคส)": "Deploy summary: patch / version, systems or machines, test result and rollback plan; at least 30 characters to count in KPI (once per case)",
-"สรุป Deploy สั้นกว่า 30 ตัวอักษร จะไม่นับใน KPI บันทึกต่อไหม?": "The deploy summary is shorter than 30 characters and won't count in KPI. Save anyway?"
+"สรุป Deploy สั้นกว่า 30 ตัวอักษร จะไม่นับใน KPI บันทึกต่อไหม?": "The deploy summary is shorter than 30 characters and won't count in KPI. Save anyway?",
+"ประเภทคำขอ": "Request type",
+"งาน / ข้อมูล": "Work / information",
+"ขอให้ทีมเข้าร่วม Meeting": "Ask the team to join a meeting",
+"Meeting กับลูกค้าเป็นงาน routine อยู่แล้ว": "Customer meetings are routine work already",
+"ขอให้ทีมเข้าร่วมเมื่อจำเป็นต้องใช้ความรู้ด้านเทคนิคจริง และระบุเหตุผลให้ Manager ใช้ประกอบการอนุมัติ": "Ask the team to join only when its technical knowledge is really needed, and give the Manager a reason to approve",
+"รูปแบบ Meeting": "Meeting type",
+"Onsite (ที่ลูกค้า)": "Onsite (at the customer)",
+"เหตุผลที่ต้องให้ทีมเข้าร่วม": "Why the team needs to join",
+"ใส่เหตุผลที่ต้องให้ทีมเข้าร่วม Meeting อย่างน้อย 40 ตัวอักษร": "Give a reason of at least 40 characters for the team to join the meeting",
+"(นับ 1 ครั้งต่อเคส · Product Patch นับมากกว่า MS Patch)": "(once per case · a product patch counts more than MS patches)"
 }

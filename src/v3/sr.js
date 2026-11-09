@@ -135,6 +135,7 @@ function ser(s, hol, viewer) {
     requester: { id: s.requester_id, name: s.requester_name, email: s.requester_email, phone: s.requester_phone || "", department: s.requester_department || "", title: s.requester_title || "" },
     assignee: s.assignee_id ? { id: s.assignee_id, name: s.assignee_name, email: s.assignee_email, phone: s.assignee_phone || "" } : null,
     approvedBy: s.approved_by_name || "", approvedAt: s.approved_at, managerNote: s.manager_note || "", category: s.category || "",
+    requestKind: s.request_kind || "general", meetingMode: s.meeting_mode || "", meetingModeLabel: MEETING_MODE[s.meeting_mode] || "", meetingReason: s.meeting_reason || "",
     outcome: s.outcome, outcomeLabel: s.outcome ? OUTCOME[s.outcome] : "", resolution: s.resolution || "",
     closedBy: s.closed_by_name || "", closedAt: s.closed_at, reopenCount: s.reopen_count,
     canReopenUntil: s.status === "done" && closedIso ? d.toISODate(d.addDays(d.fromISODate(closedIso), REOPEN_DAYS)) : null,
@@ -215,14 +216,14 @@ async function notifySubmitted(s) {
   const today = s.severity === "urgent_high" && isoDay(s.requested_date) === todayIso();
   await send(emails(mgrs), [], { no: s.sr_no, text: `${today ? "[ด่วนมาก ต้องการวันนี้] " : ""}[รออนุมัติ] จาก${s.requester_name} · ${SEV[s.severity]} · ต้องการ ${thai(s.requested_date)}` }, today ? "#B3263A" : "#C07A00",
     body(s, `${today ? "<strong style='color:#B3263A'>ด่วนมาก ผู้ขอต้องการงานภายในวันนี้ ผู้ขอจะโทรหาคุณเพื่อขออนุมัติ</strong><br>" : ""}มีคำขอบริการใหม่รอคุณอนุมัติ ตรวจรายละเอียด ปรับวันที่ส่งงานได้ และเลือกผู้รับผิดชอบ<br><span style='color:#5B6675;font-size:13px'>ถ้ายังไม่อนุมัติภายใน 1 วันทำการ ระบบเตือนซ้ำ</span>`,
-      [["วันที่ต้องการ", thaiDay(s.requested_date)], ["รายละเอียด", s.detail.slice(0, 600)]], { button: "ตรวจและอนุมัติ" }));
+      [["วันที่ต้องการ", thaiDay(s.requested_date)], ...meetingFacts(s), ["รายละเอียด", s.detail.slice(0, 600)]], { button: "ตรวจและอนุมัติ" }));
   await tg(`${today ? "🚨 ด่วนมาก ต้องการวันนี้ · " : ""}📝 คำขอบริการรออนุมัติ\n${s.sr_no} ${s.title}\nจาก ${s.requester_name}${s.requester_department ? ` (${s.requester_department})` : ""} · ทีม ${s.team_label} · ${SEV[s.severity]} · ต้องการ ${thai(s.requested_date)}`);
   require("./push").send(mgrs.map((m) => m.id), { title: `${today ? "ด่วนมาก · " : ""}คำขอบริการรออนุมัติ · ${s.sr_no}`, body: `${s.title} · จาก ${s.requester_name}`, url: `/#/sr/${s.id}`, tag: `sr-${s.id}` }).catch(() => {});
   await require("./teamsnotify").notify(s.team, "sr", {
     title: `${today ? "🚨 ด่วนมาก ต้องการวันนี้ · " : "📝 "}คำขอบริการรออนุมัติ · ${s.sr_no}`,
     color: today ? "Attention" : "Warning",
     text: s.title,
-    facts: [["จาก", `${s.requester_name}${s.requester_department ? ` (${s.requester_department})` : ""}`], ["ทีม", s.team_label], ["ความเร่งด่วน", SEV[s.severity]], ["ต้องการ", thai(s.requested_date)], ["ผู้อนุมัติ", mgrs.map((m) => m.display_name).join(", ")]],
+    facts: [["จาก", `${s.requester_name}${s.requester_department ? ` (${s.requester_department})` : ""}`], ["ทีม", s.team_label], ["ความเร่งด่วน", SEV[s.severity]], ["ต้องการ", thai(s.requested_date)], ...meetingFacts(s), ["ผู้อนุมัติ", mgrs.map((m) => m.display_name).join(", ")]],
     actions: [["ตรวจและอนุมัติ", url(s.id)]],
   });
 }
@@ -317,6 +318,20 @@ function validDate(v, label) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || !d.fromISODate(s)) throw bad(`${label} ไม่ถูกต้อง`);
   return s;
 }
+// Asking the team to join a meeting is allowed, but needs a reason: meetings with customers are normally routine work
+// of the requester's own side, so the team should only be pulled in when its technical knowledge is really needed.
+const MEETING_REASON_MIN = 40;
+function meetingOf(b) {
+  if (b.requestKind !== "meeting") return { kind: "general", mode: null, reason: null };
+  const mode = ["onsite", "online"].includes(b.meetingMode) ? b.meetingMode : null;
+  if (!mode) throw bad("เลือกว่าเป็น Meeting แบบ Onsite หรือ Online");
+  const reason = clean(b.meetingReason, 1000);
+  if (reason.length < MEETING_REASON_MIN) throw bad(`ใส่เหตุผลที่ต้องให้ทีมเข้าร่วม Meeting อย่างน้อย ${MEETING_REASON_MIN} ตัวอักษร (Meeting ปกติเป็นงาน routine จึงต้องมีเหตุผลประกอบ)`);
+  return { kind: "meeting", mode, reason };
+}
+const MEETING_MODE = { onsite: "Onsite (ที่ลูกค้า)", online: "Online" };
+const meetingFacts = (s) => (s.request_kind === "meeting" ? [["ประเภทคำขอ", `ขอให้เข้าร่วม Meeting · ${MEETING_MODE[s.meeting_mode] || "-"}`], ["เหตุผลที่ต้องให้ทีมเข้าร่วม", s.meeting_reason || "-"]] : []);
+
 async function create(user, b) {
   const miss = profileMissing(user);
   if (miss.length) throw bad("กรอกข้อมูลของคุณ (หน่วยงาน ตำแหน่ง เบอร์โทร) ให้ครบก่อนส่งคำขอ", 428);
@@ -327,6 +342,7 @@ async function create(user, b) {
   if (title.length < 5) throw bad("ใส่หัวข้ออย่างน้อย 5 ตัวอักษร");
   if (detail.length < 20) throw bad("อธิบายงานที่ต้องการอย่างน้อย 20 ตัวอักษร");
   if (!SEV[b.severity]) throw bad("เลือก Severity");
+  const mt = meetingOf(b);
   const hol = await holidays();
   const date = validDate(b.requestedDate, "วันที่ต้องการ");
   // "Very urgent" may ask for today (the requester is told to call the Manager); otherwise from the next working day.
@@ -336,8 +352,8 @@ async function create(user, b) {
   if (!sameDay && !isWorkday(date, hol)) throw bad("วันที่ต้องการตรงกับวันหยุด เลือกวันทำการ");
   const id = await tx(async (c) => {
     const r = await c.query(
-      `INSERT INTO service_requests (team, title, detail, severity, customer, requested_date, requester_id) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-      [team, title, detail, b.severity, clean(b.customer, 120) || null, date, user.id]
+      `INSERT INTO service_requests (team, title, detail, severity, customer, requested_date, requester_id, request_kind, meeting_mode, meeting_reason) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+      [team, title, detail, b.severity, clean(b.customer, 120) || null, date, user.id, mt.kind, mt.mode, mt.reason]
     );
     const srId = r.rows[0].id;
     const ev = await addEvent(c, srId, "submitted", null, { requestedDate: date, severity: b.severity }, user.id);
@@ -357,11 +373,12 @@ async function edit(user, s, b) {
   const detail = clean(b.detail ?? s.detail, 5000);
   if (title.length < 5 || detail.length < 20) throw bad("หัวข้ออย่างน้อย 5 ตัวอักษร และรายละเอียดอย่างน้อย 20 ตัวอักษร");
   const sev = b.severity && SEV[b.severity] ? b.severity : s.severity;
+  const mt = b.requestKind !== undefined ? meetingOf(b) : { kind: s.request_kind || "general", mode: s.meeting_mode, reason: s.meeting_reason };
   const date = b.requestedDate ? validDate(b.requestedDate, "วันที่ต้องการ") : isoDay(s.requested_date);
   if (date !== isoDay(s.requested_date) && date < addWorkdays(todayIso(), 1, hol) && !(sev === "urgent_high" && date === todayIso())) throw bad("วันที่ต้องการต้องเป็นวันทำการถัดไปเป็นต้นไป (ด่วนมาก เลือกวันนี้ได้)");
   const wasInfo = s.status === "info";
   await tx(async (c) => {
-    await c.query(`UPDATE service_requests SET title=$2, detail=$3, severity=$4, requested_date=$5, customer=$6, status='pending', updated_at=now() WHERE id=$1`, [s.id, title, detail, sev, date, clean(b.customer ?? s.customer, 120) || null]);
+    await c.query(`UPDATE service_requests SET title=$2, detail=$3, severity=$4, requested_date=$5, customer=$6, request_kind=$7, meeting_mode=$8, meeting_reason=$9, status='pending', updated_at=now() WHERE id=$1`, [s.id, title, detail, sev, date, clean(b.customer ?? s.customer, 120) || null, mt.kind, mt.mode, mt.reason]);
     const ev = await addEvent(c, s.id, wasInfo ? "resubmitted" : "edited", clean(b.note, 1000) || null, null, user.id);
     await storeFiles(c, s.id, ev, b.files, user.id);
   });

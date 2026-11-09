@@ -368,8 +368,8 @@ async function submit(token, b) {
 
 // ------------------------------------------------------------ notifications
 const intakeUrl = (i) => `${config3.baseUrl}/#/intake/${i.id}`;
-const SEV_COLOR = { Critical: "#C0283C", High: "#C2410C", Medium: "#B07800", Low: "#1C6B45", "Request information": "#4A5361", Deploy: "#1F5FBF" };
-const SEV_ICON = { Critical: "🔴", High: "🟠", Medium: "🟡", Low: "🟢", "Request information": "⚪", Deploy: "🔵" };
+const SEV_COLOR = { Critical: "#C0283C", High: "#C2410C", Medium: "#B07800", Low: "#1C6B45", "Request information": "#4A5361", "Deploy Product Patch": "#1F5FBF", "Deploy MS Patch": "#1F5FBF" };
+const SEV_ICON = { Critical: "🔴", High: "🟠", Medium: "🟡", Low: "🟢", "Request information": "⚪", "Deploy Product Patch": "🔵", "Deploy MS Patch": "🔵" };
 const customerName = (i) => i.site || `${i.customer_text || "ไม่ระบุบริษัท"} (ลูกค้าใหม่ รอยืนยัน)`;
 
 async function teamRecipients(i) {
