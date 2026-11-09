@@ -26,7 +26,7 @@
   };
   const STAGE = { normal: "ปกติ", r1: "แจ้งรอบ 1", r2: "แจ้งรอบ 2", overdue: "เกิน Due", no_start: "ไม่มี Start date", closed: "ปิดแล้ว" };
   const ALERT = { r1: "แจ้งรอบ 1", r2: "แจ้งรอบ 2", overdue: "เกิน Due" };
-  const ROLE = { admin: "Admin", manager: "Manager", observer: "Observer", engineer: "Engineer", viewer: "Viewer", requester: "ผู้ขอบริการ" };
+  const ROLE = { admin: "Admin", manager: "Manager", observer: "Observer", engineer: "User", viewer: "Viewer", requester: "ผู้ขอบริการ" };
   const ROLE_HINT = { admin: "ทำได้ทุกอย่าง รวมถึงจัดการผู้ใช้และตั้งค่าระบบ", manager: "ดูและแก้เคสของทีม อนุมัติขยายเวลา ส่ง Report ปรับคะแนน KPI เห็นและมอบงานได้เฉพาะคนในทีมตัวเอง", observer: "ดูได้ทุกทีมทุกหน้า (ภาพรวม เคส ราย User KPI Report ประวัติแก้ไข) แก้ไขอะไรไม่ได้", engineer: "เปิด แก้ และปิดเคสของตัวเอง เห็น KPI ของตัวเอง", viewer: "ดูภาพรวมและเคสของทีมตัวเองอย่างเดียว", requester: "พนักงานทีมอื่น ส่งคำขอบริการและดูได้เฉพาะคำขอของตัวเอง ไม่เห็นเคสลูกค้า (ระบบสร้างให้อัตโนมัติเมื่อ login ด้วยบัญชี Microsoft ของบริษัท)" };
   document.addEventListener("change", (e) => {
     const t = e.target;
@@ -3267,17 +3267,41 @@ ${after ? "" : `<section class="card" id="av-card" style="max-width:620px;margin
 <label class="f">รายละเอียดงานที่ต้องการ<textarea name="detail" rows="5" required minlength="20" maxlength="5000" placeholder="ต้องการอะไร ใช้ทำอะไร รูปแบบที่ต้องการ (เช่น Excel แยกรายวัน) ช่วงข้อมูล"></textarea></label>
 <div class="formgrid" style="grid-template-columns:1.2fr 1fr">
 <div class="f"><span>Severity</span>${seg("severity", m.severities, "normal")}<span class="hint" id="sr-sevhint">${esc(m.severities.find((x) => x.key === "normal").hint)}</span></div>
-<label class="f">ต้องการรับงานภายใน<input type="date" name="requestedDate" required min="${m.minDate}"><span class="hint">ตั้งแต่ ${dlong(m.minDate)} (วันทำการถัดไป) · Manager อาจปรับวันที่</span></label></div>
+<label class="f">ต้องการรับงานภายใน<input type="date" name="requestedDate" required min="${m.minDate}"><span class="hint" id="sr-datehint">ตั้งแต่ ${dlong(m.minDate)} (วันทำการถัดไป) · Manager อาจปรับวันที่</span></label></div>
+<div class="banner warn" id="sr-today" hidden style="margin:0"></div>
 <label class="f">เกี่ยวกับลูกค้า (ไม่บังคับ)<input name="customer" maxlength="120" placeholder="เช่น KTB"></label>
 ${fileBox(m)}
 <div class="right"><a class="btn" href="#/sr">ยกเลิก</a><button class="btn primary" type="submit">ส่งคำขอ</button></div></form>`;
     const f = document.getElementById("srf");
     const fp = filePicker(f, m);
     f.querySelectorAll("input[name=team]").forEach((x) => (x.onchange = () => (document.getElementById("sr-appr").textContent = `ผู้อนุมัติ: ${(m.managers[x.value] || []).join(", ") || "Admin"}`)));
-    f.querySelectorAll("input[name=severity]").forEach((x) => (x.onchange = () => (document.getElementById("sr-sevhint").textContent = m.severities.find((s) => s.key === x.value).hint)));
+    // "Very urgent" may ask for today, with a reminder to phone the team's Manager for approval.
+    const syncUrgent = () => {
+      const urgent = f.severity.value === "urgent_high";
+      const today = m.today || daysAgo(0);
+      f.requestedDate.min = urgent ? today : m.minDate;
+      document.getElementById("sr-datehint").textContent = urgent ? `ด่วนมาก เลือกวันนี้ (${dlong(today)}) ได้ · ปกติตั้งแต่ ${dlong(m.minDate)}` : `ตั้งแต่ ${dlong(m.minDate)} (วันทำการถัดไป) · Manager อาจปรับวันที่`;
+      if (!urgent && f.requestedDate.value && f.requestedDate.value < m.minDate) f.requestedDate.value = "";
+      const box = document.getElementById("sr-today");
+      const isToday = urgent && f.requestedDate.value === today;
+      box.hidden = !isToday;
+      if (isToday) {
+        const team = f.team.value;
+        const ps = team ? m.managerPhones[team] || [] : [];
+        box.innerHTML = `<div><strong>ต้องการงานภายในวันนี้: โทรหา Manager เพื่อขออนุมัติทันทีหลังส่งคำขอ</strong><br><span style="font-size:14px">${team ? (ps.length ? ps.map((p) => `${esc(p.name)}${p.phone ? ` · <a href="tel:${esc(p.phone.replace(/[^+0-9]/g, ""))}">${esc(p.phone)}</a>` : " · ยังไม่มีเบอร์ในระบบ"}`).join("<br>") : "Admin") : "เลือกทีมก่อน เพื่อดูชื่อและเบอร์ Manager"}</span><br><span style="font-size:13px">ระบบส่ง email ถึง Manager แล้วก็จริง แต่งานวันนี้ต้องคุยกันทางโทรศัพท์ ไม่อย่างนั้นอาจไม่ทันหรือไม่ได้รับอนุมัติ</span></div>`;
+      }
+    };
+    f.querySelectorAll("input[name=severity]").forEach((x) => (x.onchange = () => {
+      document.getElementById("sr-sevhint").textContent = m.severities.find((s) => s.key === x.value).hint;
+      syncUrgent();
+    }));
+    f.querySelectorAll("input[name=team]").forEach((x) => x.addEventListener("change", syncUrgent));
     f.requestedDate.onchange = () => {
-      const day = new Date(f.requestedDate.value + "T00:00:00").getDay();
-      f.requestedDate.setCustomValidity(day === 0 || day === 6 || m.holidays.includes(f.requestedDate.value) ? "เลือกวันทำการ (ไม่ใช่เสาร์ อาทิตย์ หรือวันหยุด)" : "");
+      const v = f.requestedDate.value;
+      const day = new Date(v + "T00:00:00").getDay();
+      const todayOk = f.severity.value === "urgent_high" && v === (m.today || daysAgo(0));
+      f.requestedDate.setCustomValidity(!todayOk && (day === 0 || day === 6 || m.holidays.includes(v)) ? "เลือกวันทำการ (ไม่ใช่เสาร์ อาทิตย์ หรือวันหยุด)" : "");
+      syncUrgent();
     };
     f.onsubmit = async (e) => {
       e.preventDefault();
@@ -3286,7 +3310,7 @@ ${fileBox(m)}
       try {
         const body = { team: f.team.value, title: f.title.value, detail: f.detail.value, severity: f.severity.value, requestedDate: f.requestedDate.value, customer: f.customer.value, files: await fp.get() };
         const r = await post("/sr", body);
-        toast(`ส่งคำขอ ${r.srNo} แล้ว ระบบส่ง email ยืนยันให้คุณ`, 5000);
+        toast(body.severity === "urgent_high" && body.requestedDate === (m.today || daysAgo(0)) ? `ส่งคำขอ ${r.srNo} แล้ว อย่าลืมโทรหา Manager เพื่อขออนุมัติ` : `ส่งคำขอ ${r.srNo} แล้ว ระบบส่ง email ยืนยันให้คุณ`, 8000);
         location.hash = "#/sr/" + r.id;
       } catch (err) {
         btn.disabled = false;

@@ -7,7 +7,7 @@ const { tempPassword } = require("./auth");
 const ROLE_ALIASES = {
   admin: "admin", แอดมิน: "admin", ผู้ดูแลระบบ: "admin",
   manager: "manager", ผู้จัดการ: "manager",
-  engineer: "engineer", วิศวกร: "engineer", owner: "engineer",
+  engineer: "engineer", วิศวกร: "engineer", owner: "engineer", user: "engineer",
   observer: "observer", ผู้บริหาร: "observer", ดูทั้งหมด: "observer",
   viewer: "viewer", ดูอย่างเดียว: "viewer",
 };
@@ -42,7 +42,7 @@ async function template() {
   ];
   ws.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
   ws.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F3A5F" } };
-  ws.addRow({ email: "somchai.k@sinostech.co.th", name: "Somchai K.", role: "Engineer", teams: teams[0]?.code || "ENGAGE", auth: "Microsoft" });
+  ws.addRow({ email: "somchai.k@sinostech.co.th", name: "Somchai K.", role: "User", teams: teams[0]?.code || "ENGAGE", auth: "Microsoft" });
   ws.addRow({ email: "manager@sinostech.co.th", name: "Team Manager", role: "Manager", teams: teams.map((t) => t.code).join(", "), auth: "Microsoft" });
   ws.addRow({ email: "partner@example.com", name: "Vendor Partner", role: "Viewer", teams: teams[1]?.code || "NEXIDIA", auth: "Password" });
   for (let r = 2; r <= 500; r++) {
@@ -56,7 +56,7 @@ async function template() {
     ["คอลัมน์", "คำอธิบาย"],
     ["Email", "จำเป็น ใช้เป็นตัวระบุผู้ใช้ ถ้ามีอยู่แล้วระบบจะอัปเดตชื่อ บทบาท และทีมแทนการสร้างใหม่"],
     ["ชื่อที่แสดง", "ไม่บังคับ ถ้าเว้นว่าง ผู้ใช้ใหม่จะใช้อีเมลเป็นชื่อ ผู้ใช้เดิมคงชื่อเดิม"],
-    ["บทบาท", "Admin, Manager, Engineer หรือ Viewer ถ้าเว้นว่าง ผู้ใช้ใหม่เป็น Engineer ผู้ใช้เดิมคงบทบาทเดิม"],
+    ["บทบาท", "Admin, Manager, User (Engineer เดิม) หรือ Viewer ถ้าเว้นว่าง ผู้ใช้ใหม่เป็น User ผู้ใช้เดิมคงบทบาทเดิม"],
     ["ทีม", `ใส่รหัสทีมคั่นด้วย , ได้หลายทีม: ${teams.map((t) => `${t.code} (${t.label})`).join(", ")} หรือ ALL = ทุกทีม ถ้าเว้นว่าง ผู้ใช้เดิมคงทีมเดิม`],
     ["วิธีเข้าระบบ", "Microsoft = บัญชีบริษัท (ค่าเริ่มต้น) · Password = คนนอกบริษัท ระบบสร้างรหัสชั่วคราวให้และบังคับเปลี่ยนตอนเข้าครั้งแรก"],
     ["", "ระบบไม่ลบหรือปิดใช้งานผู้ใช้จากไฟล์นี้ และไม่เปลี่ยนวิธีเข้าระบบของผู้ใช้เดิม"],

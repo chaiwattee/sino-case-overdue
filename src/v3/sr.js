@@ -74,12 +74,12 @@ const todayIso = () => d.toISODate(d.today());
 // ------------------------------------------------------------ people
 async function teamManagers(team) {
   const rows = await all(
-    `SELECT DISTINCT u.id, u.email, u.display_name FROM users u JOIN user_teams t ON t.user_id = u.id
+    `SELECT DISTINCT u.id, u.email, u.display_name, u.phone FROM users u JOIN user_teams t ON t.user_id = u.id
       WHERE u.active AND u.role = 'manager' AND t.team = $1 ORDER BY u.display_name`,
     [team]
   );
   // No manager in the team yet: the admins approve.
-  return rows.length ? rows : all("SELECT id, email, display_name FROM users WHERE active AND role = 'admin' ORDER BY display_name");
+  return rows.length ? rows : all("SELECT id, email, display_name, phone FROM users WHERE active AND role = 'admin' ORDER BY display_name");
 }
 async function assignees(team) {
   return all(
@@ -212,10 +212,11 @@ async function notifySubmitted(s) {
   await send([s.requester_email], [], { no: s.sr_no, text: `ได้รับคำขอแล้ว รอ Manager อนุมัติ · ${s.title}` }, "#1F5FBF",
     body(s, `เรียน คุณ${esc(s.requester_name)}<br>ระบบได้รับคำขอของคุณแล้ว ตอนนี้อยู่ระหว่างรอ Manager ทีม ${esc(s.team_label)} อนุมัติ<br>เมื่ออนุมัติแล้ว ระบบจะแจ้งชื่อผู้รับผิดชอบและวันที่ส่งงาน (Manager อาจปรับวันที่)`,
       [["วันที่ต้องการ", thaiDay(s.requested_date)], ["ผู้อนุมัติ", mgrs.map((m) => m.display_name).join(", ")]], { button: "ดูสถานะ / เพิ่มข้อมูล" }));
-  await send(emails(mgrs), [], { no: s.sr_no, text: `[รออนุมัติ] จาก${s.requester_name} · ${SEV[s.severity]} · ต้องการ ${thai(s.requested_date)}` }, "#C07A00",
-    body(s, "มีคำขอบริการใหม่รอคุณอนุมัติ ตรวจรายละเอียด ปรับวันที่ส่งงานได้ และเลือกผู้รับผิดชอบ<br><span style='color:#5B6675;font-size:13px'>ถ้ายังไม่อนุมัติภายใน 1 วันทำการ ระบบเตือนซ้ำ</span>",
+  const today = s.severity === "urgent_high" && isoDay(s.requested_date) === todayIso();
+  await send(emails(mgrs), [], { no: s.sr_no, text: `${today ? "[ด่วนมาก ต้องการวันนี้] " : ""}[รออนุมัติ] จาก${s.requester_name} · ${SEV[s.severity]} · ต้องการ ${thai(s.requested_date)}` }, today ? "#B3263A" : "#C07A00",
+    body(s, `${today ? "<strong style='color:#B3263A'>ด่วนมาก ผู้ขอต้องการงานภายในวันนี้ ผู้ขอจะโทรหาคุณเพื่อขออนุมัติ</strong><br>" : ""}มีคำขอบริการใหม่รอคุณอนุมัติ ตรวจรายละเอียด ปรับวันที่ส่งงานได้ และเลือกผู้รับผิดชอบ<br><span style='color:#5B6675;font-size:13px'>ถ้ายังไม่อนุมัติภายใน 1 วันทำการ ระบบเตือนซ้ำ</span>`,
       [["วันที่ต้องการ", thaiDay(s.requested_date)], ["รายละเอียด", s.detail.slice(0, 600)]], { button: "ตรวจและอนุมัติ" }));
-  await tg(`📝 คำขอบริการรออนุมัติ\n${s.sr_no} ${s.title}\nจาก ${s.requester_name}${s.requester_department ? ` (${s.requester_department})` : ""} · ทีม ${s.team_label} · ${SEV[s.severity]} · ต้องการ ${thai(s.requested_date)}`);
+  await tg(`${today ? "🚨 ด่วนมาก ต้องการวันนี้ · " : ""}📝 คำขอบริการรออนุมัติ\n${s.sr_no} ${s.title}\nจาก ${s.requester_name}${s.requester_department ? ` (${s.requester_department})` : ""} · ทีม ${s.team_label} · ${SEV[s.severity]} · ต้องการ ${thai(s.requested_date)}`);
 }
 async function notifyApproved(s, by) {
   const mgrs = await teamManagers(s.team);
@@ -319,9 +320,11 @@ async function create(user, b) {
   if (!SEV[b.severity]) throw bad("เลือก Severity");
   const hol = await holidays();
   const date = validDate(b.requestedDate, "วันที่ต้องการ");
+  // "Very urgent" may ask for today (the requester is told to call the Manager); otherwise from the next working day.
+  const sameDay = b.severity === "urgent_high" && date === todayIso();
   const minDate = addWorkdays(todayIso(), 1, hol);
-  if (date < minDate) throw bad(`วันที่ต้องการต้องตั้งแต่ ${thai(minDate)} (วันทำการถัดไป)`);
-  if (!isWorkday(date, hol)) throw bad("วันที่ต้องการตรงกับวันหยุด เลือกวันทำการ");
+  if (!sameDay && date < minDate) throw bad(b.severity === "urgent_high" ? `วันที่ต้องการต้องเป็นวันนี้ หรือตั้งแต่ ${thai(minDate)}` : `วันที่ต้องการต้องตั้งแต่ ${thai(minDate)} (วันทำการถัดไป) · ถ้าต้องการวันนี้ เลือก Severity "ด่วนมาก"`);
+  if (!sameDay && !isWorkday(date, hol)) throw bad("วันที่ต้องการตรงกับวันหยุด เลือกวันทำการ");
   const id = await tx(async (c) => {
     const r = await c.query(
       `INSERT INTO service_requests (team, title, detail, severity, customer, requested_date, requester_id) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
@@ -346,7 +349,7 @@ async function edit(user, s, b) {
   if (title.length < 5 || detail.length < 20) throw bad("หัวข้ออย่างน้อย 5 ตัวอักษร และรายละเอียดอย่างน้อย 20 ตัวอักษร");
   const sev = b.severity && SEV[b.severity] ? b.severity : s.severity;
   const date = b.requestedDate ? validDate(b.requestedDate, "วันที่ต้องการ") : isoDay(s.requested_date);
-  if (date !== isoDay(s.requested_date) && date < addWorkdays(todayIso(), 1, hol)) throw bad("วันที่ต้องการต้องเป็นวันทำการถัดไปเป็นต้นไป");
+  if (date !== isoDay(s.requested_date) && date < addWorkdays(todayIso(), 1, hol) && !(sev === "urgent_high" && date === todayIso())) throw bad("วันที่ต้องการต้องเป็นวันทำการถัดไปเป็นต้นไป (ด่วนมาก เลือกวันนี้ได้)");
   const wasInfo = s.status === "info";
   await tx(async (c) => {
     await c.query(`UPDATE service_requests SET title=$2, detail=$3, severity=$4, requested_date=$5, customer=$6, status='pending', updated_at=now() WHERE id=$1`, [s.id, title, detail, sev, date, clean(b.customer ?? s.customer, 120) || null]);
@@ -384,7 +387,7 @@ async function approve(user, s, b) {
   const hol = await holidays();
   const target = validDate(b.targetDate || isoDay(s.requested_date), "Target date");
   if (target < todayIso()) throw bad("Target date ต้องไม่ใช่วันที่ผ่านมาแล้ว");
-  if (!isWorkday(target, hol)) throw bad("Target date ตรงกับวันหยุด เลือกวันทำการ");
+  if (!isWorkday(target, hol) && !(target === todayIso() && s.severity === "urgent_high")) throw bad("Target date ตรงกับวันหยุด เลือกวันทำการ");
   const reason = clean(b.targetReason, 500);
   if (target !== isoDay(s.requested_date) && reason.length < 5) throw bad("ปรับ Target ต่างจากที่ผู้ขอต้องการ ใส่เหตุผลให้ผู้ขอทราบ");
   const a = await one("SELECT u.id FROM users u JOIN user_teams t ON t.user_id = u.id WHERE u.id = $1 AND u.active AND u.role IN ('engineer','manager') AND t.team = $2", [Number(b.assigneeId), s.team]);
@@ -615,7 +618,12 @@ function mount(api, { wrap }) {
     const hol = await holidays();
     const teams = await all("SELECT code, label FROM teams ORDER BY sort");
     const managers = {};
-    for (const t of teams) managers[t.code] = (await teamManagers(t.code)).map((m) => m.display_name);
+    const managerPhones = {};
+    for (const t of teams) {
+      const ms = await teamManagers(t.code);
+      managers[t.code] = ms.map((m) => m.display_name);
+      managerPhones[t.code] = ms.map((m) => ({ name: m.display_name, phone: m.phone || "" }));
+    }
     const cats = (await require("./kpi").categories()).map((c) => c.name);
     const u = await one("SELECT phone, department, job_title FROM users WHERE id = $1", [req.user.id]);
     const counts = await one(
@@ -624,7 +632,7 @@ function mount(api, { wrap }) {
       [req.user.role === "admin" || perms.seesAllTeams(req.user) ? teams.map((t) => t.code) : await userTeams(req.user.id)]
     );
     res.json({
-      teams, managers, severities: Object.entries(SEV).map(([k, v]) => ({ key: k, label: v, hint: SEV_HINT[k] })), categories: cats,
+      teams, managers, managerPhones, today: todayIso(), severities: Object.entries(SEV).map(([k, v]) => ({ key: k, label: v, hint: SEV_HINT[k] })), categories: cats,
       minDate: addWorkdays(todayIso(), 1, hol), holidays: [...hol].sort(), profileMissing: profileMissing(u), resolutionMin: RESOLUTION_MIN,
       canManage: req.user.role === "admin" || req.user.role === "manager", counts, fileExt: FILE_EXT, maxFileMb: MAX_FILE_MB,
     });
