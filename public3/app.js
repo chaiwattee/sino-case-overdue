@@ -355,6 +355,7 @@ ${edit || !csOf(c) ? "" : `<div class="rca-sec" id="rca-sec"></div>`}
       .filter((t) => t[3] && (ME.user.role !== "requester" || t[0] === "sr"))
       .map(([k, h, l]) => `<a href="${h}" data-nav="${k}">${l}</a>`)
       .join("");
+    bindNavBtn();
     const u = ME.user;
     paintMeAvatar();
     document.getElementById("me-name").innerHTML = `${esc(u.display_name.split(" ")[0])} <span class="muted">· ${ROLE[u.role]}</span>`;
@@ -393,7 +394,40 @@ ${edit || !csOf(c) ? "" : `<div class="rca-sec" id="rca-sec"></div>`}
   }
   const teamLabel = (code) => (ME.teams.find((t) => t.key === code) || {}).label || code;
   function setNav(name) {
-    document.querySelectorAll("#tabs a[data-nav]").forEach((a) => a.classList.toggle("active", a.dataset.nav === name));
+    let cur = null;
+    document.querySelectorAll("#tabs a[data-nav]").forEach((a) => {
+      a.classList.toggle("active", a.dataset.nav === name);
+      if (a.dataset.nav === name) cur = a;
+    });
+    // Phone: the menu button shows the current page; the menu closes after choosing.
+    const lbl = document.getElementById("nav-cur");
+    if (lbl) lbl.textContent = cur ? cur.firstChild.textContent.trim() : "เมนู";
+    closeNav();
+  }
+  function closeNav() {
+    const t = document.getElementById("tabs");
+    const b = document.getElementById("nav-btn");
+    if (t) t.classList.remove("open");
+    if (b) b.setAttribute("aria-expanded", "false");
+  }
+  function bindNavBtn() {
+    const b = document.getElementById("nav-btn");
+    const t = document.getElementById("tabs");
+    if (!b || !t) return;
+    b.onclick = (e) => {
+      e.stopPropagation();
+      const open = !t.classList.contains("open");
+      t.classList.toggle("open", open);
+      b.setAttribute("aria-expanded", String(open));
+    };
+    t.addEventListener("click", (e) => e.target.closest("a") && closeNav());
+    document.addEventListener("click", (e) => !t.contains(e.target) && closeNav());
+    document.addEventListener("keydown", (e) => e.key === "Escape" && closeNav());
+    // A red dot on the menu button when any tab has a waiting-count badge.
+    const dot = document.getElementById("nav-dot");
+    const sync = () => (dot.hidden = !t.querySelector(".badge:not([hidden]), .nbadge:not([hidden]), .count:not([hidden])"));
+    new MutationObserver(sync).observe(t, { childList: true, subtree: true, attributes: true, attributeFilter: ["hidden"] });
+    sync();
   }
 
   // ------------------------------------------------------------ shared pieces
