@@ -115,7 +115,7 @@ async function submit(token, b, ip) {
     contactName: clean(b.contactName, 120),
     phone: clean(b.phone, 60),
     product: clean(b.product, 60),
-    severity: repo.severityOf(b.severity) || "",
+    severity: repo.customerSeverityOf(b.severity) || "",
     startedText: clean(b.startedText, 120),
     affected: clean(b.affected, 120),
     detail: clean(b.detail, 5000),

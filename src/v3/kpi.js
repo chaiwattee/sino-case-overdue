@@ -8,7 +8,8 @@ const { config } = require("../config");
 const d = require("../dates");
 const { q, one, all, getSetting, setSetting, audit } = require("./db");
 
-const SEV_W = { Critical: 3, High: 2, Medium: 1.5, Low: 1, "Request information": 0.5 };
+// Deploy = planned patch / upgrade: prepared ahead and done in a window, weighted like Medium (+0.3 more when a "Deploy Patch" activity is logged).
+const SEV_W = { Critical: 3, High: 2, Medium: 1.5, Low: 1, "Request information": 0.5, Deploy: 1.5 };
 const DEFAULT_CATEGORIES = [
   { name: "Login / สิทธิ์ผู้ใช้", keywords: "login, log in, เข้าระบบ, password, รหัสผ่าน, สิทธิ์, permission, account, sso, user, ผู้ใช้, lock" },
   { name: "Report / Dashboard", keywords: "report, รายงาน, dashboard, export, ยอด, สถิติ, refresh" },

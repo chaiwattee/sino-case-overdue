@@ -39,7 +39,7 @@
   const MEETINGS = ["Meeting Onsite กับลูกค้า", "Meeting Online กับลูกค้า"];
   const DEPLOY = "Deploy Patch";
   const KINDS = ["ดำเนินการ", "ติดต่อลูกค้า", ...MEETINGS, DEPLOY, "เปิดเคส Vendor", "Remote / Onsite", "รอข้อมูล"];
-  const SEV_CHIP = { Critical: "overdue", High: "r2", Medium: "r1", Low: "normal", "Request information": "closed" };
+  const SEV_CHIP = { Critical: "overdue", High: "r2", Medium: "r1", Low: "normal", "Request information": "closed", Deploy: "deploy" };
   const SEV_SHORT = { "Request information": "Request info" };
   const sevChip = (v) => (v ? `<span class="chip c-${SEV_CHIP[v] || "closed"} sev" title="Severity: ${esc(v)}">${esc(SEV_SHORT[v] || v)}</span>` : "");
   // Case number CASE-2026-11-0001 (every case) with the vendor CS Number underneath.
@@ -3097,7 +3097,7 @@ ${owners.map((o) => `<tr class="click" data-href="#/kpi?${qs({ month, owner: o.i
 <div class="tablewrap" style="margin-top:10px"><table><thead><tr><th>เกณฑ์</th><th class="n">คะแนน</th><th>วิธีคิด</th></tr></thead><tbody>
 <tr><td>1. ปิดทัน SLA</td><td class="n">30</td><td>% เคสที่ปิดทัน Due เดิม (ก่อนขยาย) · ปิดทันเวลาที่ขยายได้ครึ่งหนึ่ง · Critical นับ 2 เท่า</td></tr>
 <tr><td>2. ความเร็วตอบสนอง</td><td class="n">15</td><td>Activity แรกหลังเปิดเคส ≤4 ชม. 8 · ≤8 ชม. 6 · ≤24 ชม. 4 · ≤48 ชม. 2 และอัปเดตเคสที่เปิดอยู่ทุก ≤2 วัน 7 · ≤3 วัน 5 · ≤5 วัน 3</td></tr>
-<tr><td>3. แต้มงาน (ปริมาณ × ความยาก)</td><td class="n">20</td><td>แต้มต่อเคสที่ปิด = Severity (Critical 3, High 2, Medium 1.5, Low 1, ขอข้อมูล 0.5) × (1 + ส่ง NICE/มี CS Number 0.5 + Onsite 0.3 + Meeting Onsite 0.4 / Meeting Online 0.2 ต่อครั้ง นับ 2 ครั้งที่มากสุด ไม่เกิน 0.6 + Deploy Patch 0.3 + เปิดนานเกิน 7 วัน 0.2) × ความยากที่ Manager ปรับ (0.8–1.5) · เทียบค่ากลางของทีมเดียวกันแบบรากที่สอง: 20 × √(แต้ม ÷ ค่ากลาง) ÷ 1.3 สูงสุด 20 · เคสมากขึ้น 4 เท่าได้คะแนนเพิ่มประมาณ 2 เท่า</td></tr>
+<tr><td>3. แต้มงาน (ปริมาณ × ความยาก)</td><td class="n">20</td><td>แต้มต่อเคสที่ปิด = Severity (Critical 3, High 2, Medium 1.5, Deploy 1.5, Low 1, ขอข้อมูล 0.5) × (1 + ส่ง NICE/มี CS Number 0.5 + Onsite 0.3 + Meeting Onsite 0.4 / Meeting Online 0.2 ต่อครั้ง นับ 2 ครั้งที่มากสุด ไม่เกิน 0.6 + Deploy Patch 0.3 + เปิดนานเกิน 7 วัน 0.2) × ความยากที่ Manager ปรับ (0.8–1.5) · เทียบค่ากลางของทีมเดียวกันแบบรากที่สอง: 20 × √(แต้ม ÷ ค่ากลาง) ÷ 1.3 สูงสุด 20 · เคสมากขึ้น 4 เท่าได้คะแนนเพิ่มประมาณ 2 เท่า</td></tr>
 <tr><td>4. ความหลากหลาย / Skill</td><td class="n">15</td><td>ความกระจายของประเภทงาน Product และลูกค้า (0–1) × 10.5 + Product หรือประเภทงานที่ทำครั้งแรก 1.5 ต่อรายการ (สูงสุด 4.5) · Meeting กับลูกค้านับเป็นประเภทงานหนึ่ง Deploy Patch นับเป็นงาน Upgrade / Patch และครั้งแรกของทั้งสองอย่างนับเป็น Skill ใหม่ · คนที่ตั้งเป็น "ดูแลลูกค้าประจำ" ไม่นับความหลากหลายของลูกค้า</td></tr>
 <tr><td>5. งานค้างและการขยายเวลา</td><td class="n">10</td><td>เริ่ม 10 · หัก 2 ต่อเคสเกิน Due สิ้นเดือน · หัก 1 ต่อการขยายที่อนุมัติ (สูงสุด 3)</td></tr>
 <tr><td>6. คุณภาพการบันทึก</td><td class="n">10</td><td>เคสที่ปิดมีบันทึกสุดท้าย ≥20 ตัวอักษร 5 · Activity ที่มีเนื้อหาเฉลี่ย ≥3 ต่อเคส 5</td></tr>

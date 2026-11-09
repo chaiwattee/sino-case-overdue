@@ -729,3 +729,4 @@ tr.off td { opacity: .55; }
   .tabs.open a.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); font-weight: 600; }
 }
 #team-card td { vertical-align: middle; }
+.c-deploy { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }

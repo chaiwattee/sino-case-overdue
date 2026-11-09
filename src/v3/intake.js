@@ -302,7 +302,7 @@ async function submit(token, b) {
     contact_phone: clean(b.phone, 60),
     product: clean(b.product, 60),
     started_text: clean(b.startedText, 120),
-    severity: repo.severityOf(b.severity),
+    severity: repo.customerSeverityOf(b.severity),
     subject: clean(b.subject, 150),
     detail: clean(b.detail, 5000),
     affected: clean(b.affected, 120),
@@ -368,8 +368,8 @@ async function submit(token, b) {
 
 // ------------------------------------------------------------ notifications
 const intakeUrl = (i) => `${config3.baseUrl}/#/intake/${i.id}`;
-const SEV_COLOR = { Critical: "#C0283C", High: "#C2410C", Medium: "#B07800", Low: "#1C6B45", "Request information": "#4A5361" };
-const SEV_ICON = { Critical: "🔴", High: "🟠", Medium: "🟡", Low: "🟢", "Request information": "⚪" };
+const SEV_COLOR = { Critical: "#C0283C", High: "#C2410C", Medium: "#B07800", Low: "#1C6B45", "Request information": "#4A5361", Deploy: "#1F5FBF" };
+const SEV_ICON = { Critical: "🔴", High: "🟠", Medium: "🟡", Low: "🟢", "Request information": "⚪", Deploy: "🔵" };
 const customerName = (i) => i.site || `${i.customer_text || "ไม่ระบุบริษัท"} (ลูกค้าใหม่ รอยืนยัน)`;
 
 async function teamRecipients(i) {

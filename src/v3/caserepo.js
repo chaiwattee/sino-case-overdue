@@ -51,8 +51,11 @@ const rootCauseOf = (v, note) => {
   return t ? `${OTHER_CAUSE}: ${t}` : OTHER_CAUSE;
 };
 
-const SEVERITIES = ["Critical", "High", "Medium", "Low", "Request information"];
+// "Deploy" = planned patch / upgrade work; the team sets it, customers never see or choose it.
+const SEVERITIES = ["Critical", "High", "Medium", "Low", "Request information", "Deploy"];
 const severityOf = (v) => SEVERITIES.find((x) => x.toLowerCase() === String(v || "").trim().toLowerCase()) || null;
+const CUSTOMER_SEVERITIES = SEVERITIES.filter((x) => x !== "Deploy");
+const customerSeverityOf = (v) => CUSTOMER_SEVERITIES.find((x) => x.toLowerCase() === String(v || "").trim().toLowerCase()) || null;
 
 function toCase(r) {
   const base = {
@@ -393,5 +396,5 @@ async function deleteCase(user, kase, reason) {
 
 module.exports = {
   loadCases, getCase, canSee, activities, addActivity, createCase, updateCase, editStartDate, deleteCase,
-  ensureLookup, logChange, toCase, CASE_SELECT, SEVERITIES, severityOf, ROOT_CAUSES, RESOLUTION_MIN, STATUS_HELP,
+  ensureLookup, logChange, toCase, CASE_SELECT, SEVERITIES, severityOf, customerSeverityOf, ROOT_CAUSES, RESOLUTION_MIN, STATUS_HELP,
 };
