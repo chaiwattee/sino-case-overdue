@@ -124,8 +124,10 @@ function tempPassword() {
 
 // ------------------------------------------------------------ routes
 const router = express.Router();
-router.use(express.json({ limit: "50kb" }));
-router.use(express.urlencoded({ extended: false, limit: "10kb" }));
+// Body parsers only for the sign-in routes: this router is mounted for every request, and a parser here would read
+// (and size-limit) every body first, so file uploads elsewhere failed with "request entity too large".
+router.use("/auth", express.json({ limit: "50kb" }));
+router.use("/auth", express.urlencoded({ extended: false, limit: "10kb" }));
 
 function ssoReady() {
   return !!(config3.sso.clientId && config3.sso.clientSecret && config3.sso.tenantId);
