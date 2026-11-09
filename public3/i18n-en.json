@@ -2239,5 +2239,11 @@
 "หน้าเว็บจะโหลดใหม่เพื่อแสดงทีมล่าสุดเมื่อออกจากหน้านี้": "the page reloads to show the latest teams when you leave this page",
 "บันทึกชื่อทีมแล้ว": "Team name saved",
 "ลบทีมแล้ว": "Team deleted",
-"ใส่ชื่อทีม": "Enter a team name"
+"ใส่ชื่อทีม": "Enter a team name",
+"Meeting กับลูกค้า": "Customer meeting",
+"ระบุสาเหตุ": "Specify the cause",
+"ระบุสาเหตุ เมื่อเลือก “อื่นๆ”": "Specify the cause when choosing “Other”",
+"เช่น ไฟดับที่ Data Center ของลูกค้า ระบบ restart เอง": "e.g. power outage at the customer's data center, the system restarted",
+"สรุป Meeting: ผู้เข้าร่วมฝั่งลูกค้า หัวข้อ ข้อตกลง และขั้นต่อไป อย่างน้อย 30 ตัวอักษร จึงนับเป็นงานใน KPI (นับสูงสุด 2 ครั้งต่อเคส)": "Meeting summary: customer attendees, topic, agreements and next steps; at least 30 characters to count as work in KPI (at most 2 per case)",
+"สรุป Meeting สั้นกว่า 30 ตัวอักษร จะไม่นับใน KPI บันทึกต่อไหม?": "The meeting summary is shorter than 30 characters and won't count in KPI. Save anyway?"
 }

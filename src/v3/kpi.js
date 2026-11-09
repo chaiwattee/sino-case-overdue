@@ -22,6 +22,10 @@ const DEFAULT_CATEGORIES = [
   { name: "License / ขอข้อมูล", keywords: "license, ไลเซนส์, สอบถาม, quotation, quote, ขอข้อมูล, renewal, ต่ออายุ" },
 ];
 const OTHER = "อื่นๆ";
+// A customer meeting (an activity of this kind with a real summary) counts as work and as a work type of its own.
+const MEETING = "Meeting กับลูกค้า";
+const MEETING_MIN = 30;
+const isMeeting = (a) => a.kind === MEETING && String(a.detail || "").trim().length >= MEETING_MIN;
 
 async function categories() {
   const s = await getSetting("kpi_categories", null);
@@ -124,6 +128,15 @@ async function compute(ym) {
         AND (closed_at AT TIME ZONE 'Asia/Bangkok')::date < $1`,
     [R.fromIso]
   ).catch(() => []);
+  const meetBefore = new Set(
+    (
+      await all(
+        `SELECT DISTINCT c.owner_id FROM case_activities a JOIN cases c ON c.id = a.case_id
+          WHERE a.kind = $1 AND NOT a.is_system AND length(trim(a.detail)) >= $2 AND a.activity_date < $3`,
+        [MEETING, MEETING_MIN, R.fromIso]
+      ).catch(() => [])
+    ).map((r) => r.owner_id)
+  );
   const productsAll = (await all("SELECT count(*)::int AS n FROM lookups WHERE kind='product' AND active"))[0]?.n || 6;
   const sitesAll = (await all("SELECT count(*)::int AS n FROM lookups WHERE kind='site' AND active"))[0]?.n || 10;
 
@@ -191,7 +204,9 @@ async function compute(ym) {
     //    curve (4× the points ≈ 2× the score), so many easy cases and a few hard ones end up close. Filled in below.
     const casePoints = (c) => {
       const h = human(c);
-      const auto = 1 + (c.cs_number ? 0.5 : 0) + (h.some((a) => /onsite/i.test(a.kind || "")) ? 0.3 : 0) + (c.end_date && d.daysBetween(d.fromISODate(c.start_date), d.fromISODate(c.end_date)) > 7 ? 0.2 : 0);
+      // Customer meetings in the case: +0.3 for one, +0.5 for two or more (at most 2 count, so meetings can't be padded).
+      const meets = Math.min(2, h.filter(isMeeting).length);
+      const auto = 1 + (c.cs_number ? 0.5 : 0) + (h.some((a) => /onsite/i.test(a.kind || "")) ? 0.3 : 0) + (meets ? (meets >= 2 ? 0.5 : 0.3) : 0) + (c.end_date && d.daysBetween(d.fromISODate(c.start_date), d.fromISODate(c.end_date)) > 7 ? 0.2 : 0);
       return (SEV_W[c.severity] || 1) * auto * (c.complexity ? Number(c.complexity) : 1);
     };
     m.points = r1(closed.reduce((a, c) => a + casePoints(c), 0));
@@ -214,7 +229,10 @@ async function compute(ym) {
       if (c.product) prodCount[c.product.toUpperCase()] = (prodCount[c.product.toUpperCase()] || 0) + 1;
       if (c.site) siteCount[c.site] = (siteCount[c.site] || 0) + 1;
       human(c).forEach((a) => (kindCount[a.kind] = (kindCount[a.kind] || 0) + 1));
+      // A case with a customer meeting this month also counts as the work type "Meeting กับลูกค้า".
+      if (human(c).some((a) => isMeeting(a) && a.activity_date >= R.fromIso && a.activity_date <= R.toIso)) typeCount[MEETING] = (typeCount[MEETING] || 0) + 1;
     });
+    m.meetings = handled.reduce((n, c) => n + human(c).filter((a) => isMeeting(a) && a.activity_date >= R.fromIso && a.activity_date <= R.toIso).length, 0);
     const srk = srBy.get(o.id);
     m.sr = srk ? { count: srk.count, onTime: srk.onTime, categories: srk.categories } : { count: 0, onTime: 0, categories: {} };
     if (srk) {
@@ -225,7 +243,7 @@ async function compute(ym) {
       }
     }
     // Someone the manager assigned to one customer is not marked down for customer variety.
-    const dv = [diversity(typeCount, cats.length + 1), diversity(prodCount, productsAll), ...(o.dedicated ? [] : [diversity(siteCount, sitesAll)])];
+    const dv = [diversity(typeCount, cats.length + 2), diversity(prodCount, productsAll), ...(o.dedicated ? [] : [diversity(siteCount, sitesAll)])];
     m.dedicated = !!o.dedicated;
     m.diversity = Math.round((dv.reduce((a, b) => a + b, 0) / dv.length) * 100) / 100;
     const known = new Set(before.filter((b) => b.owner_id === o.id).map((b) => b.product));
@@ -234,6 +252,8 @@ async function compute(ym) {
     // A work type done for the first time through a service request counts as a new skill too.
     const srKnown = new Set(srTypesBefore.filter((x) => x.assignee_id === o.id).map((x) => x.category));
     if (known.size || srKnown.size) for (const cat of Object.keys(m.sr.categories)) if (!srKnown.has(cat) && !m.newSkills.includes(cat)) m.newSkills.push(cat);
+    // First customer meeting ever (for someone with history in the system) is a new skill too.
+    if (known.size && m.meetings && !meetBefore.has(o.id)) m.newSkills.push(MEETING);
     const sDiv = 10.5 * m.diversity + Math.min(4.5, 1.5 * m.newSkills.length); // 15
 
     // 6. Backlog & extensions (10): overdue at month end and approved extensions in the month.
@@ -325,6 +345,7 @@ function summarize(o, all) {
   if (m.firstResponseHrs != null && avgFirst != null && m.firstResponseHrs <= avgFirst) good.push(`ตอบสนองเร็ว (${m.firstResponseHrs} ชม.)`);
   if (m.critical) good.push(`รับเคส Critical ${m.critical} เคส`);
   if (m.newSkills.length) good.push(`ทำ ${m.newSkills.join(", ")} เป็นครั้งแรก`);
+  if (m.meetings) good.push(`Meeting กับลูกค้า ${m.meetings} ครั้ง`);
   if (m.sr && m.sr.count) good.push(`ทำคำขอบริการภายในเสร็จ ${m.sr.count} งาน (ทันกำหนด ${m.sr.onTime}) นับเป็นทักษะ ไม่มีคะแนนแยก`);
   if (m.fastClaims) good.push(`รับเคสจากลูกค้าภายใน 1 ชม. ${m.fastClaims} เคส`);
   if (m.csatCount >= 2 && m.csatAvg >= 4) good.push(`ลูกค้าให้คะแนนพึงพอใจเฉลี่ย ${m.csatAvg}/5 (${m.csatCount} คำตอบ)`);

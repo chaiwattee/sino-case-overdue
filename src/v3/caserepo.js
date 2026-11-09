@@ -40,7 +40,16 @@ function checkResolution(text) {
   if (t.length < RESOLUTION_MIN) throw Object.assign(new Error(`กรุณาใส่ Resolution อย่างน้อย ${RESOLUTION_MIN} ตัวอักษร (แก้ไขอย่างไร / ผลลัพธ์)`), { status: 400 });
   return t.slice(0, 4000);
 }
-const rootCauseOf = (v) => (v ? ROOT_CAUSES.find((x) => x === String(v).trim()) || null : null);
+// "อื่นๆ" carries the cause the user typed: stored as "อื่นๆ: <text>".
+const OTHER_CAUSE = "อื่นๆ";
+const rootCauseOf = (v, note) => {
+  if (!v) return null;
+  const s = String(v).trim();
+  const base = s.startsWith(OTHER_CAUSE) ? OTHER_CAUSE : ROOT_CAUSES.find((x) => x === s) || null;
+  if (base !== OTHER_CAUSE) return base;
+  const t = String(note ?? s.slice(OTHER_CAUSE.length).replace(/^\s*:\s*/, "")).replace(/\s+/g, " ").trim().slice(0, 200);
+  return t ? `${OTHER_CAUSE}: ${t}` : OTHER_CAUSE;
+};
 
 const SEVERITIES = ["Critical", "High", "Medium", "Low", "Request information"];
 const severityOf = (v) => SEVERITIES.find((x) => x.toLowerCase() === String(v || "").trim().toLowerCase()) || null;
@@ -225,7 +234,7 @@ async function createCase(user, body, { ownerId, startDate } = {}) {
       await addActivity(c, id, user, { kind: "บันทึก RCA จาก NICE", detail: `RCA (${rca.category}, NICE ส่ง ${rca.date}):\n${rca.text}` });
     }
     if (resolution) {
-      await c.query("UPDATE cases SET resolution = $2, root_cause = $3, resolved_by = $4, resolved_at = now() WHERE id = $1", [id, resolution, rootCauseOf(body.root_cause), user?.id || null]);
+      await c.query("UPDATE cases SET resolution = $2, root_cause = $3, resolved_by = $4, resolved_at = now() WHERE id = $1", [id, resolution, rootCauseOf(body.root_cause, body.root_cause_note), user?.id || null]);
       await addActivity(c, id, user, { kind: "ปิดเคส", detail: `ปิดเคส (${status})\nResolution: ${resolution}` });
     }
     return { id, newSite: site.created ? site.value : null };
@@ -304,7 +313,7 @@ async function updateCaseTx(user, kase, body, { allowReassign }) {
         vals.push(new Date());
         sets.push(`closed_at = $${vals.length}`);
         set("resolution", resolution);
-        set("root_cause", rootCauseOf(body.root_cause));
+        set("root_cause", rootCauseOf(body.root_cause, body.root_cause_note));
         set("resolved_by", user?.id || null);
         sets.push("resolved_at = now()");
         // A pending extension request no longer makes sense once the case is closed.
@@ -334,7 +343,11 @@ async function updateCaseTx(user, kase, body, { allowReassign }) {
           await logChange(c, kase, user, "resolution", kase.resolution || null, t);
         }
       }
-      if (body.root_cause !== undefined && rootCauseOf(body.root_cause) !== (kase.rootCause || null)) set("root_cause", rootCauseOf(body.root_cause));
+      const rcNew = body.root_cause !== undefined ? rootCauseOf(body.root_cause, body.root_cause_note) : null;
+      if (body.root_cause !== undefined && rcNew !== (kase.rootCause || null)) {
+        set("root_cause", rcNew);
+        await logChange(c, kase, user, "root_cause", kase.rootCause || null, rcNew);
+      }
     }
 
     if (allowReassign && body.owner_id && Number(body.owner_id) !== kase.owner_id) {

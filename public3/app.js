@@ -36,7 +36,8 @@
     }
   });
   const ROLE_CHIP = { admin: "overdue", manager: "r1", observer: "r2", engineer: "ok", viewer: "closed" };
-  const KINDS = ["ดำเนินการ", "ติดต่อลูกค้า", "เปิดเคส Vendor", "Remote / Onsite", "รอข้อมูล"];
+  const MEETING = "Meeting กับลูกค้า";
+  const KINDS = ["ดำเนินการ", "ติดต่อลูกค้า", MEETING, "เปิดเคส Vendor", "Remote / Onsite", "รอข้อมูล"];
   const SEV_CHIP = { Critical: "overdue", High: "r2", Medium: "r1", Low: "normal", "Request information": "closed" };
   const SEV_SHORT = { "Request information": "Request info" };
   const sevChip = (v) => (v ? `<span class="chip c-${SEV_CHIP[v] || "closed"} sev" title="Severity: ${esc(v)}">${esc(SEV_SHORT[v] || v)}</span>` : "");
@@ -246,6 +247,9 @@ ${rcaFieldsHtml(lk, c)}
     const lk = await lookups();
     const min = lk.resolutionMin || 20;
     const closedOpts = lk.status.filter(isClosedStatus);
+    // "อื่นๆ: <text>" is stored as one value: split it for the form.
+    const rcBase = String(c.rootCause || "").startsWith("อื่นๆ") ? "อื่นๆ" : c.rootCause || "";
+    const rcNote = rcBase === "อื่นๆ" ? String(c.rootCause).replace(/^อื่นๆ\s*:?\s*/, "") : "";
     const st0 = status && isClosedStatus(status) ? status : closedOpts.find((s) => s.toLowerCase() === "success") || closedOpts[0];
     const dlg = document.getElementById("dlg") || document.body.appendChild(Object.assign(document.createElement("dialog"), { id: "dlg" }));
     const ageTxt = c.stage === "closed" ? "" : c.stage === "overdue" ? `เกิน Due ${c.daysOverdue} วัน` : `อายุเคส ${c.totalAge ?? c.age ?? 0} วัน (ทัน SLA)`;
@@ -257,7 +261,8 @@ ${edit ? "" : `<fieldset class="f" style="border:0;padding:0;margin:0"><legend s
 <details class="st-all"><summary>Success กับ Resolved ต่างกันอย่างไร · ดูความหมายทุก Status</summary>${statusTable(closedOpts)}</details></fieldset>`}
 <label class="f"><span class="req">Resolution: แก้ไขอย่างไร / ผลลัพธ์</span><textarea name="res" rows="4" required placeholder="เช่น SMTP relay ของลูกค้าเปลี่ยน IP แก้ค่า relay ใน Scheduler ทดสอบส่ง report 3 รอบ ลูกค้ายืนยันว่าได้รับแล้ว">${esc(edit ? c.resolution || "" : "")}</textarea></label>
 <div class="hint" id="rs-count" style="text-align:right;margin-top:-6px"></div>
-<label class="f">สาเหตุของปัญหา (ไม่บังคับ)<select name="rc"><option value="">-</option>${(lk.rootCauses || []).map((x) => `<option ${x === c.rootCause ? "selected" : ""}>${esc(x)}</option>`).join("")}</select></label>
+<label class="f">สาเหตุของปัญหา (ไม่บังคับ)<select name="rc"><option value="">-</option>${(lk.rootCauses || []).map((x) => `<option ${x === rcBase ? "selected" : ""}>${esc(x)}</option>`).join("")}</select></label>
+<label class="f" id="rc-other" ${rcBase === "อื่นๆ" ? "" : "hidden"}><span class="req">ระบุสาเหตุ</span><input name="rc_note" maxlength="200" value="${esc(rcNote)}" placeholder="เช่น ไฟดับที่ Data Center ของลูกค้า ระบบ restart เอง"></label>
 ${edit || !csOf(c) ? "" : `<div class="rca-sec" id="rca-sec"></div>`}
 <p class="hint" style="margin:0">Resolution บันทึกเป็น Activity ในไทม์ไลน์ แสดงในหน้าเคส ผลค้นหา และ Report Excel (ข้อมูลภายใน ไม่ส่งถึงลูกค้า)</p>
 <div class="right"><button class="btn" value="cancel" formnovalidate>ยกเลิก</button><button class="btn primary" value="ok">${edit ? "บันทึก" : "ปิดเคส"}</button></div></form>`;
@@ -270,6 +275,14 @@ ${edit || !csOf(c) ? "" : `<div class="rca-sec" id="rca-sec"></div>`}
     };
     f.res.addEventListener("input", upd);
     upd();
+    const rcOther = dlg.querySelector("#rc-other");
+    const syncRc = () => {
+      rcOther.hidden = f.rc.value !== "อื่นๆ";
+      f.rc_note.required = !rcOther.hidden;
+      if (!rcOther.hidden && !f.rc_note.value) f.rc_note.focus();
+    };
+    f.rc.addEventListener("change", syncRc);
+    syncRc();
     const sh = dlg.querySelector("#st-help");
     const showHelp = () => {
       const p = f.querySelector("input[name=st]:checked");
@@ -316,6 +329,11 @@ ${edit || !csOf(c) ? "" : `<div class="rca-sec" id="rca-sec"></div>`}
           f.res.focus();
           return;
         }
+        if (f.rc.value === "อื่นๆ" && f.rc_note.value.trim().length < 3) {
+          toast("ระบุสาเหตุ เมื่อเลือก “อื่นๆ”");
+          f.rc_note.focus();
+          return;
+        }
         const picked = f.querySelector("input[name=st]:checked");
         let rcaOut = null;
         if (!edit && rcaNeeded() && !c.rcaText) {
@@ -326,7 +344,7 @@ ${edit || !csOf(c) ? "" : `<div class="rca-sec" id="rca-sec"></div>`}
           }
         }
         dlg.close();
-        finish({ status: edit ? undefined : picked ? picked.value : st0, resolution: text, root_cause: f.rc.value, ...(rcaOut ? { rca: rcaOut.rca, rcaFile: rcaOut.file } : {}) });
+        finish({ status: edit ? undefined : picked ? picked.value : st0, resolution: text, root_cause: f.rc.value, root_cause_note: f.rc.value === "อื่นๆ" ? f.rc_note.value.trim() : undefined, ...(rcaOut ? { rca: rcaOut.rca, rcaFile: rcaOut.file } : {}) });
       };
       dlg.addEventListener("close", () => finish(null), { once: true });
       dlg.showModal();
@@ -1011,6 +1029,7 @@ ${permsC.edit ? `<form id="af" class="stack">
 <label class="f">วันที่ทำ<input type="date" name="date" value="${daysAgo(0)}" max="${daysAgo(0)}" required></label>
 <label class="f">ประเภท<select name="kind">${KINDS.map((k) => `<option>${k}</option>`).join("")}</select></label></div>
 <label class="f">รายละเอียด<textarea name="detail" rows="3" placeholder="วันนี้ทำอะไรไป ผลเป็นอย่างไร ขั้นต่อไปคืออะไร" required></textarea></label>
+<p class="hint" id="af-meet" hidden style="margin:-4px 0 0">สรุป Meeting: ผู้เข้าร่วมฝั่งลูกค้า หัวข้อ ข้อตกลง และขั้นต่อไป อย่างน้อย 30 ตัวอักษร จึงนับเป็นงานใน KPI (นับสูงสุด 2 ครั้งต่อเคส)</p>
 <div class="right"><button class="btn primary" type="submit">เพิ่ม Activity</button></div></form>` : ""}
 ${actsHtml(data.activities)}</section>`}
 </aside></div>
@@ -1069,10 +1088,21 @@ ${actsHtml(data.activities)}</section>`}
       }
     };
     const af = document.getElementById("af");
+    if (af) {
+      const meetHint = document.getElementById("af-meet");
+      const syncMeet = () => {
+        const m = af.kind.value === MEETING;
+        meetHint.hidden = !m;
+        af.detail.placeholder = m ? "เช่น ประชุมกับคุณสมศรี (IT Manager) และทีม QA ของลูกค้า สรุปแผน upgrade เป็นเวอร์ชันใหม่ เลือกทำวันที่ 20 ลูกค้าขอ test plan ก่อน 15" : "วันนี้ทำอะไรไป ผลเป็นอย่างไร ขั้นต่อไปคืออะไร";
+      };
+      af.kind.addEventListener("change", syncMeet);
+      syncMeet();
+    }
     if (af)
       af.onsubmit = async (e) => {
         e.preventDefault();
         if (af.detail.value.trim().length < 3) return toast("กรุณาใส่รายละเอียด");
+        if (af.kind.value === MEETING && af.detail.value.trim().length < 30 && !confirm("สรุป Meeting สั้นกว่า 30 ตัวอักษร จะไม่นับใน KPI บันทึกต่อไหม?")) return;
         try {
           await post(`/case/${id}/activity`, { date: af.date.value, kind: af.kind.value, detail: af.detail.value });
           toast("เพิ่ม Activity แล้ว");
@@ -1121,7 +1151,7 @@ ${actsHtml(data.activities)}</section>`}
         const r = await askResolution(c, { edit: true });
         if (!r) return;
         try {
-          await post("/case/" + id, { resolution: r.resolution, root_cause: r.root_cause }, "PUT");
+          await post("/case/" + id, { resolution: r.resolution, root_cause: r.root_cause, root_cause_note: r.root_cause_note }, "PUT");
           toast("บันทึก Resolution แล้ว");
           viewCase(id);
         } catch (err) {
@@ -3029,6 +3059,7 @@ ${stat("ขยายเวลา (อนุมัติ)", `${m.extensions} ค�
 ${stat("เกิน Due สิ้นเดือน", `<span class="${m.overdueAtEnd ? "t-over" : ""}">${m.overdueAtEnd}</span>`)}
 ${stat("Critical", m.critical)}
 ${stat("รับเคสลูกค้าใน 1 ชม.", m.fastClaims)}
+${stat("Meeting กับลูกค้า", m.meetings || 0)}
 ${stat("ความพึงพอใจลูกค้า", m.csatCount ? `${m.csatAvg}/5 · ${m.csatCount} คำตอบ` : "-")}</div></section></div>
 
 <div class="kp-g3" style="grid-template-columns:repeat(3,minmax(0,1fr))">
@@ -3060,8 +3091,8 @@ ${owners.map((o) => `<tr class="click" data-href="#/kpi?${qs({ month, owner: o.i
 <div class="tablewrap" style="margin-top:10px"><table><thead><tr><th>เกณฑ์</th><th class="n">คะแนน</th><th>วิธีคิด</th></tr></thead><tbody>
 <tr><td>1. ปิดทัน SLA</td><td class="n">30</td><td>% เคสที่ปิดทัน Due เดิม (ก่อนขยาย) · ปิดทันเวลาที่ขยายได้ครึ่งหนึ่ง · Critical นับ 2 เท่า</td></tr>
 <tr><td>2. ความเร็วตอบสนอง</td><td class="n">15</td><td>Activity แรกหลังเปิดเคส ≤4 ชม. 8 · ≤8 ชม. 6 · ≤24 ชม. 4 · ≤48 ชม. 2 และอัปเดตเคสที่เปิดอยู่ทุก ≤2 วัน 7 · ≤3 วัน 5 · ≤5 วัน 3</td></tr>
-<tr><td>3. แต้มงาน (ปริมาณ × ความยาก)</td><td class="n">20</td><td>แต้มต่อเคสที่ปิด = Severity (Critical 3, High 2, Medium 1.5, Low 1, ขอข้อมูล 0.5) × (1 + ส่ง NICE/มี CS Number 0.5 + Onsite 0.3 + เปิดนานเกิน 7 วัน 0.2) × ความยากที่ Manager ปรับ (0.8–1.5) · เทียบค่ากลางของทีมเดียวกันแบบรากที่สอง: 20 × √(แต้ม ÷ ค่ากลาง) ÷ 1.3 สูงสุด 20 · เคสมากขึ้น 4 เท่าได้คะแนนเพิ่มประมาณ 2 เท่า</td></tr>
-<tr><td>4. ความหลากหลาย / Skill</td><td class="n">15</td><td>ความกระจายของประเภทงาน Product และลูกค้า (0–1) × 10.5 + Product หรือประเภทงานที่ทำครั้งแรก 1.5 ต่อรายการ (สูงสุด 4.5) · คนที่ตั้งเป็น "ดูแลลูกค้าประจำ" ไม่นับความหลากหลายของลูกค้า</td></tr>
+<tr><td>3. แต้มงาน (ปริมาณ × ความยาก)</td><td class="n">20</td><td>แต้มต่อเคสที่ปิด = Severity (Critical 3, High 2, Medium 1.5, Low 1, ขอข้อมูล 0.5) × (1 + ส่ง NICE/มี CS Number 0.5 + Onsite 0.3 + Meeting กับลูกค้า 0.3 หรือ 0.5 ถ้าตั้งแต่ 2 ครั้ง + เปิดนานเกิน 7 วัน 0.2) × ความยากที่ Manager ปรับ (0.8–1.5) · เทียบค่ากลางของทีมเดียวกันแบบรากที่สอง: 20 × √(แต้ม ÷ ค่ากลาง) ÷ 1.3 สูงสุด 20 · เคสมากขึ้น 4 เท่าได้คะแนนเพิ่มประมาณ 2 เท่า</td></tr>
+<tr><td>4. ความหลากหลาย / Skill</td><td class="n">15</td><td>ความกระจายของประเภทงาน Product และลูกค้า (0–1) × 10.5 + Product หรือประเภทงานที่ทำครั้งแรก 1.5 ต่อรายการ (สูงสุด 4.5) · Meeting กับลูกค้านับเป็นประเภทงานหนึ่ง และ Meeting ครั้งแรกนับเป็น Skill ใหม่ · คนที่ตั้งเป็น "ดูแลลูกค้าประจำ" ไม่นับความหลากหลายของลูกค้า</td></tr>
 <tr><td>5. งานค้างและการขยายเวลา</td><td class="n">10</td><td>เริ่ม 10 · หัก 2 ต่อเคสเกิน Due สิ้นเดือน · หัก 1 ต่อการขยายที่อนุมัติ (สูงสุด 3)</td></tr>
 <tr><td>6. คุณภาพการบันทึก</td><td class="n">10</td><td>เคสที่ปิดมีบันทึกสุดท้าย ≥20 ตัวอักษร 5 · Activity ที่มีเนื้อหาเฉลี่ย ≥3 ต่อเคส 5</td></tr>
 <tr><td>+ โบนัส</td><td class="n">5</td><td>รับเคสจากลูกค้าภายใน 1 ชม. ทุก 2 เคสได้ 1 (สูงสุด 5)</td></tr>
