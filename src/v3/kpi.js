@@ -32,6 +32,10 @@ const MEETING_KINDS = [MEETING_ONSITE, MEETING_ONLINE, MEETING];
 const MEETING_MIN = 30;
 const MEET_W = { [MEETING_ONSITE]: 0.4, [MEETING_ONLINE]: 0.2, [MEETING]: 0.2 };
 const isMeeting = (a) => MEETING_KINDS.includes(a.kind) && String(a.detail || "").trim().length >= MEETING_MIN;
+// Deploying a patch / upgrade on the customer's system (with a real summary: version, systems, result, rollback): +0.3 once per case.
+const DEPLOY = "Deploy Patch";
+const DEPLOY_TYPE = "Upgrade / Patch"; // the work type it counts as
+const isDeploy = (a) => a.kind === DEPLOY && String(a.detail || "").trim().length >= MEETING_MIN;
 /** Extra work multiplier for a case's meetings: the 2 heaviest count (onsite 0.4, online 0.2), at most 0.6. */
 const meetingBonus = (acts) => {
   const w = acts.filter(isMeeting).map((a) => MEET_W[a.kind]).sort((x, y) => y - x).slice(0, 2);
@@ -148,6 +152,15 @@ async function compute(ym) {
       ).catch(() => [])
     ).map((r) => r.owner_id)
   );
+  const deployBefore = new Set(
+    (
+      await all(
+        `SELECT DISTINCT c.owner_id FROM case_activities a JOIN cases c ON c.id = a.case_id
+          WHERE a.kind = $1 AND NOT a.is_system AND length(trim(a.detail)) >= $2 AND a.activity_date < $3`,
+        [DEPLOY, MEETING_MIN, R.fromIso]
+      ).catch(() => [])
+    ).map((r) => r.owner_id)
+  );
   const productsAll = (await all("SELECT count(*)::int AS n FROM lookups WHERE kind='product' AND active"))[0]?.n || 6;
   const sitesAll = (await all("SELECT count(*)::int AS n FROM lookups WHERE kind='site' AND active"))[0]?.n || 10;
 
@@ -218,7 +231,7 @@ async function compute(ym) {
       // Customer meetings: onsite +0.4, online +0.2, the 2 heaviest count (at most +0.6), so meetings can't be padded.
       // "Remote / Onsite" technical work keeps its own +0.3; an onsite meeting is not counted twice.
       const onsiteWork = h.some((a) => /onsite/i.test(a.kind || "") && !MEETING_KINDS.includes(a.kind));
-      const auto = 1 + (c.cs_number ? 0.5 : 0) + (onsiteWork ? 0.3 : 0) + meetingBonus(h) + (c.end_date && d.daysBetween(d.fromISODate(c.start_date), d.fromISODate(c.end_date)) > 7 ? 0.2 : 0);
+      const auto = 1 + (c.cs_number ? 0.5 : 0) + (onsiteWork ? 0.3 : 0) + meetingBonus(h) + (h.some(isDeploy) ? 0.3 : 0) + (c.end_date && d.daysBetween(d.fromISODate(c.start_date), d.fromISODate(c.end_date)) > 7 ? 0.2 : 0);
       return (SEV_W[c.severity] || 1) * auto * (c.complexity ? Number(c.complexity) : 1);
     };
     m.points = r1(closed.reduce((a, c) => a + casePoints(c), 0));
@@ -248,6 +261,13 @@ async function compute(ym) {
     m.meetingsOnsite = meetsIn.filter((a) => a.kind === MEETING_ONSITE).length;
     m.meetingsOnline = meetsIn.length - m.meetingsOnsite;
     m.meetings = meetsIn.length;
+    const deploysIn = handled.filter((c) => human(c).some((a) => isDeploy(a) && a.activity_date >= R.fromIso && a.activity_date <= R.toIso));
+    m.deploys = deploysIn.length;
+    // A case with a patch deployed this month counts as the work type "Upgrade / Patch" (once, even if its text already says so).
+    deploysIn.forEach((c) => {
+      const t = categorize([c.task, ...human(c).map((a) => a.detail)].join(" "), cats);
+      if (t !== DEPLOY_TYPE) typeCount[DEPLOY_TYPE] = (typeCount[DEPLOY_TYPE] || 0) + 1;
+    });
     const srk = srBy.get(o.id);
     m.sr = srk ? { count: srk.count, onTime: srk.onTime, categories: srk.categories } : { count: 0, onTime: 0, categories: {} };
     if (srk) {
@@ -269,6 +289,7 @@ async function compute(ym) {
     if (known.size || srKnown.size) for (const cat of Object.keys(m.sr.categories)) if (!srKnown.has(cat) && !m.newSkills.includes(cat)) m.newSkills.push(cat);
     // First customer meeting ever (for someone with history in the system) is a new skill too.
     if (known.size && m.meetings && !meetBefore.has(o.id)) m.newSkills.push(MEETING);
+    if (known.size && m.deploys && !deployBefore.has(o.id) && !m.newSkills.includes(DEPLOY)) m.newSkills.push(DEPLOY);
     const sDiv = 10.5 * m.diversity + Math.min(4.5, 1.5 * m.newSkills.length); // 15
 
     // 6. Backlog & extensions (10): overdue at month end and approved extensions in the month.
@@ -360,6 +381,7 @@ function summarize(o, all) {
   if (m.firstResponseHrs != null && avgFirst != null && m.firstResponseHrs <= avgFirst) good.push(`ตอบสนองเร็ว (${m.firstResponseHrs} ชม.)`);
   if (m.critical) good.push(`รับเคส Critical ${m.critical} เคส`);
   if (m.newSkills.length) good.push(`ทำ ${m.newSkills.join(", ")} เป็นครั้งแรก`);
+  if (m.deploys) good.push(`Deploy Patch ${m.deploys} เคส`);
   if (m.meetings) good.push(`Meeting กับลูกค้า ${m.meetings} ครั้ง (Onsite ${m.meetingsOnsite || 0} · Online ${m.meetingsOnline || 0})`);
   if (m.sr && m.sr.count) good.push(`ทำคำขอบริการภายในเสร็จ ${m.sr.count} งาน (ทันกำหนด ${m.sr.onTime}) นับเป็นทักษะ ไม่มีคะแนนแยก`);
   if (m.fastClaims) good.push(`รับเคสจากลูกค้าภายใน 1 ชม. ${m.fastClaims} เคส`);
