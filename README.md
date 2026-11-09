@@ -53,17 +53,9 @@ curl "http://localhost:3001/run-alerts?dry=1&secret=$RUN_SECRET"  # ดูว่
 ดู log ด้วย `pm2 logs case-overdue` — ตอน dry run จะขึ้น `[DRY RUN email] ...` แทนการส่งจริง
 เมื่อพร้อม เปลี่ยน `DRY_RUN_EMAIL=0` แล้ว `pm2 restart case-overdue --update-env`
 
-### 5. เปิดหน้าเว็บผ่าน Cloudflare Named Tunnel
-เพิ่ม hostname ใน tunnel ที่มีอยู่ (`~/.cloudflared/config.yml`) ไว้**ก่อน**บรรทัด `http_status:404`
-```yaml
-  - hostname: case.baanpin.com
-    service: http://localhost:3001
-```
-```bash
-cloudflared tunnel route dns cwa-acc case.baanpin.com
-pm2 restart <ชื่อ process ของ tunnel>
-```
-แล้วตั้ง `DASHBOARD_URL=https://case.baanpin.com` · หน้าเว็บถาม user/pass ตาม `DASHBOARD_USER` / `DASHBOARD_PASS`
+### 5. เปิดหน้าเว็บ
+ระบบเปิดที่ `BASE_URL` (https://case.sinostech.co.th:9443) ผ่าน HTTPS ของแอปเอง (port forward โดยทีม IT บริษัท)
+ไม่ใช้ Cloudflare Tunnel และ domain baanpin.com แล้ว (ชื่อเดิม case.baanpin.com / case-v3.baanpin.com ถูกถอดออกจาก tunnel เมื่อ พ.ย. 2026)
 
 ### 6. ปิดงาน cron-job.org เดิม
 ตัว `/run-check` เดิมยังใช้ได้ (ตอนนี้แปลว่า "ส่ง email แจ้งเตือน") แต่ระบบตั้งเวลาเองแล้ว ให้ปิด job เดิมเพื่อไม่ให้ซ้ำซ้อน
