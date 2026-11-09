@@ -23,9 +23,20 @@ const DEFAULT_CATEGORIES = [
 ];
 const OTHER = "อื่นๆ";
 // A customer meeting (an activity of this kind with a real summary) counts as work and as a work type of its own.
-const MEETING = "Meeting กับลูกค้า";
+// Customer meetings (an activity of these kinds with a real summary) count as work and as a work type of their own.
+// Onsite (travel, half a day or more) is worth more than online. "Meeting กับลูกค้า" is the older single kind: counted as online.
+const MEETING = "Meeting กับลูกค้า"; // the work type name
+const MEETING_ONSITE = "Meeting Onsite กับลูกค้า";
+const MEETING_ONLINE = "Meeting Online กับลูกค้า";
+const MEETING_KINDS = [MEETING_ONSITE, MEETING_ONLINE, MEETING];
 const MEETING_MIN = 30;
-const isMeeting = (a) => a.kind === MEETING && String(a.detail || "").trim().length >= MEETING_MIN;
+const MEET_W = { [MEETING_ONSITE]: 0.4, [MEETING_ONLINE]: 0.2, [MEETING]: 0.2 };
+const isMeeting = (a) => MEETING_KINDS.includes(a.kind) && String(a.detail || "").trim().length >= MEETING_MIN;
+/** Extra work multiplier for a case's meetings: the 2 heaviest count (onsite 0.4, online 0.2), at most 0.6. */
+const meetingBonus = (acts) => {
+  const w = acts.filter(isMeeting).map((a) => MEET_W[a.kind]).sort((x, y) => y - x).slice(0, 2);
+  return Math.min(0.6, w.reduce((s, x) => s + x, 0));
+};
 
 async function categories() {
   const s = await getSetting("kpi_categories", null);
@@ -132,8 +143,8 @@ async function compute(ym) {
     (
       await all(
         `SELECT DISTINCT c.owner_id FROM case_activities a JOIN cases c ON c.id = a.case_id
-          WHERE a.kind = $1 AND NOT a.is_system AND length(trim(a.detail)) >= $2 AND a.activity_date < $3`,
-        [MEETING, MEETING_MIN, R.fromIso]
+          WHERE a.kind = ANY($1) AND NOT a.is_system AND length(trim(a.detail)) >= $2 AND a.activity_date < $3`,
+        [MEETING_KINDS, MEETING_MIN, R.fromIso]
       ).catch(() => [])
     ).map((r) => r.owner_id)
   );
@@ -204,9 +215,10 @@ async function compute(ym) {
     //    curve (4× the points ≈ 2× the score), so many easy cases and a few hard ones end up close. Filled in below.
     const casePoints = (c) => {
       const h = human(c);
-      // Customer meetings in the case: +0.3 for one, +0.5 for two or more (at most 2 count, so meetings can't be padded).
-      const meets = Math.min(2, h.filter(isMeeting).length);
-      const auto = 1 + (c.cs_number ? 0.5 : 0) + (h.some((a) => /onsite/i.test(a.kind || "")) ? 0.3 : 0) + (meets ? (meets >= 2 ? 0.5 : 0.3) : 0) + (c.end_date && d.daysBetween(d.fromISODate(c.start_date), d.fromISODate(c.end_date)) > 7 ? 0.2 : 0);
+      // Customer meetings: onsite +0.4, online +0.2, the 2 heaviest count (at most +0.6), so meetings can't be padded.
+      // "Remote / Onsite" technical work keeps its own +0.3; an onsite meeting is not counted twice.
+      const onsiteWork = h.some((a) => /onsite/i.test(a.kind || "") && !MEETING_KINDS.includes(a.kind));
+      const auto = 1 + (c.cs_number ? 0.5 : 0) + (onsiteWork ? 0.3 : 0) + meetingBonus(h) + (c.end_date && d.daysBetween(d.fromISODate(c.start_date), d.fromISODate(c.end_date)) > 7 ? 0.2 : 0);
       return (SEV_W[c.severity] || 1) * auto * (c.complexity ? Number(c.complexity) : 1);
     };
     m.points = r1(closed.reduce((a, c) => a + casePoints(c), 0));
@@ -232,7 +244,10 @@ async function compute(ym) {
       // A case with a customer meeting this month also counts as the work type "Meeting กับลูกค้า".
       if (human(c).some((a) => isMeeting(a) && a.activity_date >= R.fromIso && a.activity_date <= R.toIso)) typeCount[MEETING] = (typeCount[MEETING] || 0) + 1;
     });
-    m.meetings = handled.reduce((n, c) => n + human(c).filter((a) => isMeeting(a) && a.activity_date >= R.fromIso && a.activity_date <= R.toIso).length, 0);
+    const meetsIn = handled.flatMap((c) => human(c).filter((a) => isMeeting(a) && a.activity_date >= R.fromIso && a.activity_date <= R.toIso));
+    m.meetingsOnsite = meetsIn.filter((a) => a.kind === MEETING_ONSITE).length;
+    m.meetingsOnline = meetsIn.length - m.meetingsOnsite;
+    m.meetings = meetsIn.length;
     const srk = srBy.get(o.id);
     m.sr = srk ? { count: srk.count, onTime: srk.onTime, categories: srk.categories } : { count: 0, onTime: 0, categories: {} };
     if (srk) {
@@ -345,7 +360,7 @@ function summarize(o, all) {
   if (m.firstResponseHrs != null && avgFirst != null && m.firstResponseHrs <= avgFirst) good.push(`ตอบสนองเร็ว (${m.firstResponseHrs} ชม.)`);
   if (m.critical) good.push(`รับเคส Critical ${m.critical} เคส`);
   if (m.newSkills.length) good.push(`ทำ ${m.newSkills.join(", ")} เป็นครั้งแรก`);
-  if (m.meetings) good.push(`Meeting กับลูกค้า ${m.meetings} ครั้ง`);
+  if (m.meetings) good.push(`Meeting กับลูกค้า ${m.meetings} ครั้ง (Onsite ${m.meetingsOnsite || 0} · Online ${m.meetingsOnline || 0})`);
   if (m.sr && m.sr.count) good.push(`ทำคำขอบริการภายในเสร็จ ${m.sr.count} งาน (ทันกำหนด ${m.sr.onTime}) นับเป็นทักษะ ไม่มีคะแนนแยก`);
   if (m.fastClaims) good.push(`รับเคสจากลูกค้าภายใน 1 ชม. ${m.fastClaims} เคส`);
   if (m.csatCount >= 2 && m.csatAvg >= 4) good.push(`ลูกค้าให้คะแนนพึงพอใจเฉลี่ย ${m.csatAvg}/5 (${m.csatCount} คำตอบ)`);

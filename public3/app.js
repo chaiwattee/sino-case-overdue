@@ -36,8 +36,8 @@
     }
   });
   const ROLE_CHIP = { admin: "overdue", manager: "r1", observer: "r2", engineer: "ok", viewer: "closed" };
-  const MEETING = "Meeting กับลูกค้า";
-  const KINDS = ["ดำเนินการ", "ติดต่อลูกค้า", MEETING, "เปิดเคส Vendor", "Remote / Onsite", "รอข้อมูล"];
+  const MEETINGS = ["Meeting Onsite กับลูกค้า", "Meeting Online กับลูกค้า"];
+  const KINDS = ["ดำเนินการ", "ติดต่อลูกค้า", ...MEETINGS, "เปิดเคส Vendor", "Remote / Onsite", "รอข้อมูล"];
   const SEV_CHIP = { Critical: "overdue", High: "r2", Medium: "r1", Low: "normal", "Request information": "closed" };
   const SEV_SHORT = { "Request information": "Request info" };
   const sevChip = (v) => (v ? `<span class="chip c-${SEV_CHIP[v] || "closed"} sev" title="Severity: ${esc(v)}">${esc(SEV_SHORT[v] || v)}</span>` : "");
@@ -1029,7 +1029,7 @@ ${permsC.edit ? `<form id="af" class="stack">
 <label class="f">วันที่ทำ<input type="date" name="date" value="${daysAgo(0)}" max="${daysAgo(0)}" required></label>
 <label class="f">ประเภท<select name="kind">${KINDS.map((k) => `<option>${k}</option>`).join("")}</select></label></div>
 <label class="f">รายละเอียด<textarea name="detail" rows="3" placeholder="วันนี้ทำอะไรไป ผลเป็นอย่างไร ขั้นต่อไปคืออะไร" required></textarea></label>
-<p class="hint" id="af-meet" hidden style="margin:-4px 0 0">สรุป Meeting: ผู้เข้าร่วมฝั่งลูกค้า หัวข้อ ข้อตกลง และขั้นต่อไป อย่างน้อย 30 ตัวอักษร จึงนับเป็นงานใน KPI (นับสูงสุด 2 ครั้งต่อเคส)</p>
+<p class="hint" id="af-meet" hidden style="margin:-4px 0 0">สรุป Meeting: ผู้เข้าร่วมฝั่งลูกค้า หัวข้อ ข้อตกลง และขั้นต่อไป อย่างน้อย 30 ตัวอักษร จึงนับเป็นงานใน KPI · Onsite (ไปที่ลูกค้า) นับมากกว่า Online · นับสูงสุด 2 ครั้งต่อเคส</p>
 <div class="right"><button class="btn primary" type="submit">เพิ่ม Activity</button></div></form>` : ""}
 ${actsHtml(data.activities)}</section>`}
 </aside></div>
@@ -1091,7 +1091,7 @@ ${actsHtml(data.activities)}</section>`}
     if (af) {
       const meetHint = document.getElementById("af-meet");
       const syncMeet = () => {
-        const m = af.kind.value === MEETING;
+        const m = MEETINGS.includes(af.kind.value);
         meetHint.hidden = !m;
         af.detail.placeholder = m ? "เช่น ประชุมกับคุณสมศรี (IT Manager) และทีม QA ของลูกค้า สรุปแผน upgrade เป็นเวอร์ชันใหม่ เลือกทำวันที่ 20 ลูกค้าขอ test plan ก่อน 15" : "วันนี้ทำอะไรไป ผลเป็นอย่างไร ขั้นต่อไปคืออะไร";
       };
@@ -1102,7 +1102,7 @@ ${actsHtml(data.activities)}</section>`}
       af.onsubmit = async (e) => {
         e.preventDefault();
         if (af.detail.value.trim().length < 3) return toast("กรุณาใส่รายละเอียด");
-        if (af.kind.value === MEETING && af.detail.value.trim().length < 30 && !confirm("สรุป Meeting สั้นกว่า 30 ตัวอักษร จะไม่นับใน KPI บันทึกต่อไหม?")) return;
+        if (MEETINGS.includes(af.kind.value) && af.detail.value.trim().length < 30 && !confirm("สรุป Meeting สั้นกว่า 30 ตัวอักษร จะไม่นับใน KPI บันทึกต่อไหม?")) return;
         try {
           await post(`/case/${id}/activity`, { date: af.date.value, kind: af.kind.value, detail: af.detail.value });
           toast("เพิ่ม Activity แล้ว");
@@ -3059,7 +3059,7 @@ ${stat("ขยายเวลา (อนุมัติ)", `${m.extensions} ค�
 ${stat("เกิน Due สิ้นเดือน", `<span class="${m.overdueAtEnd ? "t-over" : ""}">${m.overdueAtEnd}</span>`)}
 ${stat("Critical", m.critical)}
 ${stat("รับเคสลูกค้าใน 1 ชม.", m.fastClaims)}
-${stat("Meeting กับลูกค้า", m.meetings || 0)}
+${stat("Meeting กับลูกค้า", m.meetings ? `${m.meetings} (Onsite ${m.meetingsOnsite || 0} · Online ${m.meetingsOnline || 0})` : 0)}
 ${stat("ความพึงพอใจลูกค้า", m.csatCount ? `${m.csatAvg}/5 · ${m.csatCount} คำตอบ` : "-")}</div></section></div>
 
 <div class="kp-g3" style="grid-template-columns:repeat(3,minmax(0,1fr))">
@@ -3091,7 +3091,7 @@ ${owners.map((o) => `<tr class="click" data-href="#/kpi?${qs({ month, owner: o.i
 <div class="tablewrap" style="margin-top:10px"><table><thead><tr><th>เกณฑ์</th><th class="n">คะแนน</th><th>วิธีคิด</th></tr></thead><tbody>
 <tr><td>1. ปิดทัน SLA</td><td class="n">30</td><td>% เคสที่ปิดทัน Due เดิม (ก่อนขยาย) · ปิดทันเวลาที่ขยายได้ครึ่งหนึ่ง · Critical นับ 2 เท่า</td></tr>
 <tr><td>2. ความเร็วตอบสนอง</td><td class="n">15</td><td>Activity แรกหลังเปิดเคส ≤4 ชม. 8 · ≤8 ชม. 6 · ≤24 ชม. 4 · ≤48 ชม. 2 และอัปเดตเคสที่เปิดอยู่ทุก ≤2 วัน 7 · ≤3 วัน 5 · ≤5 วัน 3</td></tr>
-<tr><td>3. แต้มงาน (ปริมาณ × ความยาก)</td><td class="n">20</td><td>แต้มต่อเคสที่ปิด = Severity (Critical 3, High 2, Medium 1.5, Low 1, ขอข้อมูล 0.5) × (1 + ส่ง NICE/มี CS Number 0.5 + Onsite 0.3 + Meeting กับลูกค้า 0.3 หรือ 0.5 ถ้าตั้งแต่ 2 ครั้ง + เปิดนานเกิน 7 วัน 0.2) × ความยากที่ Manager ปรับ (0.8–1.5) · เทียบค่ากลางของทีมเดียวกันแบบรากที่สอง: 20 × √(แต้ม ÷ ค่ากลาง) ÷ 1.3 สูงสุด 20 · เคสมากขึ้น 4 เท่าได้คะแนนเพิ่มประมาณ 2 เท่า</td></tr>
+<tr><td>3. แต้มงาน (ปริมาณ × ความยาก)</td><td class="n">20</td><td>แต้มต่อเคสที่ปิด = Severity (Critical 3, High 2, Medium 1.5, Low 1, ขอข้อมูล 0.5) × (1 + ส่ง NICE/มี CS Number 0.5 + Onsite 0.3 + Meeting Onsite 0.4 / Meeting Online 0.2 ต่อครั้ง นับ 2 ครั้งที่มากสุด ไม่เกิน 0.6 + เปิดนานเกิน 7 วัน 0.2) × ความยากที่ Manager ปรับ (0.8–1.5) · เทียบค่ากลางของทีมเดียวกันแบบรากที่สอง: 20 × √(แต้ม ÷ ค่ากลาง) ÷ 1.3 สูงสุด 20 · เคสมากขึ้น 4 เท่าได้คะแนนเพิ่มประมาณ 2 เท่า</td></tr>
 <tr><td>4. ความหลากหลาย / Skill</td><td class="n">15</td><td>ความกระจายของประเภทงาน Product และลูกค้า (0–1) × 10.5 + Product หรือประเภทงานที่ทำครั้งแรก 1.5 ต่อรายการ (สูงสุด 4.5) · Meeting กับลูกค้านับเป็นประเภทงานหนึ่ง และ Meeting ครั้งแรกนับเป็น Skill ใหม่ · คนที่ตั้งเป็น "ดูแลลูกค้าประจำ" ไม่นับความหลากหลายของลูกค้า</td></tr>
 <tr><td>5. งานค้างและการขยายเวลา</td><td class="n">10</td><td>เริ่ม 10 · หัก 2 ต่อเคสเกิน Due สิ้นเดือน · หัก 1 ต่อการขยายที่อนุมัติ (สูงสุด 3)</td></tr>
 <tr><td>6. คุณภาพการบันทึก</td><td class="n">10</td><td>เคสที่ปิดมีบันทึกสุดท้าย ≥20 ตัวอักษร 5 · Activity ที่มีเนื้อหาเฉลี่ย ≥3 ต่อเคส 5</td></tr>
