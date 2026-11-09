@@ -28,7 +28,7 @@ const forCases = (ids) => (ids.length ? all(`${EXT_SELECT} WHERE e.case_id = ANY
 async function request(user, kase, b) {
   if (kase.stage === "closed") throw bad("เคสนี้ปิดแล้ว ขอขยายเวลาไม่ได้");
   const isOwner = kase.owner_id === user.id;
-  if (!isOwner && (await perms.level(user, "case_edit")) !== "all") throw bad("เฉพาะ Owner ของเคสขอขยายเวลาได้", 403);
+  if (!isOwner && (await perms.level(user, "case_edit")) !== "all") throw bad("เฉพาะ User ของเคสขอขยายเวลาได้", 403);
   const reason = clean(b.reason);
   if (reason.length < 5) throw bad("กรุณาระบุเหตุผลที่ต้องขยาย (อย่างน้อย 5 ตัวอักษร)");
   const approver = (await approvers()).find((u) => u.id === Number(b.approverId));
@@ -118,7 +118,7 @@ async function mailRequest(e, kase) {
       "#B07800",
       `<p style="margin:0 0 12px">เรียน ${esc(e.approver_name)}</p>
 <p style="margin:0 0 14px">${esc(e.requested_by_name)} ขอขยายเวลาเคส <strong>${esc(e.case_no)}</strong> อีก ${e.days} วัน จาก Due <strong>${esc(th(e.old_due))}</strong> เป็น <strong>${esc(th(e.new_due))}</strong></p>
-${fieldTable([["เลขเคส", `${e.case_no}${e.cs_number ? ` / ${e.cs_number}` : ""}`], ["ลูกค้า", e.site || "-"], ["งาน", e.task || "-"], ["Owner", e.owner_name || "-"], ["เปิดเคสมาแล้ว", `${kase.totalAge ?? kase.age ?? "-"} วัน`], ["ขยายไปแล้ว", `${kase.extCount || 0} ครั้ง`]])}
+${fieldTable([["เลขเคส", `${e.case_no}${e.cs_number ? ` / ${e.cs_number}` : ""}`], ["ลูกค้า", e.site || "-"], ["งาน", e.task || "-"], ["User", e.owner_name || "-"], ["เปิดเคสมาแล้ว", `${kase.totalAge ?? kase.age ?? "-"} วัน`], ["ขยายไปแล้ว", `${kase.extCount || 0} ครั้ง`]])}
 <p style="margin:14px 0;background:#F6F7F9;padding:12px 14px;border-radius:8px;white-space:pre-wrap"><strong>เหตุผล:</strong> ${esc(e.reason)}</p>
 ${button(`${config3.baseUrl}/#/case/${e.case_id}`, "เปิดเพื่ออนุมัติ")}`
     ),
@@ -134,7 +134,7 @@ async function mailDecision(e, by) {
     subject: `[${ok ? "อนุมัติ" : "ไม่อนุมัติ"}ขยายเวลา] ${e.case_no} · ${e.site || "-"}${ok ? ` · Due ใหม่ ${th(e.new_due)}` : ""}`,
     html: shell(
       ok ? "#1C6B45" : "#9A1B30",
-      `<p style="margin:0 0 12px">เรียน ${esc(e.owner_name || "Owner")}</p>
+      `<p style="margin:0 0 12px">เรียน ${esc(e.owner_name || "User")}</p>
 <p style="margin:0 0 14px">${esc(by.display_name)} ${ok ? `<strong>อนุมัติ</strong>ขยายเวลาเคส ${esc(e.case_no)} (คำขอครั้งที่ ${e.seq}) Due ใหม่ <strong>${esc(th(e.new_due))}</strong> ระบบเริ่มนับรอบแจ้งเตือนใหม่ (วันที่ ${config.alert1Day}, วันที่ ${config.alert2Day} และเมื่อเกิน Due)` : `<strong>ไม่อนุมัติ</strong>คำขอขยายเวลาเคส ${esc(e.case_no)} Due ยังเป็น ${esc(th(e.old_due))}`}</p>
 ${e.decision_note ? `<p style="margin:0 0 14px;background:#F6F7F9;padding:12px 14px;border-radius:8px"><strong>ความเห็น:</strong> ${esc(e.decision_note)}</p>` : ""}
 ${button(`${config3.baseUrl}/#/case/${e.case_id}`, "เปิดเคส")}`
@@ -182,7 +182,7 @@ function addSheet(wb, rep) {
   if (!rep.extensions) return;
   const ws = wb.addWorksheet("การขยายเวลา", { views: [{ state: "frozen", ySplit: 1 }] });
   ws.columns = [
-    { header: "Owner", key: "owner", width: 22 },
+    { header: "User", key: "owner", width: 22 },
     { header: "เลขเคส", key: "case_no", width: 16 },
     { header: "CS Number", key: "cs", width: 14 },
     { header: "ลูกค้า", key: "site", width: 16 },

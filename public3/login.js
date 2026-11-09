@@ -162,3 +162,10 @@ ${sso ? `<div class="or"><span></span>บัญชีภายนอก<span></s
     })
     .catch(() => renderLogin(false));
 })();
+
+(function () {
+  const b = document.getElementById("lang");
+  if (!b || !window.I18N) return;
+  b.textContent = I18N.lang === "en" ? "ไทย" : "EN";
+  b.onclick = () => I18N.set(I18N.lang === "en" ? "th" : "en");
+})();

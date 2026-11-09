@@ -80,7 +80,7 @@ function caseAlertEmail(c, type) {
 
   const html = shell(
     COLORS[type].bar,
-    `<p style="margin:0 0 12px">เรียน ${esc(c.owner || "Owner")}</p>
+    `<p style="margin:0 0 12px">เรียน ${esc(c.owner || "User")}</p>
 <p style="margin:0 0 18px">${lead} กรุณาอัปเดตสถานะหรือปิดเคส${c.caseUrl ? "บนหน้าเว็บ" : "ใน Case List"}</p>
 ${fieldTable([
   ...(c.caseNo ? [["เลขเคส", c.caseNo]] : []),
@@ -141,7 +141,7 @@ function auditEmail(changes) {
     `<p style="margin:0 0 12px;font-size:17px;font-weight:700">ตรวจพบการแก้ไข Start date / Target date</p>
 <p style="margin:0 0 16px">Start date ถูก stamp อัตโนมัติครั้งเดียวตอนเปิดเคส การแก้ไขภายหลังจะทำให้นับวัน SLA ใหม่ จึงแจ้งให้ตรวจสอบ</p>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:14px">
-<tr style="text-align:left;color:#5B6576;font-size:12px"><th style="padding:8px 10px;border-bottom:1px solid #E2E5EA">เคส</th><th style="padding:8px 10px;border-bottom:1px solid #E2E5EA">Owner</th><th style="padding:8px 10px;border-bottom:1px solid #E2E5EA">ช่อง</th><th style="padding:8px 10px;border-bottom:1px solid #E2E5EA">เดิม → ใหม่</th><th style="padding:8px 10px;border-bottom:1px solid #E2E5EA">แก้ไฟล์ล่าสุดโดย</th></tr>
+<tr style="text-align:left;color:#5B6576;font-size:12px"><th style="padding:8px 10px;border-bottom:1px solid #E2E5EA">เคส</th><th style="padding:8px 10px;border-bottom:1px solid #E2E5EA">User</th><th style="padding:8px 10px;border-bottom:1px solid #E2E5EA">ช่อง</th><th style="padding:8px 10px;border-bottom:1px solid #E2E5EA">เดิม → ใหม่</th><th style="padding:8px 10px;border-bottom:1px solid #E2E5EA">แก้ไฟล์ล่าสุดโดย</th></tr>
 ${rows}</table>
 <p style="margin:14px 0 0;font-size:12px;color:#5B6576">"แก้ไฟล์ล่าสุดโดย" คือผู้ที่บันทึกไฟล์ครั้งล่าสุด อาจไม่ใช่ผู้ที่แก้แถวนี้โดยตรงหากมีหลายคนแก้ไฟล์ในช่วงเดียวกัน</p>`
   );
@@ -195,9 +195,9 @@ ${tile("เปิดเคสในช่วงนี้", k.opened, "#18212E")}
       "#1F4FD1"
     )}${tile("เกิน Due ขณะนี้", k.overdueNow, "#8E1B3A")}
 </tr></table>
-<p style="margin:0 0 8px;font-weight:700">แยกตาม Owner</p>
+<p style="margin:0 0 8px;font-weight:700">แยกตาม User</p>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;margin:0 0 18px">
-<tr style="color:#5B6576;font-size:12px">${th("Owner")}${th("เปิดใหม่", 1)}${th("ปิด", 1)}${th("ปิดทัน SLA", 1)}${th(
+<tr style="color:#5B6576;font-size:12px">${th("User")}${th("เปิดใหม่", 1)}${th("ปิด", 1)}${th("ปิดทัน SLA", 1)}${th(
       "ยังเปิดอยู่",
       1
     )}${th("เกิน Due", 1)}${hasExt ? th("ขอขยายเวลา", 1) : ""}</tr>
@@ -207,7 +207,7 @@ ${
   rep.overdueCases.length
     ? `<p style="margin:0 0 8px;font-weight:700">เคสที่เกิน Due ขณะนี้ (${rep.overdueCases.length})</p>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;margin:0 0 18px">
-<tr style="color:#5B6576;font-size:12px">${th("เลขเคส")}${th("ลูกค้า")}${th("Owner")}${th("เกิน", 1)}</tr>${overdueRows}</table>`
+<tr style="color:#5B6576;font-size:12px">${th("เลขเคส")}${th("ลูกค้า")}${th("User")}${th("เกิน", 1)}</tr>${overdueRows}</table>`
     : ""
 }
 ${
@@ -219,7 +219,7 @@ ${
   hasExt && rep.extensions.length
     ? `<p style="margin:18px 0 8px;font-weight:700">การขอขยายเวลาในช่วงนี้ (${rep.extensions.length} ครั้ง)</p>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px">
-<tr style="color:#5B6576;font-size:12px">${th("Owner")}${th("เลขเคส")}${th("เหตุผล")}${th("ผล")}</tr>${rep.extensions
+<tr style="color:#5B6576;font-size:12px">${th("User")}${th("เลขเคส")}${th("เหตุผล")}${th("ผล")}</tr>${rep.extensions
         .map(
           (e) => `<tr><td style="padding:7px 10px;border-bottom:1px solid #EEF0F3">${esc(e.owner_name || "-")}</td><td style="padding:7px 10px;border-bottom:1px solid #EEF0F3">${esc(e.case_no)}<br><span style="color:#5B6576;font-size:12px">${esc(e.site || "")} · คำขอครั้งที่ ${e.seq}</span></td><td style="padding:7px 10px;border-bottom:1px solid #EEF0F3">${esc(e.reason)}</td><td style="padding:7px 10px;border-bottom:1px solid #EEF0F3">${esc({ pending: "รออนุมัติ", approved: "อนุมัติ", rejected: "ไม่อนุมัติ" }[e.status] || e.status)}${e.approver_name ? `<br><span style="color:#5B6576;font-size:12px">${esc(e.approver_name)}</span>` : ""}</td></tr>`
         )

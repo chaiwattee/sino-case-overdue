@@ -418,7 +418,7 @@ async function notifyNew(i) {
 ${intakeFields(i)}
 <p style="margin:14px 0;white-space:pre-wrap;background:#F6F7F9;padding:12px 14px;border-radius:8px">${esc(i.detail)}</p>
 ${i.new_line ? `<p style="margin:0 0 12px;color:#7A4A00">เคสแรกจากบัญชี LINE นี้ กรุณาโทรยืนยันกับลูกค้าตอนรับเคส</p>` : ""}
-${button(intakeUrl(i), "รับเคส / โอนให้ Owner")}`
+${button(intakeUrl(i), "รับเคส / โอนให้ User")}`
   );
   if (to.length) await graph.sendMail({ to, cc, subject, html }).catch((e) => console.error("[intake] mail:", e.message));
   if (s.telegram && !i.is_test) {
@@ -556,7 +556,7 @@ async function notifyClaimed(i, kase, by, owner) {
         to: [owner.email],
         cc: [],
         subject: `${i.is_test ? "[ทดสอบ] " : ""}[โอนเคสให้คุณ] ${i.severity} · ${kase.site} · ${i.subject}`,
-        html: shell(SEV_COLOR[i.severity] || "#1F4FD1", `<p style="margin:0 0 14px">${esc(by.display_name)} โอนเคสจากลูกค้า ${esc(kase.site)} ให้คุณเป็น Owner SLA 7 วันเริ่มนับวันนี้</p>${intakeFields(i)}
+        html: shell(SEV_COLOR[i.severity] || "#1F4FD1", `<p style="margin:0 0 14px">${esc(by.display_name)} โอนเคสจากลูกค้า ${esc(kase.site)} ให้คุณเป็น User SLA 7 วันเริ่มนับวันนี้</p>${intakeFields(i)}
 <p style="margin:14px 0;white-space:pre-wrap;background:#F6F7F9;padding:12px 14px;border-radius:8px">${esc(i.detail)}</p>${button(kase.caseUrl, "เปิดเคสเพื่ออัปเดต")}`),
       })
       .catch((e) => console.error("[intake] owner mail:", e.message));
@@ -564,7 +564,7 @@ async function notifyClaimed(i, kase, by, owner) {
   if (s.telegram && !i.is_test) {
     const mins = Math.round((new Date(i.claimed_at) - new Date(i.created_at)) / 60000);
     await telegram
-      .sendText(`✅ รับเคสแล้ว ${i.req_no} → ${kase.caseNo}${kase.csNumber ? ` (${kase.csNumber})` : ""}\n${kase.site} · ${i.severity} · Owner: ${owner.display_name}\nโดย ${by.display_name} · รอรับ ${mins < 60 ? mins + " นาที" : Math.floor(mins / 60) + " ชม. " + (mins % 60) + " นาที"}`)
+      .sendText(`✅ รับเคสแล้ว ${i.req_no} → ${kase.caseNo}${kase.csNumber ? ` (${kase.csNumber})` : ""}\n${kase.site} · ${i.severity} · User: ${owner.display_name}\nโดย ${by.display_name} · รอรับ ${mins < 60 ? mins + " นาที" : Math.floor(mins / 60) + " ชม. " + (mins % 60) + " นาที"}`)
       .catch(() => {});
   }
   // Requests that came by email: reply in the customer's own thread from the shared mailbox.

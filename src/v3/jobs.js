@@ -77,7 +77,7 @@ async function runAlerts({ dryRun = false } = {}) {
     const c = x.c;
     const { subject, html } = caseAlertEmail(c, x.type);
     const { to, cc, noOwner } = recipientsFor(c, x.type, rules);
-    const finalSubject = noOwner ? `[ไม่พบอีเมล Owner] ${subject}` : subject;
+    const finalSubject = noOwner ? `[ไม่พบอีเมล User] ${subject}` : subject;
     let ok = true;
     let error = null;
     let dry = false;
@@ -451,6 +451,8 @@ function startJobs() {
   job("web-risk", "40 7 * * *", true, () => checkWebRisk());
   // KPI of last month to managers and admins, 1st of every month 08:20.
   job("kpi-monthly", "20 8 1 * *", j.reports, () => require("./kpi").sendMonthly());
+  // New customer names still waiting for a manager: remind every workday morning.
+  job("customer-pending", "35 8 * * 1-5", true, () => require("./customers").remindAll());
   // Customer intake: hourly "nobody has claimed this yet" reminders (checked every 5 min), chatbot webhooks, cleanup.
   const intake = require("./intake");
   job("intake-reminders", "*/5 * * * *", j.intake, () => intake.runReminders());

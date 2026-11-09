@@ -27,7 +27,7 @@
   const STAGE = { normal: "ปกติ", r1: "แจ้งรอบ 1", r2: "แจ้งรอบ 2", overdue: "เกิน Due", no_start: "ไม่มี Start date", closed: "ปิดแล้ว" };
   const ALERT = { r1: "แจ้งรอบ 1", r2: "แจ้งรอบ 2", overdue: "เกิน Due" };
   const ROLE = { admin: "Admin", manager: "Manager", observer: "Observer", engineer: "Engineer", viewer: "Viewer", requester: "ผู้ขอบริการ" };
-  const ROLE_HINT = { admin: "ทำได้ทุกอย่าง รวมถึงจัดการผู้ใช้และตั้งค่าระบบ", manager: "ดูและแก้เคสของทีม อนุมัติขยายเวลา ส่ง Report ปรับคะแนน KPI เห็นและมอบงานได้เฉพาะคนในทีมตัวเอง", observer: "ดูได้ทุกทีมทุกหน้า (ภาพรวม เคส ราย Owner KPI Report ประวัติแก้ไข) แก้ไขอะไรไม่ได้", engineer: "เปิด แก้ และปิดเคสของตัวเอง เห็น KPI ของตัวเอง", viewer: "ดูภาพรวมและเคสของทีมตัวเองอย่างเดียว", requester: "พนักงานทีมอื่น ส่งคำขอบริการและดูได้เฉพาะคำขอของตัวเอง ไม่เห็นเคสลูกค้า (ระบบสร้างให้อัตโนมัติเมื่อ login ด้วยบัญชี Microsoft ของบริษัท)" };
+  const ROLE_HINT = { admin: "ทำได้ทุกอย่าง รวมถึงจัดการผู้ใช้และตั้งค่าระบบ", manager: "ดูและแก้เคสของทีม อนุมัติขยายเวลา ส่ง Report ปรับคะแนน KPI เห็นและมอบงานได้เฉพาะคนในทีมตัวเอง", observer: "ดูได้ทุกทีมทุกหน้า (ภาพรวม เคส ราย User KPI Report ประวัติแก้ไข) แก้ไขอะไรไม่ได้", engineer: "เปิด แก้ และปิดเคสของตัวเอง เห็น KPI ของตัวเอง", viewer: "ดูภาพรวมและเคสของทีมตัวเองอย่างเดียว", requester: "พนักงานทีมอื่น ส่งคำขอบริการและดูได้เฉพาะคำขอของตัวเอง ไม่เห็นเคสลูกค้า (ระบบสร้างให้อัตโนมัติเมื่อ login ด้วยบัญชี Microsoft ของบริษัท)" };
   document.addEventListener("change", (e) => {
     const t = e.target;
     if (t && t.name === "role" && t.tagName === "SELECT") {
@@ -191,7 +191,58 @@ ${rcaFieldsHtml(lk, c)}
     });
   }
 
+  // ---- New customer waiting for a manager (approve / rename / merge)
+  async function bindSitePending(c, reload) {
+    const rb = document.getElementById("btn-site-remind");
+    if (rb)
+      rb.onclick = async () => {
+        try {
+          await post(`/customers/${c.sitePendingId}/remind`, {});
+          toast("ส่งเตือน Manager แล้ว");
+        } catch (err) {
+          toast(err.message, 6000);
+        }
+      };
+    const { pending: p } = await api("/customers/pending/by-name?" + qs({ site: c.site }));
+    const db = document.getElementById("btn-site-decide");
+    if (!p || !p.canDecide || !db) return;
+    db.hidden = false;
+    db.onclick = () => {
+      const dlg = document.getElementById("dlg") || document.body.appendChild(Object.assign(document.createElement("dialog"), { id: "dlg" }));
+      dlg.innerHTML = `<form class="card" method="dialog" id="spf" style="min-width:min(560px,90vw)"><h2>ตรวจชื่อลูกค้าใหม่</h2>
+<p class="muted" style="margin:0;font-size:14px"><strong>${esc(p.value)}</strong> · เพิ่มเมื่อ ${fdt(p.created_at)}${p.similar.length ? ` · ชื่อใกล้เคียง: ${esc(p.similar.map((x) => x.value).join(", "))}` : ""}</p>
+<label class="chk ik-opt"><input type="radio" name="act" value="approve" checked> <span><strong>อนุมัติเป็นลูกค้าใหม่</strong><br><span class="muted">เพิ่มเข้ารายการ ทุกคนเลือกได้</span></span></label>
+<label class="chk ik-opt"><input type="radio" name="act" value="merge"> <span style="flex:1"><strong>รวมกับลูกค้าที่มีอยู่</strong><br><span class="muted">เคสที่ใช้ชื่อนี้เปลี่ยนเป็นชื่อเดิม</span>
+<select name="into" style="margin-top:6px"><option value="">เลือกลูกค้า</option>${p.similar.length ? `<optgroup label="ชื่อใกล้เคียง">${p.similar.map((x) => `<option value="${x.id}">${esc(x.value)}</option>`).join("")}</optgroup>` : ""}<optgroup label="ทั้งหมด">${p.all.map((x) => `<option value="${x.id}">${esc(x.value)}</option>`).join("")}</optgroup></select></span></label>
+<label class="chk ik-opt"><input type="radio" name="act" value="rename"> <span style="flex:1"><strong>แก้ชื่อแล้วอนุมัติ</strong><br><input name="value" value="${esc(p.value)}" maxlength="120" style="margin-top:6px" aria-label="ชื่อที่ถูกต้อง"></span></label>
+<div class="right"><button class="btn" value="cancel" formnovalidate>ยกเลิก</button><button class="btn primary" value="ok">ยืนยัน</button></div></form>`;
+      const f = dlg.querySelector("#spf");
+      f.into.onchange = () => (f.querySelector("input[value=merge]").checked = true);
+      f.value.oninput = () => (f.querySelector("input[value=rename]").checked = true);
+      f.onsubmit = async (e) => {
+        if (e.submitter && e.submitter.value === "cancel") return;
+        e.preventDefault();
+        const act = f.querySelector("input[name=act]:checked").value;
+        if (act === "merge" && !f.into.value) return toast("เลือกลูกค้าที่จะรวม");
+        try {
+          const r = await post(`/customers/${p.id}/decide`, { action: act, into: f.into.value, value: f.value.value });
+          dlg.close();
+          toast(act === "merge" ? `รวมเข้ากับ “${r.site}” แล้ว` : `อนุมัติลูกค้า “${r.site}” แล้ว`);
+          LOOKUPS = null;
+          reload();
+        } catch (err) {
+          toast(err.message, 6000);
+        }
+      };
+      dlg.showModal();
+    };
+  }
+
   async function askResolution(c, { status, edit = false } = {}) {
+    if (!edit && c.sitePendingId) {
+      toast(`ปิดเคสไม่ได้: ลูกค้า “${c.site}” ยังรอ Manager อนุมัติ`, 6000);
+      return null;
+    }
     const lk = await lookups();
     const min = lk.resolutionMin || 20;
     const closedOpts = lk.status.filter(isClosedStatus);
@@ -289,7 +340,7 @@ ${edit || !csOf(c) ? "" : `<div class="rca-sec" id="rca-sec"></div>`}
       ["overview", "#/", "ภาพรวม", true],
       ["mine", "#/mine", "เคสของฉัน", lvl("case_create") !== "none" || lvl("case_edit") !== "none"],
       ["intake", "#/intake", "เคสจากลูกค้า", true],
-      ["owner", "#/owner", "ราย Owner", true],
+      ["owner", "#/owner", "ราย User", true],
       ["kpi", "#/kpi", "KPI (ทดลองใช้)", ME.user.role !== "viewer"],
       ["rank", "#/rank", "อันดับ KPI", !!(ME.leaderboard && ME.leaderboard.visible)],
       ["reports", "#/reports", "Report &amp; Export", lvl("export") !== "none" || lvl("reports_manage") !== "none"],
@@ -367,7 +418,7 @@ ${edit || !csOf(c) ? "" : `<div class="rca-sec" id="rca-sec"></div>`}
     return `<section class="card rca-wait"><div class="title"><h2>RCA จาก NICE</h2><span class="chip c-r1">รอ RCA จาก NICE</span></div>
 <p style="margin:0;font-size:14px">เคสนี้มี CS Number <span class="mono">${esc(csOf(c))}</span> ต้องมี RCA จาก NICE ก่อนจึงจะปิดเคสได้ (ยกเว้นปิดเป็น Cancel หรือ N/A) ถ้า NICE ส่งมาแล้วบันทึกไว้ก่อนได้ ตอนปิดเคสไม่ต้องกรอกซ้ำ</p>${btn ? `<div>${btn}</div>` : ""}</section>`;
   }
-  const rcaTag = (c) => (c.rcaPending ? ` <span class="chip c-r1" title="มี CS Number ต้องมี RCA จาก NICE ก่อนปิด">รอ RCA</span>` : "");
+  const rcaTag = (c) => (c.rcaPending ? ` <span class="chip c-r1" title="มี CS Number ต้องมี RCA จาก NICE ก่อนปิด">รอ RCA</span>` : "") + (c.sitePendingId && c.stage !== "closed" ? ` <span class="chip c-r1" title="ลูกค้าใหม่ รอ Manager อนุมัติชื่อก่อนปิดเคส">ลูกค้ารออนุมัติ</span>` : "");
   function resLine(c, { missing = false } = {}) {
     if (c.stage !== "closed") return "";
     if (c.resolution) return `<div class="resol sm" title="${esc(c.resolution)}">${c.status && !["success", "resolved"].includes(c.status.toLowerCase()) ? `Resolution (${esc(c.status)}): ` : "Resolution: "}${esc(c.resolution)}</div>`;
@@ -376,7 +427,7 @@ ${edit || !csOf(c) ? "" : `<div class="rca-sec" id="rca-sec"></div>`}
   function caseTable(cases, { showOwner = true, missingRes = false, empty = "ไม่มีเคส" } = {}) {
     if (!cases.length) return `<div class="empty">${empty}</div>`;
     return `<div class="tablewrap"><table style="min-width:${showOwner ? 1080 : 980}px">
-<thead><tr><th>เลขเคส</th><th>ลูกค้า</th><th>Severity</th><th>งาน</th>${showOwner ? "<th>Owner</th>" : ""}<th>ทีม</th><th>เปิดเคส</th><th>Due</th><th>อายุเคส</th><th>สถานะ</th></tr></thead>
+<thead><tr><th>เลขเคส</th><th>ลูกค้า</th><th>Severity</th><th>งาน</th>${showOwner ? "<th>User</th>" : ""}<th>ทีม</th><th>เปิดเคส</th><th>Due</th><th>อายุเคส</th><th>สถานะ</th></tr></thead>
 <tbody>${cases
       .map(
         (c) => `<tr class="click" data-href="#/case/${c.id}">
@@ -395,12 +446,12 @@ ${showOwner ? `<td><a href="#/owner/${encodeURIComponent(c.ownerId)}">${esc(c.ow
       .join("")}</tbody></table></div>`;
   }
 
-  const FIELD = { extension: "ขยายเวลา (Due)", severity: "Severity", start_date: "Start date", target_date: "Target date", status: "Status", owner: "Owner", deleted: "ลบเคส", resolution: "Resolution" };
+  const FIELD = { extension: "ขยายเวลา (Due)", severity: "Severity", start_date: "Start date", target_date: "Target date", status: "Status", owner: "User", deleted: "ลบเคส", resolution: "Resolution" };
   const DIR = { later: "เลื่อนออกไป", earlier: "เลื่อนเข้ามา", set: "ใส่ค่าใหม่", cleared: "ลบค่าออก" };
   function changeRows(changes, { empty = "ยังไม่มีประวัติการแก้ไข" } = {}) {
     if (!changes.length) return `<div class="empty">${empty}</div>`;
     const val = (c, v) => (c.field === "start_date" || c.field === "target_date" || c.field === "extension" ? fd(v, true) : esc(v || "-"));
-    return `<div class="tablewrap"><table style="min-width:860px"><thead><tr><th>เมื่อ</th><th>เลขเคส</th><th>ลูกค้า</th><th>Owner</th><th>รายการ</th><th>เดิม → ใหม่</th><th>แก้โดย</th></tr></thead><tbody>${changes
+    return `<div class="tablewrap"><table style="min-width:860px"><thead><tr><th>เมื่อ</th><th>เลขเคส</th><th>ลูกค้า</th><th>User</th><th>รายการ</th><th>เดิม → ใหม่</th><th>แก้โดย</th></tr></thead><tbody>${changes
       .map(
         (c) => `<tr>
 <td>${fdt(c.detected_at)}</td>
@@ -426,7 +477,11 @@ ${showOwner ? `<td><a href="#/owner/${encodeURIComponent(c.ownerId)}">${esc(c.ow
   // ------------------------------------------------------------ overview
   async function viewOverview(params) {
     setNav("overview");
-    const [data, ikHtml, extHtml, lk, srAll] = await Promise.all([api("/overview?" + qs({ source: params.source })), intakeSection(), extPendingSection(), lookups(), srList("team")]);
+    const [data, ikHtml, extHtml, lk, srAll, cp] = await Promise.all([api("/overview?" + qs({ source: params.source })), intakeSection(), extPendingSection(), lookups(), srList("team"), api("/customers/pending").catch(() => ({ list: [] }))]);
+    const cpHtml = cp.list.length
+      ? `<section class="card" style="border-color:var(--r1)"><div class="title"><h2>ลูกค้าใหม่รออนุมัติ (${cp.list.length})</h2><span>เคสปิดไม่ได้จนกว่าจะตรวจชื่อ</span></div>
+<div class="stack" style="gap:8px">${cp.list.map((x) => `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><span><strong>${esc(x.value)}</strong> <span class="muted">· เพิ่มโดย ${esc(x.created_by || "-")} ${fdt(x.created_at)}${x.similar.length ? ` · ใกล้เคียง: ${esc(x.similar.map((v) => v.value).join(", "))}` : ""}</span></span>${x.cases[0] ? `<a class="btn" href="#/case/${x.cases[0].id}" style="min-height:32px">${x.canDecide ? "ตรวจชื่อ" : "ดูเคส"} · ${esc(x.cases[0].caseNo || "#" + x.cases[0].id)}</a>` : ""}</div>`).join("")}</div></section>`
+      : "";
     const srTeam = srAll.filter((r) => !params.source || r.team === params.source);
     const srCount = (st) => srTeam.filter((r) => (st === "pending" ? ["pending", "info"].includes(r.status) : r.status === st)).length;
     const srLate = srTeam.filter((r) => r.status === "overdue").sort((a, b) => b.overdueDays - a.overdueDays);
@@ -461,16 +516,17 @@ ${cols.map((c) => `<div class="rw-col"><div class="rw-count">${c.items.length ||
 
     $app.innerHTML = `
 <div class="head"><div><h1>ภาพรวมสถานะเคส</h1>
-<p>ทุกเคสต้องปิดภายใน ${cfg.slaDays} วันนับจาก Start date ระบบส่ง email ถึง Owner ในวันที่ ${cfg.alert1Day} วันที่ ${cfg.alert2Day} และทุกวันหลังเกิน Due</p></div>
+<p>ทุกเคสต้องปิดภายใน ${cfg.slaDays} วันนับจาก Start date ระบบส่ง email ถึง User ในวันที่ ${cfg.alert1Day} วันที่ ${cfg.alert2Day} และทุกวันหลังเกิน Due</p></div>
 <div class="actions">
 ${lvl("export") === "all" ? `<a class="btn" href="api/export?${qs({ from: daysAgo(29), to: daysAgo(0), source: params.source })}">Export Excel (30 วัน)</a>` : ""}
 ${can("case_create") ? `<a class="btn primary" href="#/case/new">เปิดเคสใหม่</a>` : ""}</div></div>
+${cpHtml}
 ${extHtml}
 ${ikHtml}
 ${srHtml}
 <form class="ofilters" id="flt" onsubmit="return false">
 <label class="f">ทีม<select name="source"><option value="">ทุกทีมที่เห็นได้ (${data.sources.length})</option>${teamOpts}</select></label>
-<label class="f">ค้นหาเคส<input type="search" name="q" placeholder="เลขเคส, CS, งาน, Owner, Resolution"></label>
+<label class="f">ค้นหาเคส<input type="search" name="q" placeholder="เลขเคส, CS, งาน, User, Resolution"></label>
 <div class="site-pick">${comboBox("site", "", lk.site, { allowNew: false, required: false, label: "ลูกค้า" })}</div>
 <label class="f">สถานะเคส<select name="st"><option value="open">ยังไม่ปิด</option><option value="closed">ปิดแล้ว</option><option value="all">ทั้งหมด</option>
 <optgroup label="ทีละ Status">${lk.status.map((x) => `<option value="s:${esc(x)}" title="${esc(statusHelp(x))}">${esc(x)}</option>`).join("")}</optgroup></select></label>
@@ -488,16 +544,16 @@ ${kpi("closed", "ปิดแล้ว (30 วัน)", k.sla.closed, k.sla.pct 
 ${data.runway.length ? runwayHtml : `<div class="empty">ไม่มีเคสที่เปิดอยู่</div>`}
 <div class="rw-zones">${segs.map((s) => `<span><span class="dot d-${s}" aria-hidden="true"></span>${STAGE[s]} (${RANGE[s]}): ${k[s]}</span>`).join("")}</div>
 </section>
-<section class="card"><div class="title"><h2>สถานะแยกตาม Owner</h2><span>คลิกแถวเพื่อดูรายเคส</span></div>
-${data.owners.length ? `<div class="tablewrap"><table style="min-width:820px"><thead><tr><th>Owner</th><th class="n">เปิดอยู่</th><th class="n">ปกติ</th><th class="n">แจ้งรอบ 1</th><th class="n">แจ้งรอบ 2</th><th class="n">เกิน Due</th><th class="n">ปิดทัน SLA (30 วัน)</th></tr></thead><tbody>
+<section class="card"><div class="title"><h2>สถานะแยกตาม User</h2><span>คลิกแถวเพื่อดูรายเคส</span></div>
+${data.owners.length ? `<div class="tablewrap"><table style="min-width:820px"><thead><tr><th>User</th><th class="n">เปิดอยู่</th><th class="n">ปกติ</th><th class="n">แจ้งรอบ 1</th><th class="n">แจ้งรอบ 2</th><th class="n">เกิน Due</th><th class="n">ปิดทัน SLA (30 วัน)</th></tr></thead><tbody>
 ${data.owners.map((o) => `<tr class="click" data-href="#/owner/${encodeURIComponent(o.id)}">
 <td><a href="#/owner/${encodeURIComponent(o.id)}" style="font-weight:600">${esc(o.owner)}</a><div class="muted" style="font-size:12px">${esc(o.email || "-")}</div></td>
 <td class="n" style="font-weight:600">${o.open}</td><td class="n">${o.normal}</td><td class="n t-r1">${o.r1}</td><td class="n t-r2">${o.r2}</td><td class="n t-over">${o.overdue}</td>
 <td class="n">${o.sla.pct === null ? "-" : `${o.sla.pct}% <span class="muted">(${o.sla.onTime}/${o.sla.closed})</span>`}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">ยังไม่มีเคส</div>`}
 </section>
 ${data.topCases.length ? `<section class="card"><div class="title"><h2>เคสที่ต้องตามด่วน</h2><span>แจ้งรอบ 2 และเกิน Due · 10 อันดับแรก</span></div>${caseTable(data.topCases)}</section>` : ""}
-<section class="card"><div class="title"><h2>Email แจ้งเตือนที่ส่งวันนี้</h2><span>${(() => { const r = cfg.alertRules || {}; const t = (r.ccTypes || []).map((x) => ALERT[x]); return r.cc && t.length ? `ถึง Owner · CC ${esc(r.cc)} เฉพาะ${esc(t.join(", "))}` : "ถึง Owner เท่านั้น"; })()}</span></div>
-${data.alertsToday.length ? `<div class="tablewrap"><table style="min-width:720px"><thead><tr><th>เวลา</th><th>เลขเคส</th><th>ลูกค้า</th><th>Owner</th><th>ประเภท</th><th>ผล</th></tr></thead><tbody>
+<section class="card"><div class="title"><h2>Email แจ้งเตือนที่ส่งวันนี้</h2><span>${(() => { const r = cfg.alertRules || {}; const t = (r.ccTypes || []).map((x) => ALERT[x]); return r.cc && t.length ? `ถึง User · CC ${esc(r.cc)} เฉพาะ${esc(t.join(", "))}` : "ถึง User เท่านั้น"; })()}</span></div>
+${data.alertsToday.length ? `<div class="tablewrap"><table style="min-width:720px"><thead><tr><th>เวลา</th><th>เลขเคส</th><th>ลูกค้า</th><th>User</th><th>ประเภท</th><th>ผล</th></tr></thead><tbody>
 ${data.alertsToday.map((a) => `<tr><td>${fdt(a.sent_at)}</td><td>${caseCell(a, `#/case/${a.case_id}`)}</td><td style="font-weight:600">${esc(a.site || "-")}</td><td>${esc(a.owner || "-")}</td>
 <td>${chip(a.alert_type, ALERT[a.alert_type])}</td><td>${a.ok ? chip("ok", "ส่งแล้ว") : `<span class="chip c-fail" title="${esc(a.error)}">ส่งไม่สำเร็จ</span>`}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">วันนี้ยังไม่มีการส่ง email แจ้งเตือน</div>`}
 </section>
@@ -587,10 +643,10 @@ ${lvl("audit_view") !== "none" ? `<section class="card"><div class="title"><h2>�
 <div class="actions">${lvl("export") === "all" && cases.length ? `<button class="btn" type="button" id="cs-export">Export ผลค้นหาเป็น Excel</button>` : ""}</div></div>
 <section class="card" style="gap:16px">
 <form class="sfilters" id="sf" onsubmit="return false">
-<label class="f">คำค้น<input type="search" name="q" value="${esc(params.q || "")}" placeholder="เลขเคส, CS, งาน, Owner, Resolution"></label>
+<label class="f">คำค้น<input type="search" name="q" value="${esc(params.q || "")}" placeholder="เลขเคส, CS, งาน, User, Resolution"></label>
 <div class="site-pick">${comboBox("site", params.site || "", sites, { allowNew: false, required: false, label: "ลูกค้า" })}${params.site ? `<button type="button" class="clear" id="site-clear" aria-label="ล้างลูกค้า">×</button>` : ""}</div>
 <label class="f">ทีม<select name="source"><option value="">ทุกทีม</option>${teams.map(([k, l]) => `<option value="${esc(k)}" ${k === params.source ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label>
-<label class="f">Owner<select name="owner"><option value="">ทุกคน</option>${owners.map(([id, n]) => `<option value="${esc(id)}" ${id === params.owner ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></label>
+<label class="f">User<select name="owner"><option value="">ทุกคน</option>${owners.map(([id, n]) => `<option value="${esc(id)}" ${id === params.owner ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></label>
 <label class="f">เปิดเคสในช่วง<select name="range">${[["", "ทั้งหมด"], ["d30", "30 วันล่าสุด"], ["d90", "90 วันล่าสุด"], ["m12", "12 เดือนล่าสุด"], ["year", "ปีนี้"]].map(([v, l]) => `<option value="${v}" ${v === range ? "selected" : ""}>${l}</option>`).join("")}</select></label>
 </form>
 <div class="stack" style="gap:6px"><span style="font-size:13px;font-weight:600">สถานะเคส${stage ? ` · ระดับ ${esc(STAGE[stage])} <a href="${link({ stage: "" })}" style="font-weight:500">ล้าง</a>` : ""}</span>
@@ -603,9 +659,9 @@ ${statuses.map((x) => pill(stSet.has(x) && grp !== "all", link({ st: grp === "al
 <span class="psep" aria-hidden="true"></span>
 ${pill(flag === "overdue", link({ flag: flag === "overdue" ? "" : "overdue" }), "เกิน Due", byStatus.filter(isFlag.overdue).length)}
 ${pill(flag === "ext", link({ flag: flag === "ext" ? "" : "ext" }), "มีการขยายเวลา", byStatus.filter(isFlag.ext).length)}
-${flag === "unconf" || byStatus.some(isFlag.unconf) ? pill(flag === "unconf", link({ flag: flag === "unconf" ? "" : "unconf" }), "ลูกค้ายังไม่ยืนยัน", byStatus.filter(isFlag.unconf).length, "เคสจาก email ที่โดเมนยังไม่ผูกกับลูกค้า รอ Owner ยืนยันว่าเป็นลูกค้ารายไหน") : ""}
+${flag === "unconf" || byStatus.some(isFlag.unconf) ? pill(flag === "unconf", link({ flag: flag === "unconf" ? "" : "unconf" }), "ลูกค้ายังไม่ยืนยัน", byStatus.filter(isFlag.unconf).length, "เคสจาก email ที่โดเมนยังไม่ผูกกับลูกค้า รอ User ยืนยันว่าเป็นลูกค้ารายไหน") : ""}
 </div>
-<span class="hint">“ยังไม่ปิด” = ${esc(openSt.join(", "))} · “ปิดแล้ว” = ${esc(closedSt.join(", "))} · กด Status ทีละตัวเพื่อเลือกหลายตัว · ตัวเลข = จำนวนเคสตามคำค้น ลูกค้า ทีม Owner และช่วงวันที่ที่เลือก</span>
+<span class="hint">“ยังไม่ปิด” = ${esc(openSt.join(", "))} · “ปิดแล้ว” = ${esc(closedSt.join(", "))} · กด Status ทีละตัวเพื่อเลือกหลายตัว · ตัวเลข = จำนวนเคสตามคำค้น ลูกค้า ทีม User และช่วงวันที่ที่เลือก</span>
 <details class="st-all"><summary>ความหมายของแต่ละ Status</summary>${statusTable(statuses)}</details></div>
 </section>
 <section class="card"><div class="title"><h2>ผลค้นหา: ${esc(parts.join(" · ") || "ทุกเคส")}</h2><span>${cases.length} เคส${params.site ? ` · ลูกค้านี้มีทั้งหมด ${siteCount} เคส` : ""}</span></div>
@@ -739,24 +795,26 @@ ${srWorkTable(srMine)}</section>
   }
 
   // ------------------------------------------------------------ case form
-  function comboBox(name, value, options, { allowNew = true, required = true, label = "" } = {}) {
+  function comboBox(name, value, options, { allowNew = true, required = true, label = "", newHint = "พิมพ์ชื่อใหม่ได้ ระบบจะเพิ่มเข้า dropdown ให้ทุกคนใช้ต่อ และแจ้ง Admin ตรวจชื่อซ้ำ" } = {}) {
     return `<div class="combo" data-combo="${name}">
 <label class="f"><span class="${required ? "req" : ""}">${label}</span>
 <input type="text" name="${name}" value="${esc(value || "")}" autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list" ${required ? "required" : ""}></label>
 <div class="combo-list" role="listbox" hidden></div>
-${allowNew ? `<span class="hint">พิมพ์ชื่อใหม่ได้ ระบบจะเพิ่มเข้า dropdown ให้ทุกคนใช้ต่อ และแจ้ง Admin ตรวจชื่อซ้ำ</span>` : ""}</div>`;
+${allowNew ? `<span class="hint">${newHint}</span>` : ""}</div>`;
   }
-  function bindCombo(root, name, options, { allowNew = true, onPick = null } = {}) {
+  function bindCombo(root, name, options, { allowNew = true, onPick = null, newLabel = (v) => `+ เพิ่ม “${esc(v)}” เป็นรายการใหม่` } = {}) {
     const wrap = root.querySelector(`[data-combo="${name}"]`);
     const input = wrap.querySelector("input");
     const list = wrap.querySelector(".combo-list");
     let hl = -1;
     const render = () => {
       const v = input.value.trim().toLowerCase();
-      const matches = options.filter((o) => !v || o.toLowerCase().includes(v)).slice(0, 12);
+      // Also suggest names sharing a word (3+ letters), so a new name shows look-alikes before it is added.
+      const words = v.split(/[\s.,()\-/]+/).filter((w) => w.length >= 3);
+      const matches = options.filter((o) => !v || o.toLowerCase().includes(v) || words.some((w) => o.toLowerCase().includes(w))).slice(0, 12);
       const exact = options.some((o) => o.toLowerCase() === v);
       const items = matches.map((o) => `<button type="button" role="option" data-v="${esc(o)}">${esc(o)}</button>`);
-      if (allowNew && v && !exact) items.push(`<button type="button" role="option" class="add-new" data-v="${esc(input.value.trim())}">+ เพิ่ม “${esc(input.value.trim())}” เป็นรายการใหม่</button>`);
+      if (allowNew && v && !exact) items.push(`<button type="button" role="option" class="add-new" data-v="${esc(input.value.trim())}">${newLabel(input.value.trim())}</button>`);
       list.innerHTML = items.join("") || `<div class="hint" style="padding:8px">ไม่พบรายการ</div>`;
       list.hidden = false;
       input.setAttribute("aria-expanded", "true");
@@ -835,11 +893,11 @@ ${allowNew ? `<span class="hint">พิมพ์ชื่อใหม่ได�
       .join("");
     const productOpts = [`<option value="">-</option>`, ...lk.product.map((p) => `<option ${p === c.product ? "selected" : ""}>${esc(p)}</option>`)].join("");
     const ownerField = permsC.reassign
-      ? `<label class="f">Owner<select name="owner_id">${usersRes.users
+      ? `<label class="f">User<select name="owner_id">${usersRes.users
           .filter((u) => u.teams.includes(c.team) || u.id === c.ownerUserId)
           .map((u) => `<option value="${u.id}" ${u.id === c.ownerUserId ? "selected" : ""}>${esc(u.display_name)}</option>`)
           .join("")}</select></label>`
-      : `<label class="f">Owner<input type="text" value="${esc(c.owner || "-")}" readonly></label>`;
+      : `<label class="f">User<input type="text" value="${esc(c.owner || "-")}" readonly></label>`;
 
     const days = [];
     for (let i = 0; i <= cfg.slaDays; i++) {
@@ -858,20 +916,21 @@ ${allowNew ? `<span class="hint">พิมพ์ชื่อใหม่ได�
     $app.innerHTML = `
 <div class="crumb">${lvl("case_edit") === "none" && lvl("case_create") === "none" ? `<a href="#/">ภาพรวม</a>` : `<a href="#/mine">เคสของฉัน</a>`} / ${isNew ? "เปิดเคสใหม่" : esc(caseRef(c))}</div>
 <div class="head"><div><h1>${isNew ? "เปิดเคสใหม่" : `เคส <span class="mono" style="font-size:26px">${esc(caseRef(c))}</span> <span class="muted" style="font-size:16px;font-weight:500">${esc(c.site || "")}${csOf(c) ? " · " + esc(csOf(c)) : ""}</span>`}</h1>
-<p>${isNew ? "Start date จะบันทึกเป็นวันนี้อัตโนมัติ และ Due = Start date + " + cfg.slaDays + " วัน" : `${esc(c.sourceLabel)} · Owner ${esc(c.owner || "-")} · ${chip(c.stage)} ${sevChip(c.severity)}`}</p></div>
+<p>${isNew ? "Start date จะบันทึกเป็นวันนี้อัตโนมัติ และ Due = Start date + " + cfg.slaDays + " วัน" : `${esc(c.sourceLabel)} · User ${esc(c.owner || "-")} · ${chip(c.stage)} ${sevChip(c.severity)}`}</p></div>
 <div class="actions">
 ${!isNew && c.site && !c.customerUnconfirmed && lvl("export") === "all" ? `<a class="btn" href="#/reports?site=${encodeURIComponent(c.site)}">Export เคสของ ${esc(c.site)}</a>` : ""}
 ${!isNew && permsC.delete ? `<button class="btn danger" type="button" id="btn-del">ลบเคส</button>` : ""}
 ${!isNew && !closed && permsC.close ? `<button class="btn" type="button" id="btn-close" style="color:var(--normal-fg)">ปิดเคส</button>` : ""}
 ${!ro ? `<button class="btn primary" type="submit" form="cf">${isNew ? "เปิดเคส" : "บันทึก"}</button>` : ""}</div></div>
 ${ro ? `<div class="banner warn">คุณดูเคสนี้ได้อย่างเดียว ไม่มีสิทธิ์แก้ไข</div>` : ""}
+${!isNew && c.sitePendingId ? `<div class="banner warn unconf" id="site-pending"><div><strong>ลูกค้าใหม่รอ Manager อนุมัติ</strong> · ${esc(c.site)}<br><span style="font-size:13px">ทำงานต่อได้ตามปกติ แต่ปิดเคสได้หลัง Manager ของทีมอนุมัติชื่อ แก้ชื่อ หรือรวมกับลูกค้าที่มีอยู่</span></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" type="button" id="btn-site-remind">เตือน Manager อีกครั้ง</button><button class="btn primary" type="button" id="btn-site-decide" hidden>ตรวจชื่อลูกค้า</button></div></div>` : ""}
 ${!isNew && c.customerUnconfirmed ? `<div class="banner warn unconf"><div><strong>ลูกค้ายังไม่ยืนยัน</strong> · ${esc(c.customerUnconfirmed)}${data.intake ? `<br><span style="font-size:14px">ผู้แจ้ง ${esc(data.intake.contact_name || "-")}${data.intake.contact_phone ? ` · <a href="tel:${esc(data.intake.contact_phone.replace(/[^+0-9]/g, ""))}">${esc(data.intake.contact_phone)}</a>` : ""}${data.intake.contact_email ? ` · ${esc(data.intake.contact_email)}` : ""} · ${esc(data.intake.req_no)}</span>` : ""}<br><span style="font-size:13px">โทรถามลูกค้าว่าเป็นบริษัทไหน แล้วกด “ยืนยันลูกค้า” เคสนี้จะเข้ารายงานและ KPI ของลูกค้ารายนั้น</span></div>${permsC.edit ? `<button class="btn primary" type="button" id="btn-confirm-cust">ยืนยันลูกค้า</button>` : ""}</div>` : ""}
 <div class="cols">
 <form id="cf" class="main" novalidate>
 <fieldset class="card" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px" ${ro ? "disabled" : ""}>
 <legend style="font-size:15px;font-weight:600">ข้อมูลเคส</legend>
 <label class="f">CS Number<input type="text" name="cs_number" value="${esc(c.csNumber || "")}" class="mono" placeholder="เช่น CS5056186"></label>
-${comboBox("site", c.site, lk.site, { label: "Site / ลูกค้า", allowNew: !ro })}
+${comboBox("site", c.site, lk.site, { label: "Site / ลูกค้า", allowNew: !ro, newHint: "ไม่มีในรายการ พิมพ์ชื่อใหม่ได้ เคสเริ่มงานได้ทันที แต่ต้องให้ Manager ของทีมอนุมัติชื่อก่อนปิดเคส" })}
 <label class="f"><span class="req">Severity</span><select name="severity" required>${isNew ? `<option value="">เลือก Severity</option>` : ""}${(lk.severity || []).map((x) => `<option ${x === c.severity ? "selected" : ""}>${esc(x)}</option>`).join("")}</select></label>
 <label class="f">Product<select name="product">${productOpts}</select></label>
 <label class="f"><span class="req">Status</span><select name="status">${statusOpts}</select><span class="hint" id="st-hint">${esc(statusHelp(c.status))}</span></label>
@@ -896,6 +955,8 @@ ${closed ? `<section class="card"><div class="title"><h2>Resolution</h2>${permsC
 ${c.resolution ? `<div class="resol">${esc(c.resolution)}</div>
 <p class="muted" style="margin:0;font-size:13px">ปิดโดย ${esc(c.resolvedBy || "-")}${c.resolvedAt ? " · " + fdt(c.resolvedAt) : ""} · Status ${esc(c.status)}${c.rootCause ? " · สาเหตุ: " + esc(c.rootCause) : ""}</p>` : `<div class="resol none">ไม่มี Resolution (ปิดก่อนเริ่มบังคับ)</div>${permsC.edit ? `<button class="btn" type="button" id="btn-res" style="align-self:flex-start">เพิ่ม Resolution</button>` : ""}`}</section>` : ""}
 ${!isNew && (csOf(c) || c.rcaText) ? rcaCard(c, permsC) : ""}
+${!isNew && (ME.user.role === "admin" || (ME.user.role === "manager" && (ME.user.teams || []).includes(c.team))) ? `<section class="card"><div class="title"><h2>ความยากของเคส</h2><span>ใช้คิดแต้มงานใน KPI</span></div>
+<label class="f">ระดับความยาก<select id="cx-sel">${[["", "อัตโนมัติ (จาก Severity, ส่ง NICE, Onsite, เปิดนาน)"], ["0.8", "ง่ายกว่าปกติ ×0.8"], ["1.2", "ยาก ×1.2"], ["1.5", "ยากมาก ×1.5"]].map(([v, l]) => `<option value="${v}" ${String(c.complexity ?? "") === v ? "selected" : ""}>${l}</option>`).join("")}</select><span class="hint">ใช้กับเคสที่ระบบดูไม่ออก เช่น ต้องเขียน script เอง บันทึกในประวัติของเคส</span></label></section>` : ""}
 ${custFiles.files.length ? `<section class="card"><div class="title"><h2>รูปและไฟล์จากลูกค้า (${custFiles.files.length})</h2><span>จาก email และฟอร์มเพิ่มข้อมูล</span></div>
 <div class="cf-grid">${custFiles.files.map((f) => {
       const u = `api/intake/${f.intake_id}/files/${f.id}`;
@@ -903,7 +964,7 @@ ${custFiles.files.length ? `<section class="card"><div class="title"><h2>รู�
       return `<a class="cf" href="${u}" target="_blank" rel="noopener" title="${esc(f.file_name)}">${img ? `<img src="${u}" alt="${esc(f.file_name)}" loading="lazy">` : `<span class="cf-ext">${esc((f.file_name.split(".").pop() || "").toUpperCase())}</span>`}<span class="cf-n">${esc(f.file_name)}</span><span class="cf-d">${fdt(f.created_at)} · ${f.source === "form" ? "ฟอร์ม" : "email"}</span></a>`;
     }).join("")}</div></section>` : ""}
 ${isNew ? "" : extCard(c, extData.extensions, closed, permsC)}
-${isNew ? `<section class="card"><h2>ก่อนเปิดเคส</h2><p class="muted" style="margin:0;font-size:14px">กรอก Site, Task และ Status ให้ครบ ระบบจะส่ง email เตือน Owner ในวันที่ ${cfg.alert1Day}, ${cfg.alert2Day} และทุกวันหลังเกิน Due ถ้ายังไม่ปิดเคส</p></section>` : `
+${isNew ? `<section class="card"><h2>ก่อนเปิดเคส</h2><p class="muted" style="margin:0;font-size:14px">กรอก Site, Task และ Status ให้ครบ ระบบจะส่ง email เตือน User ในวันที่ ${cfg.alert1Day}, ${cfg.alert2Day} และทุกวันหลังเกิน Due ถ้ายังไม่ปิดเคส</p></section>` : `
 <section class="card"><div><h2>Activity / Detail</h2><div class="hint" style="margin-top:4px">ทุกบันทึกมีวันที่และชื่อผู้บันทึก แก้หรือลบย้อนหลังไม่ได้</div></div>
 ${permsC.edit ? `<form id="af" class="stack">
 <div style="display:grid;grid-template-columns:150px minmax(0,1fr);gap:8px">
@@ -917,7 +978,7 @@ ${actsHtml(data.activities)}</section>`}
 
     if (!isNew) bindExtCard(c, extData.extensions);
     const f = document.getElementById("cf");
-    bindCombo(f, "site", lk.site);
+    bindCombo(f, "site", lk.site, { newLabel: (v) => `+ ใช้ชื่อใหม่ “${esc(v)}” (ต้องให้ Manager อนุมัติ)` });
     f.status.addEventListener("change", () => (document.getElementById("st-hint").textContent = statusHelp(f.status.value)));
     f.onsubmit = async (e) => {
       e.preventDefault();
@@ -996,6 +1057,17 @@ ${actsHtml(data.activities)}</section>`}
           viewCase(id);
         }
       };
+    if (c.sitePendingId) bindSitePending(c, () => viewCase(id));
+    const cx = document.getElementById("cx-sel");
+    if (cx)
+      cx.onchange = async () => {
+        try {
+          await post(`/case/${c.id}/complexity`, { complexity: cx.value || null }, "PUT");
+          toast("บันทึกความยากของเคสแล้ว");
+        } catch (err) {
+          toast(err.message, 6000);
+        }
+      };
     const bcc = document.getElementById("btn-confirm-cust");
     if (bcc) bcc.onclick = () => openConfirmCustomer(c, data.intake, lk, () => viewCase(id));
     const br = document.getElementById("btn-res");
@@ -1051,15 +1123,17 @@ ${actsHtml(data.activities)}</section>`}
   }
 
   // ------------------------------------------------------------ owner page
-  async function viewOwner(id) {
+  async function viewOwner(id, params = {}) {
     setNav("owner");
     if (!id) {
       const ov = await api("/overview");
       if (ov.owners.length) return location.replace("#/owner/" + encodeURIComponent(ov.owners[0].id));
-      $app.innerHTML = `<div class="empty">ยังไม่มีข้อมูล Owner</div>`;
+      $app.innerHTML = `<div class="empty">ยังไม่มีข้อมูล User</div>`;
       return;
     }
-    const [o, srAll] = await Promise.all([api("/owner/" + encodeURIComponent(id)), srList("team")]);
+    const [o, srAll] = await Promise.all([api("/owner/" + encodeURIComponent(id) + (params.month ? "?month=" + encodeURIComponent(params.month) : "")), srList("team")]);
+    const M = o.month;
+    const mLabel = (ym) => ymLabel(ym, true);
     const srOwner = srAll.filter((r) => srOpen(r) && r.assignee && r.assignee.email && o.email && r.assignee.email.toLowerCase() === String(o.email).toLowerCase()).sort(srByTarget);
     const k = o.kpis;
     const open = o.cases.filter((c) => c.stage !== "closed");
@@ -1084,10 +1158,11 @@ ${actsHtml(data.activities)}</section>`}
 <section class="card owner-head" style="flex-direction:row">
 <div style="display:flex;align-items:center;gap:16px">${avHtml({ id: o.user ? o.user.id : 0, name: o.owner, avatar: o.user && o.user.avatar }, "lg")}
 <div><h1 style="font-size:24px">${esc(o.owner)}</h1><div class="muted" style="font-size:14px">${esc(o.email || "-")} · ${esc(o.sources.join(", "))}</div></div></div>
-<div class="actions"><label class="f" style="flex:0 1 240px;flex-direction:row;align-items:center;gap:8px">เปลี่ยน Owner
+<div class="actions"><label class="f" style="flex:0 1 240px;flex-direction:row;align-items:center;gap:8px">เปลี่ยน User
 <select id="pick">${o.owners.map((x) => `<option value="${esc(x.id)}" ${x.id === o.id ? "selected" : ""}>${esc(x.owner || x.id)}</option>`).join("")}</select></label>
+<span class="seg2" role="group" aria-label="เดือน">${o.months.map((ym) => `<button type="button" data-month="${ym}" aria-pressed="${ym === M.ym}">${esc(mLabel(ym))}</button>`).join("")}</span>
 <a class="btn primary" href="#/owner/${encodeURIComponent(o.id)}/meeting">มุมมองประชุม</a>
-${lvl("export") === "all" ? `<a class="btn" href="api/export?${qs({ from: daysAgo(29), to: daysAgo(0), owner: o.id })}">Export เคสของ Owner นี้</a>` : ""}</div>
+${lvl("export") === "all" ? `<a class="btn" href="api/export?${qs({ from: daysAgo(29), to: daysAgo(0), owner: o.id })}">Export เคสของ User นี้</a>` : ""}</div>
 </section>
 <div class="kpis">
 <div class="kpi k-all"><div class="l">ยังไม่ปิด</div><div class="v">${k.open}</div></div>
@@ -1095,24 +1170,25 @@ ${lvl("export") === "all" ? `<a class="btn" href="api/export?${qs({ from: daysAg
 <div class="kpi k-r1"><div class="l">แจ้งรอบ 1</div><div class="v">${k.r1}</div></div>
 <div class="kpi k-r2"><div class="l">แจ้งรอบ 2</div><div class="v">${k.r2}</div></div>
 <div class="kpi k-overdue"><div class="l">เกิน Due</div><div class="v">${k.overdue}</div></div>
-<div class="kpi k-closed"><div class="l">ปิดทัน SLA (30 วัน)</div><div class="v">${k.sla.pct === null ? "-" : k.sla.pct + "%"}</div><div class="s">${k.sla.onTime} จาก ${k.sla.closed} เคส</div></div>
+<div class="kpi k-closed"><div class="l">ปิดทัน SLA · ${esc(mLabel(M.ym))}</div><div class="v">${M.slaPct === null ? "-" : M.slaPct + "%"}</div><div class="s">${M.onTime} จาก ${M.closed} เคส · เปิดใหม่ ${M.opened}</div></div>
 <div class="kpi k-sr"><div class="l">คำขอบริการค้าง</div><div class="v">${srOwner.length}</div><div class="s">เลย Target ${srOwner.filter((r) => r.status === "overdue").length}</div></div>
 </div>
 <section class="card"><div class="title"><h2>เคสที่ยังไม่ปิด</h2><span>เรียงจากเปิดนานสุด</span></div>${caseTable(open, { showOwner: false })}</section>
 <section class="card"><div class="title"><h2>คำขอบริการที่ยังไม่ปิด (${srOwner.length})</h2><span>งานภายในที่ได้รับมอบหมาย · เรียงตาม Target date</span></div>${srWorkTable(srOwner)}</section>
 <div class="grid2">
 <section class="card"><h2>ประวัติแจ้งเตือน (60 วัน)</h2>${historyHtml || `<div class="empty">ยังไม่มี email แจ้งเตือน</div>`}</section>
-<section class="card"><h2>ปิดเคสย้อนหลัง 4 สัปดาห์</h2>
-<div class="weeks">${o.weeks.map((w) => `<div class="w"><div>${w.onTime} / ${w.late}</div>
+<section class="card"><div class="title"><h2>ปิดเคสรายสัปดาห์</h2><span>9 สัปดาห์ถึง${M.current ? "สัปดาห์นี้" : "สิ้น " + esc(mLabel(M.ym))}</span></div>
+<div class="weeks">${o.weeks.map((w) => `<div class="w ${w.inMonth ? "" : "out"}"><div>${w.onTime} / ${w.late}</div>
 <div class="stack" style="gap:0;height:${((w.onTime + w.late) / maxWeek) * 100}%;min-height:${w.onTime + w.late ? 6 : 2}px;background:${w.onTime + w.late ? "transparent" : "var(--row)"};width:36px;border-radius:6px 6px 0 0;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end">
 ${w.late ? `<div style="flex:${w.late};background:var(--over)"></div>` : ""}${w.onTime ? `<div style="flex:${w.onTime};background:var(--normal)"></div>` : ""}</div>
 <div>สัปดาห์ ${fd(w.from)}</div></div>`).join("")}</div>
-<div class="legend"><span><span class="dot d-normal" aria-hidden="true"></span>ปิดทัน SLA</span><span><span class="dot d-overdue" aria-hidden="true"></span>ปิดเกิน Due</span></div>
+<div class="legend"><span><span class="dot d-normal" aria-hidden="true"></span>ปิดทัน SLA</span><span><span class="dot d-overdue" aria-hidden="true"></span>ปิดเกิน Due</span><span>สัปดาห์ที่จางอยู่นอกเดือนที่เลือก</span></div>
 </section></div>
 ${extTable(o.extensions || [], `${esc(o.owner)} · การขอขยายเวลา`)}
-${o.changes.length && lvl("audit_view") !== "none" ? `<section class="card"><h2>การแก้ไขในเคสของ Owner นี้</h2>${changeRows(o.changes)}</section>` : ""}
-${closed.length ? `<section class="card"><div class="title"><h2>ปิดแล้วใน 30 วัน</h2><span>${closed.length} เคส</span></div>${caseTable(closed, { showOwner: false })}</section>` : ""}`;
-    document.getElementById("pick").onchange = (e) => (location.hash = "#/owner/" + encodeURIComponent(e.target.value));
+${o.changes.length && lvl("audit_view") !== "none" ? `<section class="card"><h2>การแก้ไขในเคสของ User นี้</h2>${changeRows(o.changes)}</section>` : ""}
+<section class="card"><div class="title"><h2>ปิดแล้วใน ${esc(mLabel(M.ym))}</h2><span>${closed.length} เคส</span></div>${closed.length ? caseTable(closed, { showOwner: false }) : `<div class="empty">ไม่มีเคสที่ปิดในเดือนนี้</div>`}</section>`;
+    document.querySelectorAll("[data-month]").forEach((b) => (b.onclick = () => (location.hash = `#/owner/${encodeURIComponent(o.id)}?month=${b.dataset.month}`)));
+    document.getElementById("pick").onchange = (e) => (location.hash = "#/owner/" + encodeURIComponent(e.target.value) + (params.month ? "?month=" + params.month : ""));
     bindRowLinks();
   }
 
@@ -1247,7 +1323,7 @@ ${exp !== "none" || manage ? `<section class="card"><h2>${manage ? "ส่ง Re
 <form id="manual" class="formgrid" onsubmit="return false">
 <label class="f">ตั้งแต่วันที่<input type="date" name="from" value="${daysAgo(29)}" required></label>
 <label class="f">ถึงวันที่<input type="date" name="to" value="${daysAgo(0)}" required></label>
-${exp === "own" ? "" : `<label class="f">Owner<select name="owner"><option value="">ทุกคน</option>${ownerOpts}</select></label>`}
+${exp === "own" ? "" : `<label class="f">User<select name="owner"><option value="">ทุกคน</option>${ownerOpts}</select></label>`}
 <div class="f" style="grid-column:1/-1"><label for="site-in">ลูกค้า / Site <span class="hint">(เว้นว่าง = ทุกลูกค้า เลือกได้หลายราย)</span></label>
 <div style="display:flex;gap:8px;flex-wrap:wrap"><input id="site-in" list="site-dl" placeholder="พิมพ์ชื่อลูกค้าแล้วกด Enter" style="flex:1 1 240px" autocomplete="off">
 <button class="btn" type="button" id="site-add">เพิ่ม</button></div>
@@ -1301,7 +1377,7 @@ ${hist.reports.map((r) => `<tr><td>${fdt(r.sent_at)}</td><td>${esc(r.title)}</td
           const p = await api("/reports/preview?" + qs(params()) + siteQs());
           const k = p.kpis;
           document.getElementById("preview").innerHTML = `${sites.length ? `ลูกค้า ${esc(sites.join(", "))} · ` : `ทุกลูกค้า (${p.customers} ราย) · `}ช่วง ${esc(p.rangeLabel)}: เปิดใหม่ <strong>${k.opened}</strong> · ปิด <strong>${k.closed}</strong> (ทัน SLA ${k.slaPct === null ? "-" : k.slaPct + "%"}) · ยังเปิดอยู่ ${k.openNow} · เกิน Due ขณะนี้ <strong>${k.overdueNow}</strong>${k.extCount ? ` · ขอขยายเวลา <strong>${k.extCases}</strong> เคส ${k.extCount} ครั้ง` : ""}
-<div class="tablewrap" style="margin-top:12px"><table style="min-width:860px"><thead><tr><th>Owner</th><th class="n">เปิดใหม่</th><th class="n">ปิด</th><th class="n">ปิดทัน SLA เดิม</th><th class="n">ยังเปิดอยู่</th><th class="n">เกิน Due</th><th class="n">ขอขยาย (เคส)</th><th class="n">ขอขยาย (ครั้ง)</th><th class="n">อนุมัติ / ไม่อนุมัติ</th></tr></thead><tbody>
+<div class="tablewrap" style="margin-top:12px"><table style="min-width:860px"><thead><tr><th>User</th><th class="n">เปิดใหม่</th><th class="n">ปิด</th><th class="n">ปิดทัน SLA เดิม</th><th class="n">ยังเปิดอยู่</th><th class="n">เกิน Due</th><th class="n">ขอขยาย (เคส)</th><th class="n">ขอขยาย (ครั้ง)</th><th class="n">อนุมัติ / ไม่อนุมัติ</th></tr></thead><tbody>
 ${p.owners.map((o) => `<tr><td style="font-weight:600">${esc(o.owner)}</td><td class="n">${o.opened}</td><td class="n">${o.closed}</td><td class="n">${o.closedOnTime}</td><td class="n">${o.open}</td><td class="n t-over">${o.overdue || 0}</td><td class="n" style="font-weight:700">${o.extCases || 0}</td><td class="n" style="font-weight:700">${o.extCount || 0}</td><td class="n">${o.extCount ? `${o.extApproved} / ${o.extRejected}` : "-"}</td></tr>`).join("")}</tbody></table></div>
 ${extTable(p.extensions || [], "การขอขยายเวลาในช่วงนี้ พร้อมเหตุผล")}`;
         } catch (e) {
@@ -1405,7 +1481,8 @@ ${extTable(p.extensions || [], "การขอขยายเวลาในช
   // ------------------------------------------------------------ users (admin)
   async function viewUsers(params) {
     setNav("users");
-    const { users } = await api("/users");
+    const [{ users }, { list: deptList }] = await Promise.all([api("/users"), api("/departments")]);
+    const deptNames = deptList.filter((x) => x.active).map((x) => x.name);
     const sel = params.id ? users.find((u) => String(u.id) === params.id) : null;
     let list = users;
     if (params.q) {
@@ -1420,9 +1497,10 @@ ${extTable(p.extensions || [], "การขอขยายเวลาในช
 <div><h2>${esc(sel.display_name)}</h2><div class="muted" style="font-size:13px">${esc(sel.email)} · ${sel.auth_type === "sso" ? "บัญชี Microsoft" : sel.auth_type === "email" ? "เข้าด้วยลิงก์ทาง email" : "บัญชีรหัสผ่าน"}</div></div></div>
 <label class="f">ชื่อที่แสดง<input name="display_name" value="${esc(sel.display_name)}"></label>
 <label class="f">เบอร์โทร<input name="phone" value="${esc(sel.phone || "")}" placeholder="081-234-5678"><span class="hint">แสดงใน email ถึงลูกค้าเมื่อรับเคส</span></label>
-<div class="formgrid" style="grid-template-columns:1fr 1fr;gap:10px"><label class="f">หน่วยงาน<input name="department" value="${esc(sel.department || "")}"></label><label class="f">ตำแหน่ง<input name="job_title" value="${esc(sel.job_title || "")}"></label></div>
+<div class="formgrid" style="grid-template-columns:1fr 1fr;gap:10px"><label class="f">หน่วยงาน${deptSelect(deptNames, sel.department || "", { other: false })}</label><label class="f">ตำแหน่ง<input name="job_title" value="${esc(sel.job_title || "")}"></label></div>
 <label class="f">บทบาท<select name="role" ${sel.id === ME.user.id ? "disabled" : ""}>${Object.entries(ROLE).map(([k, l]) => `<option value="${k}" ${k === sel.role ? "selected" : ""}>${l}</option>`).join("")}</select><span class="hint" data-role-hint>${esc(ROLE_HINT[sel.role] || "")}</span></label>
 <fieldset><legend>ทีมที่เห็นเคส</legend>${teamChecks(sel)}</fieldset>
+<label class="chk" style="justify-content:space-between"><span>ดูแลลูกค้าประจำ<span class="hint" style="display:block">ได้รับมอบให้ดูแลลูกค้ารายเดียว KPI จะไม่นับความหลากหลายของลูกค้า</span></span><input type="checkbox" name="dedicated_customer" ${sel.dedicated_customer ? "checked" : ""}></label>
 <label class="chk" style="justify-content:space-between"><span>เปิดใช้งานบัญชี<span class="hint" style="display:block">ปิดแล้วเข้าระบบไม่ได้ แต่เคสเดิมยังอยู่ครบ</span></span><input type="checkbox" name="active" ${sel.active ? "checked" : ""} ${sel.id === ME.user.id ? "disabled" : ""}></label>
 ${sel.auth_type === "local" ? `<div style="border-top:1px solid var(--line);padding-top:14px" class="stack"><h2 style="font-size:15px">รีเซ็ตรหัสผ่าน</h2>
 <button class="btn" type="button" id="rs-link">ส่งลิงก์ตั้งรหัสใหม่ทาง email</button>
@@ -1464,7 +1542,7 @@ ${list.map((u) => `<tr class="click" data-href="#/users?id=${u.id}" style="${sel
     const f = document.getElementById("uf");
     f.onsubmit = async (e) => {
       e.preventDefault();
-      const body = { display_name: f.display_name.value, phone: f.phone.value, department: f.department.value, job_title: f.job_title.value, teams: [...f.querySelectorAll("input[name=teams]:checked")].map((x) => x.value) };
+      const body = { display_name: f.display_name.value, phone: f.phone.value, department: f.department.value, job_title: f.job_title.value, dedicated_customer: f.dedicated_customer.checked, teams: [...f.querySelectorAll("input[name=teams]:checked")].map((x) => x.value) };
       if (!f.role.disabled) body.role = f.role.value;
       if (!f.active.disabled) body.active = f.active.checked;
       try {
@@ -1872,28 +1950,29 @@ ${(() => {
       return `<div class="banner ${w.error ? "warn" : bad ? "err" : "ok"}" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><span style="flex:1">${w.error ? `ตรวจคำเตือนของ Chrome ไม่สำเร็จ: ${esc(w.error)}` : bad ? `Google ติดธงเว็บนี้ว่าไม่ปลอดภัย (${bad} URL) ผู้ใช้ Chrome จะเห็นคำเตือน · แก้ที่ Google Search Console → Security issues → Request review` : w.at ? `Google ไม่ติดธงเว็บนี้ (ตรวจล่าสุด ${fdt(w.at)} ด้วย ${esc(w.api || "")})` : "ยังไม่เคยตรวจ"}</span><button class="btn" type="button" id="wr-check" style="min-height:34px">ตรวจตอนนี้</button></div>`;
     })()}
 ${newSites.length ? `<div class="banner warn">มีรายการที่ผู้ใช้เพิ่มใหม่ ${newSites.length} รายการ รอตรวจ (มีป้าย “ใหม่”) กด “แก้” เพื่อยืนยัน แก้ชื่อ หรือรวมกับรายการเดิม</div>` : ""}
+<section class="card" id="dept-card"><div class="title"><h2>หน่วยงาน</h2><span>รายการให้ผู้ใช้เลือกในบัญชีของฉัน</span></div><div id="dept-body">กำลังโหลด…</div></section>
 <section class="card" id="lb-card"><div class="title"><h2>อันดับ KPI</h2><span>กำลังโหลด…</span></div></section>
 <section class="card" id="hol-card"><div class="title"><h2>วันหยุดบริษัท</h2><span>กำลังโหลด…</span></div></section>
 <section class="card" id="bk-card"><div class="title"><h2>Backup และทดสอบ restore</h2><span>กำลังโหลด…</span></div></section>
-<section class="card" id="ae"><div class="title"><h2>Email แจ้งเตือน Owner</h2><span>ผู้รับ email แจ้งเตือนแต่ละรอบ</span></div>
+<section class="card" id="ae"><div class="title"><h2>Email แจ้งเตือน User</h2><span>ผู้รับ email แจ้งเตือนแต่ละรอบ</span></div>
 <div class="tablewrap"><table style="min-width:720px"><thead><tr><th>รอบ</th><th>ส่งเมื่อ</th><th>ถึง</th><th style="text-align:center">CC รายชื่อด้านล่าง</th><th></th></tr></thead><tbody>
 ${[["r1", `วันที่ ${cfg.alert1Day} (ครั้งเดียว)`], ["r2", `วันที่ ${cfg.alert2Day} (ครั้งเดียว)`], ["overdue", `ทุกวันหลังเกิน Due (วันที่ ${cfg.slaDays + 1} ขึ้นไป)`]].map(([t, when]) => `<tr>
-<td>${chip(t, ALERT[t])}</td><td>${when}</td><td>Owner ของเคส</td>
+<td>${chip(t, ALERT[t])}</td><td>${when}</td><td>User ของเคส</td>
 <td style="text-align:center"><label class="chk" style="justify-content:center"><input type="checkbox" name="cct" value="${t}" ${(s.alertEmail.ccTypes || []).includes(t) ? "checked" : ""}><span class="sr">CC ใน${ALERT[t]}</span></label></td>
 <td style="text-align:right;white-space:nowrap"><button class="btn" type="button" data-prev="${t}" style="min-height:34px">ดูตัวอย่าง</button> <button class="btn" type="button" data-testmail="${t}" style="min-height:34px">ส่งทดสอบถึงฉัน</button></td></tr>`).join("")}
 </tbody></table></div>
 <div class="formgrid">
 <label class="f">CC (คั่นด้วย , ถ้ามีหลายคน)<input id="ae-cc" value="${esc(s.alertEmail.cc || "")}" placeholder="engineer@sinostech.co.th"></label>
-<label class="f">ส่งถึงใครเมื่อเคสไม่มีอีเมล Owner<input id="ae-fb" value="${esc(s.alertEmail.fallback || "")}" placeholder="engineer@sinostech.co.th"></label></div>
-<p class="hint" style="margin:0">ติ๊กช่อง CC เฉพาะรอบที่ต้องการให้หัวหน้าหรือทีมเห็นด้วย ไม่ติ๊ก = ส่งถึง Owner คนเดียว Owner ไม่ถูก CC ซ้ำถ้าอีเมลอยู่ในรายชื่อ CC มีผลตั้งแต่รอบส่งถัดไป</p>
+<label class="f">ส่งถึงใครเมื่อเคสไม่มีอีเมล User<input id="ae-fb" value="${esc(s.alertEmail.fallback || "")}" placeholder="engineer@sinostech.co.th"></label></div>
+<p class="hint" style="margin:0">ติ๊กช่อง CC เฉพาะรอบที่ต้องการให้หัวหน้าหรือทีมเห็นด้วย ไม่ติ๊ก = ส่งถึง User คนเดียว User ไม่ถูก CC ซ้ำถ้าอีเมลอยู่ในรายชื่อ CC มีผลตั้งแต่รอบส่งถัดไป</p>
 <div class="actions"><button class="btn primary" type="button" id="ae-save">บันทึกผู้รับ email</button></div></section>
 <section class="card"><div class="title"><h2>นำเข้าเคสจาก Excel</h2><span>ใช้ช่วงเปลี่ยนจาก Excel มาเป็นหน้าเว็บ</span></div>
-<p class="muted" style="margin:0;font-size:14px">อ่าน tab Case List ทั้ง 3 เอกสาร แล้วเพิ่มเคสที่ยังไม่มีในระบบ เคสที่มีอยู่แล้วจะไม่ถูกนำเข้าซ้ำ Owner ที่ยังไม่มีบัญชีจะถูกสร้างเป็น Engineer (บัญชี Microsoft) ให้อัตโนมัติ</p>
+<p class="muted" style="margin:0;font-size:14px">อ่าน tab Case List ทั้ง 3 เอกสาร แล้วเพิ่มเคสที่ยังไม่มีในระบบ เคสที่มีอยู่แล้วจะไม่ถูกนำเข้าซ้ำ User ที่ยังไม่มีบัญชีจะถูกสร้างเป็น Engineer (บัญชี Microsoft) ให้อัตโนมัติ</p>
 <div class="actions"><button class="btn" type="button" id="imp-new">นำเข้าเคสใหม่จาก Excel</button><button class="btn" type="button" id="imp-refresh">นำเข้า + อัปเดตเคสที่ยังไม่ถูกแก้บนเว็บ</button></div>
 <div id="imp-out" class="hint"></div></section>
 <div class="grid2">
 <section class="card"><h2>รายการ dropdown</h2>
-${[["site", "Site / ลูกค้า · Owner เพิ่มใหม่ได้จากฟอร์มเคส"], ["product", "Product"], ["status", "Status"]].map(([k, l]) => `<div class="stack" style="gap:8px"><div class="hint">${l} (${byKind(k).length})</div><div class="chips">${lkChips(k)}<button class="btn" type="button" data-add="${k}" style="min-height:32px;padding:0 10px">เพิ่ม</button></div></div>`).join("")}
+${[["site", "Site / ลูกค้า · User เพิ่มใหม่ได้จากฟอร์มเคส"], ["product", "Product"], ["status", "Status"]].map(([k, l]) => `<div class="stack" style="gap:8px"><div class="hint">${l} (${byKind(k).length})</div><div class="chips">${lkChips(k)}<button class="btn" type="button" data-add="${k}" style="min-height:32px;padding:0 10px">เพิ่ม</button></div></div>`).join("")}
 </section>
 <section class="card" id="sh-card"><div class="title"><h2>คำอธิบาย Status</h2><span>แสดงตอนเลือก Status ปิดเคส และหน้าค้นหา</span></div>
 ${byKind("status").filter((l) => l.active).map((l) => `<label class="f">${esc(l.value)}<textarea rows="2" data-sh="${esc(l.value)}" maxlength="300">${esc((s.statusHelp || {})[l.value] || "")}</textarea></label>`).join("")}
@@ -1910,7 +1989,7 @@ ${byKind("status").filter((l) => l.active).map((l) => `<label class="f">${esc(l.
 <div class="formgrid">
 <label class="f">ส่ง email สรุปรายปีถึง (คั่นด้วย , ถ้ามีหลายคน)<input id="an-to" value="${esc(s.annual.recipients || "")}" placeholder="manager@sinostech.co.th"></label>
 <label class="f">CC<input id="an-cc" value="${esc(s.annual.cc || "")}"></label></div>
-<p class="hint" style="margin:0">email มีสรุปตัวเลขทั้งปีและแนบไฟล์ Excel (เคสทั้งหมด, ราย Owner, สรุปรายเดือน, ประวัติแก้ไข) ระบบเก็บสำเนาไว้ในคลังด้านล่างถาวร ไม่ถูกลบตามรอบเก็บข้อมูล</p>
+<p class="hint" style="margin:0">email มีสรุปตัวเลขทั้งปีและแนบไฟล์ Excel (เคสทั้งหมด, ราย User, สรุปรายเดือน, ประวัติแก้ไข) ระบบเก็บสำเนาไว้ในคลังด้านล่างถาวร ไม่ถูกลบตามรอบเก็บข้อมูล</p>
 ${s.annualReports.length ? `<div class="tablewrap"><table style="min-width:620px"><thead><tr><th>ปี</th><th>สร้างเมื่อ</th><th>ส่งถึง</th><th>ผล</th><th>ไฟล์</th></tr></thead><tbody>
 ${s.annualReports.map((a) => `<tr><td style="font-weight:600">${a.year + 543} (${a.year})</td><td>${fdt(a.created_at)}</td><td>${esc(a.recipients || "-")}</td><td>${a.ok ? chip("ok", "ส่งแล้ว") : `<span class="chip c-fail" title="${esc(a.error)}">ไม่สำเร็จ</span>`}</td><td><a href="api/annual/${a.year}/file">${esc(a.file_name)}</a></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">ยังไม่มีรายงานรายปี รายงานแรกจะสร้างวันที่ 1 ม.ค. ${new Date().getFullYear() + 1 + 543}</div>`}
 <div class="actions"><button class="btn primary" type="button" id="save-set">บันทึกการตั้งค่า</button><button class="btn" type="button" id="an-test">ส่งรายงานปีนี้ถึงวันนี้ (ทดสอบ)</button></div>
@@ -1945,11 +2024,12 @@ ${s.annualReports.map((a) => `<tr><td style="font-weight:600">${a.year + 543} ($
     loadBackupCard();
     bindHolidays();
     bindLeaderboardSettings();
+    bindDepartments();
     document.getElementById("ae-save").onclick = async () => {
       const ccTypes = [...document.querySelectorAll("input[name=cct]:checked")].map((x) => x.value);
       try {
         await post("/settings", { alertEmail: { cc: document.getElementById("ae-cc").value, fallback: document.getElementById("ae-fb").value, ccTypes } }, "PUT");
-        toast(ccTypes.length ? `บันทึกแล้ว · CC เฉพาะ${ccTypes.map((t) => ALERT[t]).join(", ")}` : "บันทึกแล้ว · ทุกรอบส่งถึง Owner คนเดียว", 5000);
+        toast(ccTypes.length ? `บันทึกแล้ว · CC เฉพาะ${ccTypes.map((t) => ALERT[t]).join(", ")}` : "บันทึกแล้ว · ทุกรอบส่งถึง User คนเดียว", 5000);
       } catch (e) {
         toast(e.message, 6000);
       }
@@ -2138,7 +2218,7 @@ ${!pending && !hist.length && closed ? `<div class="hint">เคสปิดแ�
     b.disabled = true;
     try {
       const r = await post(`/extensions/${b.dataset.id}/decide`, { approve: b.dataset.extdec === "1", note: noteEl ? noteEl.value : "" });
-      toast(r.status === "approved" ? `อนุมัติแล้ว Due ใหม่ ${fd(r.newDue, true)} ระบบแจ้ง Owner ทาง email` : "ไม่อนุมัติ ระบบแจ้ง Owner ทาง email แล้ว", 6000);
+      toast(r.status === "approved" ? `อนุมัติแล้ว Due ใหม่ ${fd(r.newDue, true)} ระบบแจ้ง User ทาง email` : "ไม่อนุมัติ ระบบแจ้ง User ทาง email แล้ว", 6000);
       after && after();
     } catch (e) {
       b.disabled = false;
@@ -2257,7 +2337,7 @@ ${live.map((e) => `<tr><td><a class="mono" href="#/case/${e.case_id}">${esc(e.ca
 <div class="muted ik-meta">${esc(i.contact_name)} · ${ikContact(i)}<br>แจ้งเมื่อ ${fdt(i.created_at)} · <span class="${Date.now() - new Date(i.created_at).getTime() > 3600000 ? "t-over" : ""}">รอมาแล้ว ${waitedText(i.created_at)}</span>${i.files ? ` · ไฟล์แนบ ${i.files}` : ""}</div>
 ${ikTags(i) ? `<div>${ikTags(i)}</div>` : ""}
 ${ikOwnerNote(i)}
-<div class="ik-actions">${canClaim ? `<button class="btn primary" type="button" data-claim="${i.id}">รับเคสเอง</button><button class="btn" type="button" data-transfer="${i.id}">โอนให้ Owner</button>` : ""}<a class="btn" href="#/intake/${i.id}">ดูรายละเอียด</a></div>
+<div class="ik-actions">${canClaim ? `<button class="btn primary" type="button" data-claim="${i.id}">รับเคสเอง</button><button class="btn" type="button" data-transfer="${i.id}">โอนให้ User</button>` : ""}<a class="btn" href="#/intake/${i.id}">ดูรายละเอียด</a></div>
 </article>`;
   }
   /** Section shown at the top of the overview and "my cases" while requests wait to be claimed. */
@@ -2350,17 +2430,17 @@ ${comboBox("site", "", lk.site, { label: "ลูกค้า (Site)", allowNew: 
 <div class="title"><h2>รับเคส ${esc(i.req_no)}</h2>${sevChip(i.severity)}</div>
 <div class="banner" style="line-height:1.6"><strong>${ikCustomer(i)}</strong> · ${esc(i.subject)}<br>${esc(i.contact_name)} · ${esc(i.contact_phone)} · แจ้งเมื่อ ${fdt(i.created_at)}</div>
 ${i.new_line ? `<div class="banner warn">เคสแรกจากบัญชี LINE นี้ กรุณาโทรยืนยันกับลูกค้าว่าเป็นผู้ติดต่อของบริษัทจริง</div>` : ""}
-<fieldset class="stack" style="border:0;margin:0;padding:0;gap:8px"><legend style="font-weight:700;margin-bottom:6px">ใครเป็น Owner ของเคสนี้</legend>
-<label class="chk ik-opt"><input type="radio" name="who" value="self" ${mode !== "transfer" ? "checked" : ""}> <span><strong>รับเคสเอง</strong><br><span class="muted">${esc(ME.user.display_name)} (คุณ) เป็น Owner</span></span></label>
-<label class="chk ik-opt"><input type="radio" name="who" value="transfer" ${mode === "transfer" ? "checked" : ""}> <span style="flex:1"><strong>โอนให้ Owner คนอื่น</strong><br><span class="muted">ระบบแจ้งเขาทาง email ทันที</span>
-${others.length ? `<select name="owner" aria-label="เลือก Owner" style="margin-top:6px">${others.map((u) => `<option value="${u.id}" ${u.id === i.recent_owner_id ? "selected" : ""}>${esc(u.display_name)}${u.teams && u.teams.length ? " · " + esc(u.teams.map(teamLabel).join(", ")) : ""}</option>`).join("")}</select>` : `<span class="hint">ยังไม่มีผู้ใช้อื่นในระบบ</span><input type="hidden" name="owner" value="">`}</span></label>
+<fieldset class="stack" style="border:0;margin:0;padding:0;gap:8px"><legend style="font-weight:700;margin-bottom:6px">ใครเป็น User ของเคสนี้</legend>
+<label class="chk ik-opt"><input type="radio" name="who" value="self" ${mode !== "transfer" ? "checked" : ""}> <span><strong>รับเคสเอง</strong><br><span class="muted">${esc(ME.user.display_name)} (คุณ) เป็น User</span></span></label>
+<label class="chk ik-opt"><input type="radio" name="who" value="transfer" ${mode === "transfer" ? "checked" : ""}> <span style="flex:1"><strong>โอนให้ User คนอื่น</strong><br><span class="muted">ระบบแจ้งเขาทาง email ทันที</span>
+${others.length ? `<select name="owner" aria-label="เลือก User" style="margin-top:6px">${others.map((u) => `<option value="${u.id}" ${u.id === i.recent_owner_id ? "selected" : ""}>${esc(u.display_name)}${u.teams && u.teams.length ? " · " + esc(u.teams.map(teamLabel).join(", ")) : ""}</option>`).join("")}</select>` : `<span class="hint">ยังไม่มีผู้ใช้อื่นในระบบ</span><input type="hidden" name="owner" value="">`}</span></label>
 </fieldset>
 <div class="formgrid">
 ${i.site ? "" : `<label class="f">ลูกค้า (Site)<select name="site"><option value="">ยังไม่ทราบ ยืนยันภายหลังบนหน้าเคส</option>${lk.site.map((s) => `<option>${esc(s)}</option>`).join("")}</select><span class="hint">${i.channel === "email" ? `ส่งจาก ${esc(i.contact_email || "-")}` : `ลูกค้าพิมพ์ว่า “${esc(i.customer_text || "-")}”`} · ไม่เลือกก็ได้ โทรถามลูกค้าแล้วกด “ยืนยันลูกค้า” บนหน้าเคส</span></label>`}
 <label class="f">ทีม<select name="team">${ME.teams.map((t) => `<option value="${esc(t.key)}" ${t.key === defTeam ? "selected" : ""}>${esc(t.label)}</option>`).join("")}</select></label>
 <label class="f">CS Number (ถ้ามี)<input name="cs" placeholder="เช่น CS5056901"></label>
 <label class="f">Severity<select name="sev">${lk.severity.map((s) => `<option ${s === i.severity ? "selected" : ""}>${esc(s)}</option>`).join("")}</select></label></div>
-<label class="f">ข้อความถึง Owner / บันทึกแรก (ไม่บังคับ)<textarea name="note" rows="2" placeholder="เช่น ลูกค้าเคยเจออาการเดียวกันเมื่อเดือนก่อน ดูเคส CS5056401 ประกอบ"></textarea></label>
+<label class="f">ข้อความถึง User / บันทึกแรก (ไม่บังคับ)<textarea name="note" rows="2" placeholder="เช่น ลูกค้าเคยเจออาการเดียวกันเมื่อเดือนก่อน ดูเคส CS5056401 ประกอบ"></textarea></label>
 <p class="hint" style="margin:0">เมื่อยืนยัน คำขอนี้กลายเป็นเคสปกติ เริ่มนับ SLA ${cfg.slaDays} วันวันนี้ และระบบแจ้งลูกค้า${i.channel === "email" ? "ทาง email " : i.channel === "line" ? "ทาง LINE " : ""}ว่าใครรับเคส${!ME.user.phone ? ` <span style="color:var(--warn,#B4530A)">· คุณยังไม่ได้ใส่เบอร์โทร ลูกค้าจะไม่เห็นเบอร์ของคุณ <a href="#/profile">ใส่เบอร์</a></span>` : ""}</p>
 <div class="right"><button class="btn" value="cancel" formnovalidate>ยกเลิก</button><button class="btn primary" value="ok">ยืนยันรับเคส</button></div></form>`;
     const f = dlg.querySelector("#cf");
@@ -2374,7 +2454,7 @@ ${i.site ? "" : `<label class="f">ลูกค้า (Site)<select name="site"><
       if (e.submitter && e.submitter.value === "cancel") return;
       e.preventDefault();
       const btn = f.querySelector("button[value=ok]");
-      if (f.who.value === "transfer" && !f.owner.value) return toast("เลือก Owner ที่จะโอนให้");
+      if (f.who.value === "transfer" && !f.owner.value) return toast("เลือก User ที่จะโอนให้");
       btn.disabled = true;
       try {
         const r = await post(`/intake/${i.id}/claim`, {
@@ -2465,7 +2545,7 @@ ${i.site ? "" : `<label class="f">ลูกค้า (Site)<select name="site"><
 ${status === "pending" || status === "held" ? `<td class="${Date.now() - new Date(i.created_at).getTime() > 3600000 ? "t-over" : ""}">${waitedText(i.created_at)}</td><td>${esc(i.recent_owner_name || "-")}</td>`
       : status === "claimed" ? `<td>${fdt(i.claimed_at)}</td><td>${esc(i.owner_name || "-")}${i.case_id ? `<div><a href="#/case/${i.case_id}">${esc(i.case_no || i.cs_number || "เคส #" + i.case_id)}</a></div>` : ""}</td>`
       : `<td>${fdt(i.claimed_at)}</td><td>${esc(i.duplicate_of ? "ซ้ำกับ " + i.duplicate_of : i.closed_reason || "-")}</td>`}</tr>`).join("");
-    const heads = status === "pending" || status === "held" ? "<th>รอมาแล้ว</th><th>ดูแลเคสล่าสุด</th>" : status === "claimed" ? "<th>รับเมื่อ</th><th>Owner / เคส</th>" : "<th>ปิดเมื่อ</th><th>เหตุผล</th>";
+    const heads = status === "pending" || status === "held" ? "<th>รอมาแล้ว</th><th>ดูแลเคสล่าสุด</th>" : status === "claimed" ? "<th>รับเมื่อ</th><th>User / เคส</th>" : "<th>ปิดเมื่อ</th><th>เหตุผล</th>";
     $app.innerHTML = `<div class="head"><div><h1>เคสจากลูกค้า</h1><p>ลูกค้าแจ้งผ่าน LINE OA, Email หรือลิงก์ ทุกคนในทีมรับได้ · SLA ${cfg.slaDays} วันเริ่มนับเมื่อรับเคส · ยังไม่มีคนรับเกิน 1 ชม. ระบบเตือนทีมทุกชั่วโมง 06:00–22:00</p></div>
 <div class="actions">${can("case_create") ? `<button class="btn" type="button" id="ml-btn">สร้างลิงก์ส่งให้ลูกค้าเอง</button>` : ""}${lvl("settings_manage") === "all" ? `<a class="btn" href="#/intake-admin">ตั้งค่า LINE OA, Email และ API</a>` : ""}</div></div>
 ${hl ? hotlineCard(hl) : ""}
@@ -2526,7 +2606,7 @@ ${h.lines.map((l, n) => `<span>${n + 1}</span><input name="p${n}" value="${esc(l
     const row = (k, v) => `<div><div class="k">${k}</div><div>${v}</div></div>`;
     $app.innerHTML = `<div class="crumb"><a href="#/intake">เคสจากลูกค้า</a> / ${esc(i.req_no)}</div>
 <div class="head"><div><h1>${esc(i.req_no)} ${sevChip(i.severity)}</h1><p>${ikCustomer(i)} · ${esc(i.subject)}</p></div>
-<div class="actions">${i.status === "pending" && !i.held && can("case_create") ? `<button class="btn primary" type="button" data-claim="${i.id}">รับเคสเอง</button><button class="btn" type="button" data-transfer="${i.id}">โอนให้ Owner</button><button class="btn" type="button" id="rej">ปิดคำขอ (ซ้ำ / ไม่ใช่เคส)</button>` : ""}
+<div class="actions">${i.status === "pending" && !i.held && can("case_create") ? `<button class="btn primary" type="button" data-claim="${i.id}">รับเคสเอง</button><button class="btn" type="button" data-transfer="${i.id}">โอนให้ User</button><button class="btn" type="button" id="rej">ปิดคำขอ (ซ้ำ / ไม่ใช่เคส)</button>` : ""}
 ${i.held && (lvl("case_reassign") === "all" || lvl("settings_manage") === "all") ? `<button class="btn primary" type="button" id="rel">ยืนยันว่าเป็นเคสจริง</button><button class="btn" type="button" id="rej">ปิดคำขอ (ไม่ใช่เคส)</button>` : ""}
 ${i.case_id ? `<a class="btn primary" href="#/case/${i.case_id}">เปิดเคส ${esc(i.case_no || i.cs_number || "#" + i.case_id)}</a>` : ""}</div></div>
 ${ikTags(i) ? `<div>${ikTags(i)}</div>` : ""}
@@ -2549,7 +2629,7 @@ ${row("ช่องทาง", i.channel === "email" ? "Email ถึงกล่
 ${i.channel === "email" ? row("ระบบเดา Severity / ระบบ", `${esc(i.severity)} / ${esc(i.product || "-")} · ตรวจและแก้ได้ตอนรับเคส`) : ""}
 ${row("ชื่อบริษัทที่ลูกค้าพิมพ์", esc(i.customer_text || "-"))}
 ${updateUrl ? row("ลิงก์ให้ลูกค้าเพิ่มข้อมูล / แนบรูป (Add details)", `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><a class="mono" href="${esc(updateUrl)}" target="_blank" rel="noopener" style="word-break:break-all;font-size:13px">${esc(updateUrl)}</a><button class="btn" type="button" id="upd-copy" style="min-height:32px">คัดลอก</button></div><div class="hint">ระบบใส่ลิงก์นี้ใน email ถึงลูกค้าอยู่แล้ว ส่งเองทาง LINE หรือแชทได้ ใช้ได้จนเคสปิด + 7 วัน</div>`) : ""}
-${i.claimed_at ? row(i.status === "claimed" ? "รับเคสโดย" : "ปิดโดย", `${esc(i.claimed_by_name || "-")} · ${fdt(i.claimed_at)}${i.owner_name && i.owner_name !== i.claimed_by_name ? ` · Owner: ${esc(i.owner_name)}` : ""}`) : ""}
+${i.claimed_at ? row(i.status === "claimed" ? "รับเคสโดย" : "ปิดโดย", `${esc(i.claimed_by_name || "-")} · ${fdt(i.claimed_at)}${i.owner_name && i.owner_name !== i.claimed_by_name ? ` · User: ${esc(i.owner_name)}` : ""}`) : ""}
 ${i.closed_reason || i.duplicate_of ? row("เหตุผล", esc(i.duplicate_of ? "ซ้ำกับ " + i.duplicate_of : i.closed_reason)) : ""}
 ${i.reminder_count ? row("เตือนทีมแล้ว", `${i.reminder_count} ครั้ง`) : ""}</div>
 ${prior.length ? `<div class="k">คำขอก่อนหน้าจาก LINE นี้</div><ul style="margin:0;padding-left:18px">${prior.map((p) => `<li><a href="#/intake/${p.id}">${esc(p.req_no)}</a> ${esc(p.subject)} <span class="muted">${IK_STATUS[p.status]}</span></li>`).join("")}</ul>` : ""}
@@ -2587,7 +2667,7 @@ ${em.mock ? `<div class="banner warn">โหมดข้อมูลจำลอ
 <div class="stat2" style="grid-template-columns:repeat(5,1fr)"><div><div class="k">สร้างคำขอ (30 วัน)</div><div class="v">${em.counts.created}</div></div><div><div class="k">เพิ่มในเรื่องเดิม</div><div class="v">${em.counts.appended}</div></div><div><div class="k">พักให้ Admin ตรวจ</div><div class="v">${em.counts.held}</div></div><div><div class="k">ข้าม</div><div class="v">${em.counts.ignored}</div></div><div><div class="k">ผิดพลาด</div><div class="v">${em.counts.errors}</div></div></div>
 <div class="formgrid">
 <label class="f">กล่องจดหมาย (shared mailbox)<input id="em-mb" value="${esc(es.mailbox)}" placeholder="service@sinostech.co.th"></label>
-<label class="f">แจ้งทีมเมื่อมีเคสใหม่ทาง email ที่<input id="em-team" value="${esc(es.teamNotifyTo || "")}" placeholder="support@sinostech.co.th"><span class="hint">ใส่ได้หลาย email คั่นด้วยจุลภาค เว้นว่าง = ใช้รายชื่อแจ้งทีมเดียวกับ LINE OA / ลิงก์ฟอร์ม · Owner เคสล่าสุดของลูกค้ารายนั้นได้ CC เหมือนเดิม</span></label>
+<label class="f">แจ้งทีมเมื่อมีเคสใหม่ทาง email ที่<input id="em-team" value="${esc(es.teamNotifyTo || "")}" placeholder="support@sinostech.co.th"><span class="hint">ใส่ได้หลาย email คั่นด้วยจุลภาค เว้นว่าง = ใช้รายชื่อแจ้งทีมเดียวกับ LINE OA / ลิงก์ฟอร์ม · User เคสล่าสุดของลูกค้ารายนั้นได้ CC เหมือนเดิม</span></label>
 <label class="f">email จากโดเมนที่ยังไม่ผูกกับลูกค้า<select id="em-unk"><option value="accept" ${es.unknownDomain === "accept" ? "selected" : ""}>รับเป็นคำขอปกติ ตอบลูกค้าทันที ยืนยันลูกค้าบนหน้าเคสภายหลัง (แนะนำ)</option><option value="hold" ${es.unknownDomain === "hold" ? "selected" : ""}>สร้างคำขอแต่พักไว้ให้ Admin / Manager ตรวจ (ไม่ตอบลูกค้า)</option><option value="ignore" ${es.unknownDomain === "ignore" ? "selected" : ""}>ข้าม ไม่สร้างคำขอ</option></select></label>
 <label class="f">ข้าม email จากโดเมน (ภายในบริษัท)<input id="em-ign" value="${esc(es.ignoreDomains.join(", "))}" placeholder="sinostech.co.th"></label>
 <label class="f">ผู้ส่งรายเดียวส่งเรื่องใหม่ได้ต่อชั่วโมง (เกินนี้พักไว้)<input id="em-rate" type="number" min="1" max="100" value="${es.perSenderPerHour}"></label>
@@ -2599,7 +2679,7 @@ ${em.mock ? `<div class="banner warn">โหมดข้อมูลจำลอ
 <ul style="margin:8px 0 0;padding-left:18px;line-height:1.8;font-size:14px">
 <li>รู้จักลูกค้าจากโดเมนผู้ส่ง ตั้งโดเมนของแต่ละลูกค้าในตาราง “ลูกค้า” ด้านล่าง (email ส่วนตัวอย่าง gmail.com ผูกไม่ได้)</li>
 <li>ข้าม: โดเมนภายใน, ตอบกลับอัตโนมัติ / out-of-office, noreply / mailer-daemon, จดหมายข่าว, email ที่เข้ามาก่อนเปิดใช้</li>
-<li>หัวเรื่องมี [REQ-…] หรือหัวเรื่องเดิมจากผู้ส่งเดิมภายใน 3 วัน: เพิ่มเข้าเรื่องเดิม ถ้ารับเคสแล้วบันทึกเป็น Activity ของเคสและแจ้ง Owner</li>
+<li>หัวเรื่องมี [REQ-…] หรือหัวเรื่องเดิมจากผู้ส่งเดิมภายใน 3 วัน: เพิ่มเข้าเรื่องเดิม ถ้ารับเคสแล้วบันทึกเป็น Activity ของเคสและแจ้ง User</li>
 <li>พักให้ Admin ตรวจ: โดเมนที่ยังไม่ผูกลูกค้า, ตอบกลับ email เก่าที่ไม่มีเลข REQ, ผู้ส่งส่งถี่เกินกำหนด, คำขอเข้ามาผิดปกติ</li>
 <li>ระบบเดา Severity และระบบจากเนื้อหา ทีมแก้ได้ตอนรับเคส · เก็บไฟล์แนบตามชนิดและขนาดที่ตั้งไว้</li>
 <li>อ่านแล้วย้ายไปโฟลเดอร์ “${esc(es.folder)}” ในกล่อง · ลบออกจากกล่องเมื่อเก่ากว่าที่ตั้งไว้ (คำขอในระบบยังเก็บเนื้อหาและไฟล์)</li>
@@ -2830,11 +2910,10 @@ ${d.outbox.map((o) => `<tr><td>${fdt(o.created_at)}</td><td class="mono">${esc(o
   const KPI_PARTS = [
     ["sla", "1. ปิดทัน SLA", 30],
     ["resp", "2. ความเร็วตอบสนอง", 15],
-    ["work", "3. ปริมาณงานถ่วงน้ำหนัก", 15],
-    ["hard", "4. ความยากของเคส", 10],
-    ["div", "5. ความหลากหลาย / Skill", 10],
-    ["back", "6. งานค้างและการขยายเวลา", 10],
-    ["doc", "7. คุณภาพการบันทึก", 10],
+    ["work", "3. แต้มงาน (ปริมาณ × ความยาก)", 20],
+    ["div", "4. ความหลากหลาย / Skill", 15],
+    ["back", "5. งานค้างและการขยายเวลา", 10],
+    ["doc", "6. คุณภาพการบันทึก", 10],
   ];
   const TH_FULL = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
   const ymLabel = (ym, full) => {
@@ -2857,9 +2936,9 @@ ${d.outbox.map((o) => `<tr><td>${fdt(o.created_at)}</td><td class="mono">${esc(o
     const sel = owners.find((o) => String(o.id) === String(params.owner)) || owners.find((o) => o.id === ME.user.id) || owners[0];
     const current = month === months[0];
     const head = `<div class="banner warn kp-trial"><strong>ทดลองใช้</strong> · เกณฑ์และคะแนนอยู่ระหว่างทดลอง ยังไม่ใช้ประเมินผลงานจริง ถ้าเห็นตัวเลขที่ไม่ตรงกับงานจริง แจ้ง Admin เพื่อปรับเกณฑ์</div>
-<div class="head"><div><h1>KPI ราย Owner · ${ymLabel(month, true)} <span class="kp-beta">ทดลองใช้</span></h1><p>คำนวณจากข้อมูลเคสในระบบ${current ? " · <strong>เดือนนี้ยังไม่จบ ตัวเลขยังเปลี่ยนได้</strong>" : ""} · Manager ปรับคะแนนได้ ±10 พร้อมเหตุผล</p></div>
+<div class="head"><div><h1>KPI ราย User · ${ymLabel(month, true)} <span class="kp-beta">ทดลองใช้</span></h1><p>คำนวณจากข้อมูลเคสในระบบ${current ? " · <strong>เดือนนี้ยังไม่จบ ตัวเลขยังเปลี่ยนได้</strong>" : ""} · Manager ปรับคะแนนได้ ±10 พร้อมเหตุผล</p></div>
 <div class="actions" style="flex-direction:row;align-items:center">
-${r.canAll && owners.length ? `<select id="kp-owner" aria-label="Owner" style="width:auto">${owners.map((o) => `<option value="${o.id}" ${sel && o.id === sel.id ? "selected" : ""}>${esc(o.name)}</option>`).join("")}</select>` : ""}
+${r.canAll && owners.length ? `<select id="kp-owner" aria-label="User" style="width:auto">${owners.map((o) => `<option value="${o.id}" ${sel && o.id === sel.id ? "selected" : ""}>${esc(o.name)}</option>`).join("")}</select>` : ""}
 <select id="kp-month" aria-label="เดือน" style="width:auto">${months.map((m) => `<option value="${m}" ${m === month ? "selected" : ""}>${ymLabel(m)}</option>`).join("")}</select>
 <button class="btn" type="button" onclick="window.print()">พิมพ์ / PDF</button></div></div>`;
     if (!sel) {
@@ -2894,6 +2973,8 @@ ${stat("ดูแล / ปิดเคส", `${sel.handled} / ${m.closed}`)}
 ${stat("ปิดทัน SLA เดิม", m.slaPct == null ? "-" : `${m.onTime} <span class="muted" style="font-size:14px">(${m.slaPct}%)</span>`)}
 ${stat("ตอบสนองครั้งแรก (มัธยฐาน)", m.firstResponseHrs == null ? "-" : `${m.firstResponseHrs} ชม.`)}
 ${stat("อัปเดตเคสทุก", m.updateEveryDays == null ? "-" : `${m.updateEveryDays} วัน`)}
+${stat("แต้มงาน", `${m.points ?? "-"} <span class="muted" style="font-size:14px">(ค่ากลางทีม ${m.teamMedianPoints ?? "-"})</span>`)}
+${stat("เคสส่ง NICE", `${m.vendor ?? 0}${m.dedicated ? ' <span class="muted" style="font-size:14px">· ดูแลลูกค้าประจำ</span>' : ""}`)}
 ${stat("ขยายเวลา (อนุมัติ)", `${m.extensions} ครั้ง`)}
 ${stat("เกิน Due สิ้นเดือน", `<span class="${m.overdueAtEnd ? "t-over" : ""}">${m.overdueAtEnd}</span>`)}
 ${stat("Critical", m.critical)}
@@ -2915,11 +2996,11 @@ ${m.newSkills.length ? `<p style="margin:10px 0 0;font-size:14px">Skill ให�
 
 ${r.canAdjust ? `<section class="card noprint"><h2>ปรับคะแนนโดย Manager</h2><p class="hint" style="margin:0">ใช้กรณีที่ข้อมูลในระบบไม่สะท้อนงานจริง เช่น เคสช้าเพราะรอลูกค้าหรือ Vendor · บันทึกในประวัติการใช้งาน</p>
 <div class="formgrid" style="align-items:end"><label class="f">คะแนน (−10 ถึง +10)<input type="number" id="kp-pts" min="-10" max="10" value="${sel.adjust ? sel.adjust.points : 0}"></label>
-<label class="f" style="grid-column:span 2">เหตุผล<input id="kp-why" value="${esc(sel.adjust ? sel.adjust.reason : "")}" placeholder="เช่น CASE-2026-0012 ช้าเพราะรอ Vendor ไม่ใช่ความผิดของ Owner"></label>
+<label class="f" style="grid-column:span 2">เหตุผล<input id="kp-why" value="${esc(sel.adjust ? sel.adjust.reason : "")}" placeholder="เช่น CASE-2026-0012 ช้าเพราะรอ Vendor ไม่ใช่ความผิดของ User"></label>
 <div class="actions"><button class="btn primary" type="button" id="kp-save">บันทึก</button></div></div></section>` : ""}
 
 ${r.canAll ? `<section class="card"><div class="title"><h2>เทียบทั้งทีม · ${ymLabel(month)}</h2><span>คลิกชื่อเพื่อดูรายละเอียด</span></div>
-<div class="tablewrap"><table style="min-width:900px"><thead><tr><th>Owner</th><th class="n">คะแนน</th><th class="n">ดูแล / ปิด</th><th class="n">ทัน SLA</th><th class="n">ตอบสนอง</th><th class="n">อัปเดตทุก</th><th class="n">หลากหลาย</th><th>Skill หลัก</th></tr></thead><tbody>
+<div class="tablewrap"><table style="min-width:900px"><thead><tr><th>User</th><th class="n">คะแนน</th><th class="n">ดูแล / ปิด</th><th class="n">ทัน SLA</th><th class="n">ตอบสนอง</th><th class="n">อัปเดตทุก</th><th class="n">หลากหลาย</th><th>Skill หลัก</th></tr></thead><tbody>
 ${owners.map((o) => `<tr class="click" data-href="#/kpi?${qs({ month, owner: o.id })}"><td style="font-weight:600">${esc(o.name)}</td><td class="n" style="font-weight:700">${o.score} ${o.grade || `<span class="muted" style="font-weight:400">ข้อมูลไม่พอ</span>`}</td>
 <td class="n">${o.handled} / ${o.metrics.closed}</td><td class="n">${o.metrics.slaPct == null ? "-" : o.metrics.slaPct + "%"}</td><td class="n">${o.metrics.firstResponseHrs == null ? "-" : o.metrics.firstResponseHrs + " ชม."}</td>
 <td class="n">${o.metrics.updateEveryDays == null ? "-" : o.metrics.updateEveryDays + " วัน"}</td><td class="n">${o.metrics.diversity.toFixed(2)}</td><td>${esc(Object.entries(o.products).sort((a, b) => b[1] - a[1]).slice(0, 2).map((x) => x[0]).join(", ") || "-")}</td></tr>`).join("")}</tbody></table></div></section>` : ""}
@@ -2928,11 +3009,10 @@ ${owners.map((o) => `<tr class="click" data-href="#/kpi?${qs({ month, owner: o.i
 <div class="tablewrap" style="margin-top:10px"><table><thead><tr><th>เกณฑ์</th><th class="n">คะแนน</th><th>วิธีคิด</th></tr></thead><tbody>
 <tr><td>1. ปิดทัน SLA</td><td class="n">30</td><td>% เคสที่ปิดทัน Due เดิม (ก่อนขยาย) · ปิดทันเวลาที่ขยายได้ครึ่งหนึ่ง · Critical นับ 2 เท่า</td></tr>
 <tr><td>2. ความเร็วตอบสนอง</td><td class="n">15</td><td>Activity แรกหลังเปิดเคส ≤4 ชม. 8 · ≤8 ชม. 6 · ≤24 ชม. 4 · ≤48 ชม. 2 และอัปเดตเคสที่เปิดอยู่ทุก ≤2 วัน 7 · ≤3 วัน 5 · ≤5 วัน 3</td></tr>
-<tr><td>3. ปริมาณงานถ่วงน้ำหนัก</td><td class="n">15</td><td>เคสที่ปิด × น้ำหนัก Severity (Critical 3, High 2, Medium 1.5, Low 1, ขอข้อมูล 0.5) เทียบมัธยฐานทีม · เท่ามัธยฐาน 10 · 1.5 เท่าขึ้นไป 15</td></tr>
-<tr><td>4. ความยากของเคส</td><td class="n">10</td><td>สัดส่วนเคส Critical/High หรือที่ต้องเปิด Vendor / Remote / Onsite เทียบค่าเฉลี่ยทีม (เท่าทีม = 5)</td></tr>
-<tr><td>5. ความหลากหลาย / Skill</td><td class="n">10</td><td>ความกระจายของประเภทงาน Product และลูกค้า (0–1) × 7 + Product ที่ทำครั้งแรก 1.5 ต่อ Product (สูงสุด 3)</td></tr>
-<tr><td>6. งานค้างและการขยายเวลา</td><td class="n">10</td><td>เริ่ม 10 · หัก 2 ต่อเคสเกิน Due สิ้นเดือน · หัก 1 ต่อการขยายที่อนุมัติ (สูงสุด 3)</td></tr>
-<tr><td>7. คุณภาพการบันทึก</td><td class="n">10</td><td>เคสที่ปิดมีบันทึกสุดท้าย ≥20 ตัวอักษร 5 · Activity ที่มีเนื้อหาเฉลี่ย ≥3 ต่อเคส 5</td></tr>
+<tr><td>3. แต้มงาน (ปริมาณ × ความยาก)</td><td class="n">20</td><td>แต้มต่อเคสที่ปิด = Severity (Critical 3, High 2, Medium 1.5, Low 1, ขอข้อมูล 0.5) × (1 + ส่ง NICE/มี CS Number 0.5 + Onsite 0.3 + เปิดนานเกิน 7 วัน 0.2) × ความยากที่ Manager ปรับ (0.8–1.5) · เทียบค่ากลางของทีมเดียวกันแบบรากที่สอง: 20 × √(แต้ม ÷ ค่ากลาง) ÷ 1.3 สูงสุด 20 · เคสมากขึ้น 4 เท่าได้คะแนนเพิ่มประมาณ 2 เท่า</td></tr>
+<tr><td>4. ความหลากหลาย / Skill</td><td class="n">15</td><td>ความกระจายของประเภทงาน Product และลูกค้า (0–1) × 10.5 + Product หรือประเภทงานที่ทำครั้งแรก 1.5 ต่อรายการ (สูงสุด 4.5) · คนที่ตั้งเป็น "ดูแลลูกค้าประจำ" ไม่นับความหลากหลายของลูกค้า</td></tr>
+<tr><td>5. งานค้างและการขยายเวลา</td><td class="n">10</td><td>เริ่ม 10 · หัก 2 ต่อเคสเกิน Due สิ้นเดือน · หัก 1 ต่อการขยายที่อนุมัติ (สูงสุด 3)</td></tr>
+<tr><td>6. คุณภาพการบันทึก</td><td class="n">10</td><td>เคสที่ปิดมีบันทึกสุดท้าย ≥20 ตัวอักษร 5 · Activity ที่มีเนื้อหาเฉลี่ย ≥3 ต่อเคส 5</td></tr>
 <tr><td>+ โบนัส</td><td class="n">5</td><td>รับเคสจากลูกค้าภายใน 1 ชม. ทุก 2 เคสได้ 1 (สูงสุด 5)</td></tr></tbody></table></div>
 <p class="hint">เกรด A ≥85 · A- 80–84 · B+ 75–79 · B 70–74 · C 60–69 · D ต่ำกว่า 60 · ปิดเคสน้อยกว่า 3 เคสไม่ให้เกรด</p></details></section>
 
@@ -3080,7 +3160,7 @@ ${r.canEditCategories ? `<section class="card noprint"><details><summary style="
   // Overdue first, then the nearest target date.
   const srByTarget = (a, b) => (b.status === "overdue") - (a.status === "overdue") || String(a.targetDate || "").localeCompare(String(b.targetDate || ""));
   const srDue = (r) => (r.status === "overdue" ? `<span class="t-over">เลย ${r.overdueDays} วันทำการ</span>` : r.daysLeft === 0 ? `<span class="t-r2">ครบวันนี้</span>` : r.daysLeft != null ? `อีก ${r.daysLeft} วันทำการ` : "");
-  /** Compact table of service requests for the case pages (เคสของฉัน, ราย Owner, ประชุม). */
+  /** Compact table of service requests for the case pages (เคสของฉัน, ราย User, ประชุม). */
   function srWorkTable(items, { showAssignee = false, print = false } = {}) {
     if (!items.length) return `<div class="empty">ไม่มีคำขอบริการค้าง</div>`;
     return `<div class="tablewrap"><table class="${print ? "mt-index" : ""}"><thead><tr><th>เลขคำขอ</th><th>งานที่ขอ</th><th>ผู้ขอ</th>${showAssignee ? "<th>ผู้รับผิดชอบ</th>" : ""}<th>Severity</th><th>Target</th><th>สถานะ</th></tr></thead><tbody>
@@ -3133,24 +3213,37 @@ ${rows.map((r) => `<tr data-go="#/sr/${r.id}" tabindex="0"><td><span class="mono
     });
   }
 
+  /** Department dropdown: the admin's list, plus the person's current value when it is not (or no longer) in it. */
+  function deptSelect(names, cur, { other = true, name = "department" } = {}) {
+    const extra = cur && !names.includes(cur) ? `<option value="${esc(cur)}" selected>${esc(cur)} (ไม่อยู่ในรายการ)</option>` : "";
+    return `<select name="${name}"><option value="">เลือกหน่วยงาน</option>${extra}${names.map((n) => `<option ${n === cur ? "selected" : ""}>${esc(n)}</option>`).join("")}${other ? `<option value="__other">อื่นๆ (ขอให้ Admin เพิ่ม)</option>` : ""}</select>`;
+  }
+
   async function viewProfile(after) {
     setNav("");
-    const { profile: p, missing } = await api("/profile");
+    const { profile: p, missing, departments = [] } = await api("/profile");
     $app.innerHTML = `<div class="pagehead"><div><h1>บัญชีของฉัน</h1><p class="muted" style="margin:0">${esc(p.email)} · ${ROLE[p.role] || p.role}</p></div></div>
 <form class="card" id="pf" style="max-width:620px">
 ${missing.length ? `<div class="banner warn" style="margin:0">${after ? "ก่อนส่งคำขอแรก " : ""}ช่วยยืนยันข้อมูลของคุณ ทีมที่รับงานจะใช้ติดต่อกลับ${p.department || p.job_title || p.phone ? "<br>ระบบดึงข้อมูลบางส่วนจากบัญชี Microsoft ของบริษัทมาให้แล้ว ตรวจแล้วแก้ได้" : ""}</div>` : ""}
 <label class="f">ชื่อที่แสดง<input name="display_name" value="${esc(p.display_name)}" maxlength="120"></label>
-<div class="formgrid" style="grid-template-columns:1fr 1fr"><label class="f">หน่วยงาน / ฝ่าย<input name="department" value="${esc(p.department || "")}" placeholder="เช่น ฝ่ายขาย" required maxlength="120"></label>
+<div class="formgrid" style="grid-template-columns:1fr 1fr"><div class="stack" style="gap:8px"><label class="f">หน่วยงาน / ฝ่าย${deptSelect(departments, p.department || "")}<span class="hint" data-dept-hint>รายการนี้ Admin เป็นคนดูแล</span></label>
+<label class="f" data-dept-other hidden>หน่วยงานที่ต้องการให้เพิ่ม<input name="department_other" maxlength="120" placeholder="เช่น ฝ่ายขายภาคเหนือ"></label></div>
 <label class="f">ตำแหน่ง<input name="job_title" value="${esc(p.job_title || "")}" placeholder="เช่น Account Manager" required maxlength="120"></label></div>
 <label class="f">เบอร์โทรที่ติดต่อได้<input name="phone" value="${esc(p.phone || "")}" placeholder="081-234-5678 หรือ 02-123-4567 ต่อ 105" required maxlength="60"><span class="hint">${["requester"].includes(p.role) ? "ทีมที่รับงานใช้ติดต่อกลับ" : "แสดงใน email ถึงลูกค้าเมื่อคุณรับเคส และในคำขอบริการ"}</span></label>
 <div class="right"><button class="btn primary" type="submit">${after ? "บันทึกแล้วไปต่อ" : "บันทึก"}</button></div></form>
 ${after ? "" : `<section class="card" id="av-card" style="max-width:620px;margin-top:16px"></section>`}`;
     if (!after) avatarPicker(document.getElementById("av-card"));
     const f = document.getElementById("pf");
+    const dOther = f.querySelector("[data-dept-other]");
+    f.department.onchange = () => {
+      dOther.hidden = f.department.value !== "__other";
+      f.querySelector("[data-dept-hint]").textContent = dOther.hidden ? "รายการนี้ Admin เป็นคนดูแล" : "บันทึกแล้วระบบส่ง email ให้ Admin เพิ่มเข้ารายการ";
+    };
     f.onsubmit = async (e) => {
       e.preventDefault();
+      if (!f.department.value) return toast("เลือกหน่วยงาน");
       try {
-        const r = await post("/profile", Object.fromEntries(["display_name", "department", "job_title", "phone"].map((k) => [k, f[k].value.trim()])), "PUT");
+        const r = await post("/profile", Object.fromEntries(["display_name", "department", "department_other", "job_title", "phone"].map((k) => [k, f[k].value.trim()])), "PUT");
         Object.assign(ME.user, { display_name: r.profile.display_name, phone: r.profile.phone, department: r.profile.department, job_title: r.profile.job_title });
         SR_META = null;
         toast("บันทึกข้อมูลแล้ว");
@@ -3423,7 +3516,7 @@ ${r.status === "info" ? `<label class="f">ข้อความถึง Manager
   function avatarPicker(host) {
     const draw = () => {
       const u = { id: ME.user.id, name: ME.user.display_name, avatar: ME.user.avatar };
-      host.innerHTML = `<div class="title"><h2>Avatar</h2><span>แสดงในอันดับ KPI หน้าราย Owner และมุมขวาบน</span></div>
+      host.innerHTML = `<div class="title"><h2>Avatar</h2><span>แสดงในอันดับ KPI หน้าราย User และมุมขวาบน</span></div>
 <div class="avpick"><div class="avprev">${avHtml(u, "xl")}<span class="hint">${(ME.user.avatar || "").startsWith("photo:") ? "ใช้รูปที่อัปโหลด" : ME.user.avatar ? "avatar ที่เลือก" : "ยังไม่เลือก ใช้ตัวอักษรชื่อ"}</span></div>
 <div><div class="avgrid" role="radiogroup" aria-label="เลือก avatar">${AVATARS.map(([k, e, bg]) => `<button type="button" class="avopt" role="radio" aria-checked="${ME.user.avatar === k}" aria-label="${k}" data-k="${k}" style="background:${bg}">${e}</button>`).join("")}</div>
 <div class="actions" style="margin-top:12px"><label class="btn" for="av-file" style="cursor:pointer">อัปโหลดรูปของฉัน</label><input type="file" id="av-file" accept="image/png,image/jpeg,image/webp" hidden>
@@ -3469,8 +3562,8 @@ ${r.status === "info" ? `<label class="f">ข้อความถึง Manager
     improved: ["🚀", "พัฒนาสูงสุด", "v"], sla100: ["⏱️", "SLA 100%", "g"], skill: ["🧩", "ทักษะใหม่", "b"],
     doc: ["📝", "Resolution ครบ", "b"], streak: ["🔥", "Top 5 สามเดือน", "o"], best: ["⭐", "สถิติส่วนตัว", "o"],
   };
-  const PART_LABEL = { sla: "SLA", resp: "ตอบสนองเร็ว", work: "ปริมาณงาน", hard: "ความยาก", div: "ทักษะหลากหลาย", back: "งานค้าง / ขยายเวลา", doc: "เอกสาร / Resolution", bonus: "โบนัสทีม" };
-  const PART_TIP = { sla: "ปิดเคสให้ทัน Due", resp: "ตอบเคสแรกเร็วและอัปเดตสม่ำเสมอ", work: "รับเคสเพิ่มตามกำลัง", hard: "รับเคส High/Critical", div: "ทำงานหลาย product / ประเภท", back: "ลดเคสค้างและการขอขยาย", doc: "เขียน Resolution ให้ครบทุกเคส", bonus: "รับเคสจากลูกค้าภายใน 1 ชม." };
+  const PART_LABEL = { sla: "SLA", resp: "ตอบสนองเร็ว", work: "แต้มงาน", div: "ทักษะหลากหลาย", back: "งานค้าง / ขยายเวลา", doc: "เอกสาร / Resolution", bonus: "โบนัสทีม" };
+  const PART_TIP = { sla: "ปิดเคสให้ทัน Due", resp: "ตอบเคสแรกเร็วและอัปเดตสม่ำเสมอ", work: "ปิดเคส โดยเฉพาะเคสยาก (Critical, ส่ง NICE, Onsite)", div: "ทำงานหลาย product / ประเภท", back: "ลดเคสค้างและการขอขยาย", doc: "เขียน Resolution ให้ครบทุกเคส", bonus: "รับเคสจากลูกค้าภายใน 1 ชม." };
   let rankTimers = [];
   const rkLater = (fn, ms) => rankTimers.push(setTimeout(fn, matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : ms));
   function rkCount(el, to, ms = 900) {
@@ -3748,6 +3841,37 @@ ${me.sr ? `<p class="hint" style="margin:0">ทำคำขอบริการ
     run();
   }
 
+  async function bindDepartments() {
+    const host = document.getElementById("dept-body");
+    if (!host) return;
+    let list = (await api("/departments")).list.map((x) => ({ ...x, was: x.name }));
+    const draw = () => {
+      host.innerHTML = `<div class="stack" style="gap:6px">${list.map((x, i) => `<div class="dept-row ${x.active ? "" : "off"}"><input value="${esc(x.name)}" data-i="${i}" aria-label="ชื่อหน่วยงาน">${x.active ? "" : `<span class="chip c-normal">ปิดอยู่</span>`}<button class="btn" type="button" data-t="${i}" style="min-height:32px">${x.active ? "ปิด" : "เปิด"}</button></div>`).join("")}</div>
+<div style="display:flex;gap:8px;margin-top:10px"><input id="dept-new" placeholder="ชื่อหน่วยงานใหม่" style="flex:1;min-width:0"><button class="btn" type="button" id="dept-add">เพิ่ม</button><button class="btn primary" type="button" id="dept-save">บันทึก</button></div>
+<p class="hint" style="margin:6px 0 0">แก้ชื่อในช่องได้เลย คนที่ใช้ชื่อเดิมจะถูกเปลี่ยนตามเมื่อบันทึก · ปิดแทนการลบ คนที่เลือกไว้แล้วยังเห็นชื่อเดิม แต่คนใหม่เลือกไม่ได้</p>`;
+      host.querySelectorAll("input[data-i]").forEach((el) => (el.oninput = () => (list[Number(el.dataset.i)].name = el.value)));
+      host.querySelectorAll("[data-t]").forEach((b) => (b.onclick = () => { const x = list[Number(b.dataset.t)]; x.active = !x.active; draw(); }));
+      document.getElementById("dept-add").onclick = () => {
+        const v = document.getElementById("dept-new").value.trim();
+        if (!v) return;
+        if (list.some((x) => x.name.toLowerCase() === v.toLowerCase())) return toast("มีหน่วยงานนี้แล้ว");
+        list.push({ name: v, active: true, was: "" });
+        draw();
+      };
+      document.getElementById("dept-save").onclick = async () => {
+        try {
+          const r = await post("/departments", { list }, "PUT");
+          list = r.list.map((x) => ({ ...x, was: x.name }));
+          draw();
+          toast("บันทึกรายการหน่วยงานแล้ว");
+        } catch (err) {
+          toast(err.message, 6000);
+        }
+      };
+    };
+    draw();
+  }
+
   function bindLeaderboardSettings() {
     const el = document.getElementById("lb-card");
     if (!el) return;
@@ -3785,7 +3909,7 @@ ${me.sr ? `<p class="hint" style="margin:0">ทำคำขอบริการ
         case "case": return await viewCase(parts[1] || "new");
         case "owner":
           if (parts[2] === "meeting") return await viewMeeting(decodeURIComponent(parts[1]), params);
-          return await viewOwner(parts[1] ? decodeURIComponent(parts[1]) : null);
+          return await viewOwner(parts[1] ? decodeURIComponent(parts[1]) : null, params);
         case "reports": return await viewReports(params);
         case "audit": return await viewAudit(params);
         case "cases": return await viewCases(params);
@@ -3822,8 +3946,14 @@ ${me.sr ? `<p class="hint" style="margin:0">ทำคำขอบริการ
         ME = { user: { must_change_password: true, display_name: "", email: "", role: "viewer", teams: [], auth_type: "local", id: 0 }, perms: {}, teams: [], config: {} };
       } else return;
     }
+    if (window.I18N && ME.user.lang && I18N.sync(ME.user.lang)) return; // the account's language differs from this browser's
     cfg = { ...cfg, ...ME.config };
     buildChrome();
+    const lb = document.getElementById("lang");
+    if (lb && window.I18N) {
+      lb.textContent = I18N.lang === "en" ? "ไทย" : "EN";
+      lb.onclick = () => I18N.set(I18N.lang === "en" ? "th" : "en", { save: (l) => post("/profile/lang", { lang: l }, "PUT") });
+    }
     if (ME.user.role !== "requester") {
       refreshIntakeBadge();
       setInterval(() => document.visibilityState === "visible" && refreshIntakeBadge(), 120000);

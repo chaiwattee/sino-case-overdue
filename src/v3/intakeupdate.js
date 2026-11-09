@@ -130,7 +130,7 @@ async function submit(token, b, ip) {
   if (files.length) await q("UPDATE intake_files SET update_id = $2 WHERE id = ANY($1)", [files.map((x) => x.id), u.id]);
   const stamp = new Intl.DateTimeFormat("th-TH", { timeZone: config.tz, day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(u.created_at));
   const lines = [
-    f.severity ? `ความเร่งด่วนที่ลูกค้าเลือก: ${f.severity}${i.status === "claimed" && i.case_severity && i.case_severity !== f.severity ? ` (เคสตอนนี้ ${i.case_severity} · Owner ตัดสินใจ ระบบไม่เปลี่ยนให้)` : ""}` : "",
+    f.severity ? `ความเร่งด่วนที่ลูกค้าเลือก: ${f.severity}${i.status === "claimed" && i.case_severity && i.case_severity !== f.severity ? ` (เคสตอนนี้ ${i.case_severity} · User ตัดสินใจ ระบบไม่เปลี่ยนให้)` : ""}` : "",
     f.contactName ? `ผู้ติดต่อ: ${f.contactName}` : "",
     f.phone ? `เบอร์ติดต่อกลับ: ${f.phone}` : "",
     f.product ? `ระบบ: ${f.product}` : "",

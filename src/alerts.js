@@ -47,7 +47,7 @@ async function runAlerts({ dryRun = false } = {}) {
     const c = d.c;
     const { subject, html } = caseAlertEmail(c, d.type);
     const { to, cc, noOwner } = recipientsFor(c, d.type);
-    const finalSubject = noOwner ? `[ไม่พบอีเมล Owner] ${subject}` : subject;
+    const finalSubject = noOwner ? `[ไม่พบอีเมล User] ${subject}` : subject;
     const row = {
       dedupe_key: d.dedupe,
       case_key: c.key,

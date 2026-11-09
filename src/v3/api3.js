@@ -56,6 +56,13 @@ ext.mount(api, { wrap });
 require("./kpi").mount(api, { wrap, need });
 require("./sr").mount(api, { wrap });
 require("./leaderboard").mount(api, { wrap, need });
+require("./departments").mount(api, { wrap, need });
+api.put("/profile/lang", wrap(async (req, res) => {
+  const lang = req.body?.lang === "en" ? "en" : "th";
+  await q("UPDATE users SET lang = $2 WHERE id = $1", [req.user.id, lang]);
+  res.json({ ok: true, lang });
+}));
+require("./customers").mount(api, { wrap });
 require("./rca").mount(api, { wrap, loadVisible, perms, repo, tx: require("./db").tx, audit });
 
 async function visibleCases(user) {
@@ -83,7 +90,8 @@ api.get("/me", wrap(async (req, res) => {
 }));
 
 api.get("/lookups", wrap(async (req, res) => {
-  const rows = await all("SELECT kind, value, is_new FROM lookups WHERE active ORDER BY kind, sort, lower(value)");
+  // A customer waiting for approval only shows for the person who typed it.
+  const rows = await all("SELECT kind, value, is_new FROM lookups WHERE active AND (NOT pending OR created_by = $1) ORDER BY kind, sort, lower(value)", [req.user.id]);
   const out = { site: [], product: [], status: [] };
   rows.forEach((r) => out[r.kind].push(r.value));
   out.severity = repo.SEVERITIES;
@@ -156,7 +164,7 @@ function ser3(c) {
     customerUnconfirmed: c.customerUnconfirmed || "",
     resolution: c.resolution || "", rootCause: c.rootCause || "", resolvedAt: c.resolvedAt || null, resolvedBy: c.resolvedBy || "", ownerUserId: c.owner_id, updatedAt: c.updatedAt, startAt: c.startAt,
     rcaText: c.rcaText || "", rcaCategory: c.rcaCategory || "", rcaDate: c.rcaDate || "", rcaFileName: c.rcaFileName || "", rcaBy: c.rcaBy || "", rcaAt: c.rcaAt || null,
-    rcaPending: !!(c.csNumber && !c.rcaText && c.stage !== "closed") };
+    rcaPending: !!(c.csNumber && !c.rcaText && c.stage !== "closed"), sitePendingId: c.sitePendingId || null, complexity: c.complexity };
 }
 
 api.get("/cases", wrap(async (req, res) => {
@@ -178,7 +186,7 @@ api.get("/owner/:id", wrap(async (req, res) => {
   const cases = await visibleCases(req.user);
   const id = String(req.params.id).toLowerCase();
   const mine = cases.filter((c) => ownerId(c) === id);
-  if (!mine.length) return res.status(404).json({ error: "ไม่พบ Owner นี้" });
+  if (!mine.length) return res.status(404).json({ error: "ไม่พบ User นี้" });
   const owners = [...new Map(cases.map((c) => [ownerId(c), { id: ownerId(c), owner: c.owner }])).values()].sort((a, b) =>
     String(a.owner).localeCompare(String(b.owner))
   );
@@ -189,20 +197,39 @@ api.get("/owner/:id", wrap(async (req, res) => {
     jobs.listChanges({ from: since, caseIds: ids }),
     ext.forCases(ids),
   ]);
+  // Month picker: this month and the two before it.
+  const t0 = d.today();
+  const months = [0, 1, 2].map((k) => {
+    const m0 = new Date(t0.getFullYear(), t0.getMonth() - k, 1);
+    return { ym: `${m0.getFullYear()}-${String(m0.getMonth() + 1).padStart(2, "0")}`, from: m0, to: new Date(m0.getFullYear(), m0.getMonth() + 1, 0) };
+  });
+  const sel = months.find((m) => m.ym === req.query.month) || months[0];
+  const mEnd = sel.to < t0 ? sel.to : t0;
+  const inMonth = (dt) => dt && dt >= sel.from && dt <= sel.to;
+  const closedIn = mine.filter((c) => c.stage === "closed" && inMonth(c.endDate));
+  const month = {
+    ym: sel.ym, current: sel === months[0],
+    opened: mine.filter((c) => inMonth(c.startDate)).length,
+    closed: closedIn.length,
+    onTime: closedIn.filter((c) => c.closedOnTime === true).length,
+    late: closedIn.filter((c) => c.closedOnTime === false).length,
+  };
+  month.slaPct = month.closed ? Math.round((month.onTime / month.closed) * 100) : null;
+  // 9 weeks (Mon–Sun) ending with the week that holds the last day shown; weeks outside the month are marked.
   const weeks = [];
-  const monday = d.addDays(d.today(), -((d.today().getDay() + 6) % 7));
-  for (let i = 3; i >= 0; i--) {
+  const monday = d.addDays(mEnd, -((mEnd.getDay() + 6) % 7));
+  for (let i = 8; i >= 0; i--) {
     const from = d.addDays(monday, -7 * i);
     const to = d.addDays(from, 6);
     const closed = mine.filter((c) => c.stage === "closed" && c.endDate >= from && c.endDate <= to);
-    weeks.push({ from: d.toISODate(from), onTime: closed.filter((c) => c.closedOnTime === true).length, late: closed.filter((c) => c.closedOnTime === false).length });
+    weeks.push({ from: d.toISODate(from), inMonth: to >= sel.from && from <= sel.to, onTime: closed.filter((c) => c.closedOnTime === true).length, late: closed.filter((c) => c.closedOnTime === false).length });
   }
-  const recent = d.addDays(d.today(), -30);
   res.json({
     id, owner: mine[0].owner, email: mine[0].ownerEmail, sources: [...new Set(mine.map((c) => c.sourceLabel))],
     user: await one("SELECT id, avatar FROM users WHERE lower(email) = lower($1)", [mine[0].ownerEmail || ""]),
     kpis: { ...stageCounts(mine), sla: slaStats(mine) }, owners,
-    cases: mine.filter((c) => c.stage !== "closed" || c.endDate >= recent)
+    months: months.map((m) => m.ym), month,
+    cases: mine.filter((c) => c.stage !== "closed" || inMonth(c.endDate))
       .sort((a, b) => (a.stage === "closed") - (b.stage === "closed") || (b.age || 0) - (a.age || 0)).map(ser3),
     alerts: alerts.map((a) => ({ ...a, case_key: `v3:${a.case_id}` })),
     changes, weeks, extensions,
@@ -215,7 +242,7 @@ api.get("/owner/:id/meeting", wrap(async (req, res) => {
   const cases = await visibleCases(req.user);
   const id = String(req.params.id).toLowerCase();
   const mine = cases.filter((c) => ownerId(c) === id);
-  if (!mine.length) return res.status(404).json({ error: "ไม่พบ Owner นี้" });
+  if (!mine.length) return res.status(404).json({ error: "ไม่พบ User นี้" });
   const closedDays = [0, 7, 14, 30].includes(Number(req.query.closed)) ? Number(req.query.closed) : 7;
   const since = d.addDays(d.today(), -closedDays);
   const pick = mine
@@ -311,6 +338,7 @@ api.post("/case", wrap(async (req, res) => {
   const closedStatus = config.closedStatuses.includes(String(b.status || "").toLowerCase());
   if (closedStatus && !(await perms.can(u, "case_close"))) throw bad("ไม่มีสิทธิ์ปิดเคส", 403);
   const r = await repo.createCase(u, { ...b, team }, { ownerId: ownerIdNum });
+  if (r.newSite) await require("./customers").onNewSite(u, r.newSite, { id: r.id, case_no: (await one("SELECT case_no FROM cases WHERE id = $1", [r.id])).case_no, team });
   await audit(u, "case_create", String(r.id), { cs: b.cs_number, site: b.site });
   res.json({ ok: true, id: r.id, newSite: r.newSite });
 }));
@@ -325,14 +353,29 @@ api.put("/case/:id", wrap(async (req, res) => {
   }
   const allowReassign = await perms.can(u, "case_reassign", c);
   if ((b.owner_id && Number(b.owner_id) !== c.owner_id) || (b.team && b.team !== c.team)) {
-    if (!allowReassign) throw bad("ไม่มีสิทธิ์เปลี่ยน Owner หรือทีม", 403);
+    if (!allowReassign) throw bad("ไม่มีสิทธิ์เปลี่ยน User หรือทีม", 403);
     await perms.checkAssign(u, b.team || c.team, b.owner_id ? Number(b.owner_id) : c.owner_id);
   }
   const r = await repo.updateCase(u, c, b, { allowReassign });
+  if (r.newSite) await require("./customers").onNewSite(u, r.newSite, { id: c.id, case_no: c.caseNo, team: b.team || c.team });
   // Status and owner changes are already in case_changes; record the other edited fields here.
   const other = (r.changed || []).filter((f) => !["status", "owner", "owner_id", "end_date", "closed_at", "resolved_by"].includes(f));
   if (other.length) await audit(u, "case_update", `${c.caseNo || c.csNumber || "#" + c.id} · ${c.site || ""}`, { case_id: c.id, fields: other });
   res.json({ ok: true, ...r });
+}));
+
+// A manager's call on how hard a case is (KPI work points): null = automatic, 0.8 / 1.2 / 1.5.
+api.put("/case/:id(\\d+)/complexity", wrap(async (req, res) => {
+  const c = await loadVisible(req);
+  const u = req.user;
+  if (!(u.role === "admin" || (u.role === "manager" && (u.teams || []).includes(c.team)))) throw bad("ปรับความยากได้เฉพาะ Manager ของทีมนี้หรือ Admin", 403);
+  const v = req.body?.complexity == null || req.body.complexity === "" ? null : Number(req.body.complexity);
+  if (v != null && ![0.8, 1.2, 1.5].includes(v)) throw bad("ค่าความยากไม่ถูกต้อง");
+  const LABEL = { 0.8: "ง่ายกว่าปกติ", 1.2: "ยาก", 1.5: "ยากมาก" };
+  await q("UPDATE cases SET complexity = $2, complexity_by = $3 WHERE id = $1", [c.id, v, u.id]);
+  await require("./db").tx((cl) => repo.addActivity(cl, c.id, u, { kind: "ความยากของเคส", detail: `${u.display_name} ตั้งความยากเป็น ${v == null ? "อัตโนมัติ" : LABEL[v] + " (×" + v + ")"} สำหรับคะแนน KPI`, system: true }));
+  await audit(u, "case_complexity", c.caseNo || String(c.id), { complexity: v });
+  res.json({ ok: true });
 }));
 
 // Case opened from a request whose customer was not known yet (email from an unmapped / personal domain).
@@ -536,7 +579,7 @@ api.post("/schedules/:id/test", need("reports_manage"), wrap(async (req, res) =>
 const ROLE_SET = new Set([...perms.ROLES, "requester"]);
 async function userRow(id) {
   return one(
-    `SELECT u.id, u.email, u.display_name, u.role, u.auth_type, u.active, u.must_change_password, u.last_login_at, u.created_at, u.phone, u.department, u.job_title,
+    `SELECT u.id, u.email, u.display_name, u.role, u.auth_type, u.active, u.must_change_password, u.last_login_at, u.created_at, u.phone, u.department, u.job_title, u.dedicated_customer,
             array_remove(array_agg(t.team ORDER BY t.team), NULL) AS teams,
             (SELECT count(*)::int FROM cases c WHERE c.owner_id = u.id AND c.closed_at IS NULL) AS open_cases
      FROM users u LEFT JOIN user_teams t ON t.user_id = u.id WHERE u.id = $1 GROUP BY u.id`,
@@ -545,7 +588,7 @@ async function userRow(id) {
 }
 api.get("/users", need("users_manage"), wrap(async (req, res) => {
   const rows = await all(
-    `SELECT u.id, u.email, u.display_name, u.role, u.auth_type, u.active, u.must_change_password, u.last_login_at, u.phone, u.department, u.job_title,
+    `SELECT u.id, u.email, u.display_name, u.role, u.auth_type, u.active, u.must_change_password, u.last_login_at, u.phone, u.department, u.job_title, u.dedicated_customer,
             array_remove(array_agg(t.team ORDER BY t.team), NULL) AS teams,
             (SELECT count(*)::int FROM cases c WHERE c.owner_id = u.id AND c.closed_at IS NULL) AS open_cases
      FROM users u LEFT JOIN user_teams t ON t.user_id = u.id GROUP BY u.id ORDER BY u.active DESC, u.role, u.display_name`
@@ -624,6 +667,7 @@ api.put("/users/:id", need("users_manage"), wrap(async (req, res) => {
     if (b.display_name !== undefined) set("display_name", String(b.display_name).trim().slice(0, 120) || cur.email);
     if (b.role !== undefined) set("role", b.role);
     for (const k of ["phone", "department", "job_title"]) if (b[k] !== undefined) set(k, String(b[k] || "").trim().slice(0, 120) || null);
+    if (b.dedicated_customer !== undefined) set("dedicated_customer", !!b.dedicated_customer);
     if (b.active !== undefined) {
       set("active", !!b.active);
       if (!b.active) sets.push("session_version = session_version + 1");
@@ -717,7 +761,7 @@ async function sampleCase(type) {
     sample: true,
     c: {
       key: "sample", id: 0, caseNo: "CASE-2026-11-0000", csNumber: "CS0000000", site: "ลูกค้าตัวอย่าง", task: "ตัวอย่างงาน", status: "In Progress",
-      owner: "Owner ตัวอย่าง", ownerEmail: "owner@sinostech.co.th", source: "ENGAGE", sourceLabel: "Engage / NRX / CXone",
+      owner: "User ตัวอย่าง", ownerEmail: "owner@sinostech.co.th", source: "ENGAGE", sourceLabel: "Engage / NRX / CXone",
       startDate: start, targetDate: d.addDays(start, config.slaDays), dueDate: d.addDays(start, config.slaDays), age, stage: type,
       daysLeft: Math.max(0, config.slaDays - age), daysOverdue: Math.max(0, age - config.slaDays),
       caseUrl: `${config3.baseUrl}/#/mine`,
@@ -794,7 +838,7 @@ api.put("/settings", need("settings_manage"), wrap(async (req, res) => {
     const bads = String(a.cc || "").concat(",", a.fallback || "").split(/[,;\s]+/).filter((x) => x && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x));
     if (bads.length) throw bad(`อีเมลไม่ถูกต้อง: ${bads.join(", ")}`);
     const ccTypes = (Array.isArray(a.ccTypes) ? a.ccTypes : []).filter((t) => ["r1", "r2", "overdue"].includes(t));
-    if (!splitEmails(a.fallback).length && !splitEmails(a.cc).length) throw bad("ต้องมีอีเมลอย่างน้อย 1 อีเมล สำหรับเคสที่ไม่มีอีเมล Owner");
+    if (!splitEmails(a.fallback).length && !splitEmails(a.cc).length) throw bad("ต้องมีอีเมลอย่างน้อย 1 อีเมล สำหรับเคสที่ไม่มีอีเมล User");
     await setSetting("alert_email", { cc: splitEmails(a.cc).join(", "), ccTypes, fallback: splitEmails(a.fallback).join(", ") });
   }
   if (b.statusHelp && typeof b.statusHelp === "object") {

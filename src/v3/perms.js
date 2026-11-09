@@ -3,11 +3,11 @@
 const { getSetting, all, one } = require("./db");
 
 const PERMS = [
-  { key: "view", label: "ดูภาพรวมและรายการเคส", hint: "Dashboard, SLA runway, ราย Owner" },
+  { key: "view", label: "ดูภาพรวมและรายการเคส", hint: "Dashboard, SLA runway, ราย User" },
   { key: "case_create", label: "เปิดเคสใหม่", hint: "Start date ถูกบันทึกอัตโนมัติ" },
   { key: "case_edit", label: "แก้ไขและอัปเดตเคส", hint: "Status, รายละเอียด, Activity" },
   { key: "case_close", label: "ปิดเคส", hint: "ระบบใส่ End date และหยุดแจ้งเตือน" },
-  { key: "case_reassign", label: "เปลี่ยน Owner ของเคส", hint: "โอนเคสให้คนอื่น" },
+  { key: "case_reassign", label: "เปลี่ยน User ของเคส", hint: "โอนเคสให้คนอื่น" },
   { key: "case_edit_start", label: "แก้ Start date", hint: "ต้องระบุเหตุผล บันทึกในประวัติ" },
   { key: "case_delete", label: "ลบเคส", hint: "ใช้กรณีบันทึกผิดหรือซ้ำ" },
   { key: "export", label: "Export Excel / CSV", hint: "ตามช่วงวันที่ที่เลือก" },
@@ -121,7 +121,7 @@ async function checkAssign(user, team, ownerId) {
   const t = teamScope(user);
   if (!t) return;
   if (!t.includes(team)) throw Object.assign(new Error("มอบหมายงานได้เฉพาะในทีมของคุณ"), { status: 403 });
-  if (Number(ownerId) !== user.id && !(await inTeam(ownerId, team))) throw Object.assign(new Error("เลือก Owner จากสมาชิกทีมนี้ (ผู้ใช้นี้ไม่ได้อยู่ในทีม)"), { status: 403 });
+  if (Number(ownerId) !== user.id && !(await inTeam(ownerId, team))) throw Object.assign(new Error("เลือก User จากสมาชิกทีมนี้ (ผู้ใช้นี้ไม่ได้อยู่ในทีม)"), { status: 403 });
 }
 
 module.exports = { PERMS, ROLES, DEFAULTS, OBSERVER_LOCKED, PER_USER, seesAllTeams, teamScope, teamMateIds, inTeam, checkAssign, matrix, grants, forUser, level, can, invalidate };

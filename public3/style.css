@@ -641,3 +641,13 @@ label.f[hidden], div.f[hidden] { display: none; }
 .rk-lc svg:hover .ln2 { opacity: .25; }
 .rk-lc svg .ln2:hover, .rk-lc svg .ln2.hl { opacity: 1; stroke-width: 5; }
 @media (prefers-reduced-motion: reduce) { .rk-lc, .rk-lc .ln2, .race { transition: none !important; } }
+
+/* departments list (settings) */
+.dept-row { display: flex; gap: 8px; align-items: center; }
+.dept-row input { flex: 1; min-width: 0; }
+.dept-row.off input { opacity: .55; }
+
+.weeks .w.out { opacity: .4; }
+
+.lang-btn { font: 700 12px/1 var(--mono, ui-monospace, monospace); min-width: 40px; }
+.login-main { position: relative; }

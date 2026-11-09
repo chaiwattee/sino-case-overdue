@@ -85,7 +85,8 @@ async function compute(ym) {
   // Cases the owner worked on in the month: open at any point during it.
   const cases = await all(
     `SELECT c.id, c.case_no, c.owner_id, c.site, c.product, c.severity, c.task, c.start_date, c.due_date, c.end_date, c.start_at, c.created_at,
-            c.closed_at, c.ext_count, c.legacy_key, c.resolution, u.display_name AS owner_name, u.email AS owner_email, u.active
+            c.closed_at, c.ext_count, c.legacy_key, c.resolution, c.team, c.cs_number, c.complexity, u.display_name AS owner_name, u.email AS owner_email, u.active,
+            u.dedicated_customer
        FROM cases c JOIN users u ON u.id = c.owner_id
       WHERE c.start_date <= $2 AND (c.end_date IS NULL OR c.end_date >= $1)`,
     [R.fromIso, R.toIso]
@@ -125,7 +126,7 @@ async function compute(ym) {
   acts.forEach((a) => (actsBy[a.case_id] = actsBy[a.case_id] || []).push(a));
   const byOwner = new Map();
   for (const c of cases) {
-    if (!byOwner.has(c.owner_id)) byOwner.set(c.owner_id, { id: c.owner_id, name: c.owner_name, email: c.owner_email, active: c.active, cases: [] });
+    if (!byOwner.has(c.owner_id)) byOwner.set(c.owner_id, { id: c.owner_id, name: c.owner_name, email: c.owner_email, active: c.active, dedicated: c.dedicated_customer, cases: [] });
     byOwner.get(c.owner_id).cases.push(c);
   }
 
@@ -181,13 +182,20 @@ async function compute(ym) {
     const sUpd = ue == null ? 0 : ue <= 2 ? 7 : ue <= 3 ? 5 : ue <= 5 ? 3 : 1;
     const sResp = sFirst + sUpd;
 
-    // 3. Weighted workload (15) vs team median — filled in after all owners are known.
-    m.weighted = r1(closed.reduce((a, c) => a + (SEV_W[c.severity] || 1), 0));
-
-    // 4. Difficulty (10) vs team average — share of Critical/High or Vendor/Onsite cases.
-    const hard = handled.filter((c) => ["Critical", "High"].includes(c.severity) || human(c).some((a) => /vendor|remote|onsite/i.test(a.kind || ""))).length;
-    m.hardShare = handled.length ? hard / handled.length : 0;
+    // 3. Work (20): "work points" of closed cases = severity × difficulty, compared with the team median on a square-root
+    //    curve (4× the points ≈ 2× the score), so many easy cases and a few hard ones end up close. Filled in below.
+    const casePoints = (c) => {
+      const h = human(c);
+      const auto = 1 + (c.cs_number ? 0.5 : 0) + (h.some((a) => /onsite/i.test(a.kind || "")) ? 0.3 : 0) + (c.end_date && d.daysBetween(d.fromISODate(c.start_date), d.fromISODate(c.end_date)) > 7 ? 0.2 : 0);
+      return (SEV_W[c.severity] || 1) * auto * (c.complexity ? Number(c.complexity) : 1);
+    };
+    m.points = r1(closed.reduce((a, c) => a + casePoints(c), 0));
+    m.weighted = m.points; // kept for older screens
+    m.vendor = closed.filter((c) => c.cs_number).length;
     m.critical = handled.filter((c) => c.severity === "Critical").length;
+    const teamCount = {};
+    handled.forEach((c) => (teamCount[c.team] = (teamCount[c.team] || 0) + 1));
+    m.team = Object.entries(teamCount).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
 
     // 5. Diversity (10): work types, products and customers; +1.5 per product new to this owner (max 3).
     const typeCount = {};
@@ -211,15 +219,17 @@ async function compute(ym) {
         typeCount[cat] = (typeCount[cat] || 0) + 1;
       }
     }
-    const dv = [diversity(typeCount, cats.length + 1), diversity(prodCount, productsAll), diversity(siteCount, sitesAll)];
-    m.diversity = Math.round((dv.reduce((a, b) => a + b, 0) / 3) * 100) / 100;
+    // Someone the manager assigned to one customer is not marked down for customer variety.
+    const dv = [diversity(typeCount, cats.length + 1), diversity(prodCount, productsAll), ...(o.dedicated ? [] : [diversity(siteCount, sitesAll)])];
+    m.dedicated = !!o.dedicated;
+    m.diversity = Math.round((dv.reduce((a, b) => a + b, 0) / dv.length) * 100) / 100;
     const known = new Set(before.filter((b) => b.owner_id === o.id).map((b) => b.product));
     // Only once the owner has history in the system; otherwise every product would look "new".
     m.newSkills = known.size ? Object.keys(prodCount).filter((p) => !known.has(p)) : [];
     // A work type done for the first time through a service request counts as a new skill too.
     const srKnown = new Set(srTypesBefore.filter((x) => x.assignee_id === o.id).map((x) => x.category));
     if (known.size || srKnown.size) for (const cat of Object.keys(m.sr.categories)) if (!srKnown.has(cat) && !m.newSkills.includes(cat)) m.newSkills.push(cat);
-    const sDiv = 7 * m.diversity + Math.min(3, 1.5 * m.newSkills.length);
+    const sDiv = 10.5 * m.diversity + Math.min(4.5, 1.5 * m.newSkills.length); // 15
 
     // 6. Backlog & extensions (10): overdue at month end and approved extensions in the month.
     m.overdueAtEnd = handled.filter((c) => (!c.end_date || c.end_date > R.toIso) && c.due_date < R.toIso).length;
@@ -246,23 +256,28 @@ async function compute(ym) {
       id: o.id, name: o.name, email: o.email, active: o.active,
       handled: handled.length, metrics: m,
       types: typeCount, products: prodCount, sites: siteCount, kinds: kindCount,
-      parts: { sla: sSla, resp: sResp, work: null, hard: null, div: sDiv, back: sBack, doc: sDoc, bonus: sBonus },
+      parts: { sla: sSla, resp: sResp, work: null, div: sDiv, back: sBack, doc: sDoc, bonus: sBonus },
     });
   }
 
   // Team-relative parts
-  const medW = median(owners.map((o) => o.metrics.weighted).filter((x) => x > 0)) || 1;
-  const avgHard = owners.length ? owners.reduce((a, o) => a + o.metrics.hardShare, 0) / owners.length : 0;
+  // Work points against the median of the same team (WFM is not compared with Nexidia).
+  const medW = median(owners.map((o) => o.metrics.points).filter((x) => x > 0)) || 1;
+  const teamMed = {};
+  for (const t of new Set(owners.map((o) => o.metrics.team))) {
+    const pts = owners.filter((o) => o.metrics.team === t).map((o) => o.metrics.points).filter((x) => x > 0);
+    teamMed[t] = pts.length >= 2 ? median(pts) : medW; // a team of one is compared with everyone
+  }
   owners.forEach((o) => {
-    const ratio = o.metrics.weighted / medW;
-    o.parts.work = ratio >= 1.5 ? 15 : ratio >= 1 ? 10 + (ratio - 1) * 10 : 10 * ratio;
-    o.parts.hard = clamp(5 + (5 * (o.metrics.hardShare - avgHard)) / Math.max(avgHard, 0.1), 0, 10);
+    const med = teamMed[o.metrics.team] || medW;
+    o.metrics.teamMedianPoints = r1(med);
+    o.parts.work = 20 * Math.min(1, Math.sqrt(o.metrics.points / med) / 1.3);
   });
 
   const adj = await all("SELECT a.*, u.display_name AS by_name FROM kpi_adjustments a LEFT JOIN users u ON u.id = a.adjusted_by WHERE month = $1", [R.ym]);
   owners.forEach((o) => {
     const p = o.parts;
-    const base = (p.sla ?? 15) + p.resp + p.work + p.hard + p.div + p.back + p.doc;
+    const base = (p.sla ?? 15) + p.resp + p.work + p.div + p.back + p.doc;
     const a = adj.find((x) => x.user_id === o.id);
     o.adjust = a ? { points: a.points, reason: a.reason, by: a.by_name, at: a.updated_at } : null;
     o.base = r1(base);
@@ -374,12 +389,12 @@ async function mailMonthly({ ym, r, to }) {
   const html = shell(
     "#1764D8",
     `<p style="margin:0 0 10px;padding:8px 12px;background:#FBF0D2;color:#7A5600;border-radius:8px;font-size:13px"><strong>ทดลองใช้</strong> · เกณฑ์และคะแนนอยู่ระหว่างทดลอง ยังไม่ใช้ประเมินผลงานจริง</p>
-<p style="margin:0 0 4px;font-size:19px;font-weight:700">KPI ราย Owner · ${esc(label)}</p>
+<p style="margin:0 0 4px;font-size:19px;font-weight:700">KPI ราย User · ${esc(label)}</p>
 <p style="margin:0 0 16px;color:#5B6576;font-size:14px">คำนวณจากข้อมูลเคสในระบบ${r.team.avgScore != null ? ` · ทีมเฉลี่ย ${r.team.avgScore}` : ""} · ปรับคะแนนได้ ±10 พร้อมเหตุผลในหน้า KPI</p>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;margin:0 0 16px"><tr>${th("Owner")}${th("คะแนน", 1)}${th("ดูแล / ปิด", 1)}${th("ทัน SLA", 1)}${th("เกิน Due สิ้นเดือน", 1)}${th("หลากหลาย", 1)}</tr>${rows}</table>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;margin:0 0 16px"><tr>${th("User")}${th("คะแนน", 1)}${th("ดูแล / ปิด", 1)}${th("ทัน SLA", 1)}${th("เกิน Due สิ้นเดือน", 1)}${th("หลากหลาย", 1)}</tr>${rows}</table>
 ${button(`${config3.baseUrl}/#/kpi?month=${ym}`, "เปิดหน้า KPI")}`
   );
-  await graph.sendMail({ to, cc: [], subject: `[Sino Case SLA] KPI ราย Owner ${label} (ทดลองใช้)`, html });
+  await graph.sendMail({ to, cc: [], subject: `[Sino Case SLA] KPI ราย User ${label} (ทดลองใช้)`, html });
 }
 
 // ------------------------------------------------------------ routes

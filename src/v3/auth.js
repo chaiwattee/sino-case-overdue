@@ -60,7 +60,7 @@ async function startSession(res, user, remember = true) {
   await q("UPDATE users SET last_login_at = now() WHERE id = $1", [user.id]);
 }
 
-const USER_COLS = "id, email, display_name, role, auth_type, must_change_password, active, session_version, phone, department, job_title, profile_confirmed_at, avatar";
+const USER_COLS = "id, email, display_name, role, auth_type, must_change_password, active, session_version, phone, department, job_title, profile_confirmed_at, avatar, lang";
 
 async function loadUser(id) {
   const u = await one(`SELECT ${USER_COLS} FROM users WHERE id = $1`, [id]);

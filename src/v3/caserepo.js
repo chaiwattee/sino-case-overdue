@@ -13,6 +13,7 @@ const CASE_SELECT = `
            ORDER BY a.activity_date DESC, a.id DESC LIMIT 1) AS last_activity,
          (SELECT max(a.created_at) FROM case_activities a WHERE a.case_id = c.id) AS last_activity_at,
          (SELECT e.id FROM case_extensions e WHERE e.case_id = c.id AND e.status = 'pending' LIMIT 1) AS pending_ext_id,
+         (SELECT l.id FROM lookups l WHERE l.kind = 'site' AND l.pending AND lower(l.value) = lower(c.site) LIMIT 1) AS site_pending_id,
          (SELECT json_build_object('seq', e.seq, 'reason', e.reason, 'approver', ua.display_name, 'decidedAt', e.decided_at,
                    'from', e.old_due, 'to', e.new_due, 'note', e.decision_note)
             FROM case_extensions e LEFT JOIN users ua ON ua.id = e.approver_id
@@ -78,6 +79,8 @@ function toCase(r) {
     rootCause: r.root_cause || "",
     resolvedAt: r.resolved_at || null,
     resolvedBy: r.resolved_by_name || "",
+    sitePendingId: r.site_pending_id || null,
+    complexity: r.complexity != null ? Number(r.complexity) : null,
     rcaText: r.rca_text || "",
     rcaCategory: r.rca_category || "",
     rcaDate: r.rca_date ? (r.rca_date instanceof Date ? d.toISODate(r.rca_date) : String(r.rca_date).slice(0, 10)) : "",
@@ -204,6 +207,7 @@ async function createCase(user, body, { ownerId, startDate } = {}) {
     const closed = config.closedStatuses.includes(status.toLowerCase());
     const resolution = closed && !body.legacy_key ? checkResolution(body.resolution) : null;
     const rca = closed && !body.legacy_key && rcaMod().needsRca(body.cs_number, status) ? rcaMod().checkRca(body.rca) : null;
+    if (closed && !body.legacy_key && site.created) throw Object.assign(new Error(`ลูกค้า "${site.value}" ยังไม่อยู่ในรายการ ต้องให้ Manager อนุมัติก่อน เปิดเคสเป็นสถานะที่ยังไม่ปิดก่อน`), { status: 400 });
     const r = await c.query(
       `INSERT INTO cases (team, cs_number, status, site, product, owner_id, task, note, start_date, due_date, end_date,
          closed_at, created_by, legacy_key, start_at, severity)
@@ -267,7 +271,10 @@ async function updateCase(user, kase, body, { allowReassign }) {
       const wasClosed = isClosed(kase);
       const nowClosed = config.closedStatuses.includes(status.toLowerCase());
       let resolution = null;
-      if (nowClosed && !wasClosed) resolution = checkResolution(body.resolution);
+      if (nowClosed && !wasClosed) {
+        resolution = checkResolution(body.resolution);
+        await require("./customers").checkClose(body.site !== undefined ? clean(body.site, 120) : kase.site);
+      }
       const csNow = body.cs_number !== undefined ? clean(body.cs_number, 60) : kase.csNumber;
       if (nowClosed && !wasClosed && rcaMod().needsRca(csNow, status)) {
         if (body.rca) {
@@ -325,7 +332,7 @@ async function updateCase(user, kase, body, { allowReassign }) {
       const nu = (await c.query("SELECT id, display_name FROM users WHERE id = $1 AND active", [Number(body.owner_id)])).rows[0];
       if (!nu) throw Object.assign(new Error("ไม่พบผู้ใช้ที่จะโอนเคสให้"), { status: 400 });
       set("owner_id", nu.id);
-      await addActivity(c, kase.id, user, { kind: "โอนเคส", detail: `Owner: ${kase.owner || "-"} → ${nu.display_name}`, system: true });
+      await addActivity(c, kase.id, user, { kind: "โอนเคส", detail: `User: ${kase.owner || "-"} → ${nu.display_name}`, system: true });
       await logChange(c, kase, user, "owner", kase.owner, nu.display_name);
     }
     if (allowReassign && body.team && body.team !== kase.team) set("team", body.team);

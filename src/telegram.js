@@ -99,7 +99,7 @@ async function sendDailySummary(opts = {}) {
     if (c.stage === "overdue") byOwner[id].overdue++;
   });
   const owners = Object.values(byOwner).sort((a, b) => b.overdue - a.overdue || b.open - a.open);
-  msg += `\n👤 แยกตาม Owner (เปิดอยู่ / เกิน Due)\n`;
+  msg += `\n👤 แยกตาม User (เปิดอยู่ / เกิน Due)\n`;
   owners.forEach((o) => (msg += `• ${o.name}: ${o.open} / ${o.overdue}${o.overdue ? " 🔴" : ""}\n`));
 
   const messages = [msg];
@@ -117,7 +117,7 @@ async function sendDailySummary(opts = {}) {
     (a, b) => b[1].cancel + b[1].resolved - (a[1].cancel + a[1].resolved)
   );
   if (crRows.length) {
-    let t = `📌 สรุปเคส Cancel / Resolved แยกตาม Owner (ไม่นับเป็น Overdue)\n\n`;
+    let t = `📌 สรุปเคส Cancel / Resolved แยกตาม User (ไม่นับเป็น Overdue)\n\n`;
     crRows.forEach(([name, c]) => (t += `👤 ${name}: Resolved ${c.resolved} | Cancel ${c.cancel}\n`));
     messages.push(t);
   }
@@ -162,7 +162,7 @@ async function sendDailySummary(opts = {}) {
       { header: "เลขเคส", key: "caseNo", width: 16 },
       { header: "CS Number", key: "csNumber", width: 14 },
       { header: "ลูกค้า (Site)", key: "site", width: 16 },
-      { header: "Owner", key: "owner", width: 22 },
+      { header: "User", key: "owner", width: 22 },
       { header: "สถานะ SLA", key: "stageLabel", width: 14 },
       { header: "Start date", key: "startDate", width: 12 },
       { header: "Due", key: "dueDate", width: 12 },

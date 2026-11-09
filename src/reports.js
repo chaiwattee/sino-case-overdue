@@ -124,8 +124,8 @@ const CASE_COLUMNS = [
   { header: "Status", key: "status", width: 13 },
   { header: "สถานะ SLA", key: "stageLabel", width: 14 },
   { header: "ลูกค้า (Site)", key: "site", width: 16 },
-  { header: "Owner", key: "owner", width: 22 },
-  { header: "Owner Email", key: "ownerEmail", width: 26 },
+  { header: "User", key: "owner", width: 22 },
+  { header: "User Email", key: "ownerEmail", width: 26 },
   { header: "Product", key: "product", width: 12 },
   { header: "Severity", key: "severity", width: 14 },
   { header: "Task/Case", key: "task", width: 40 },
@@ -186,9 +186,9 @@ async function reportWorkbook(rep) {
   wb.creator = "Sino Case Tracker";
   addSheet(
     wb,
-    "สรุปราย Owner",
+    "สรุปราย User",
     [
-      { header: "Owner", key: "owner", width: 24 },
+      { header: "User", key: "owner", width: 24 },
       { header: "Email", key: "email", width: 28 },
       { header: "เปิดใหม่ในช่วงนี้", key: "opened", width: 16 },
       { header: "ปิดในช่วงนี้", key: "closed", width: 13 },
@@ -219,7 +219,7 @@ async function reportWorkbook(rep) {
       { header: "เลขเคส", key: "case_no", width: 16 },
       { header: "ลูกค้า", key: "site", width: 16 },
       { header: "CS Number", key: "cs_number", width: 14 },
-      { header: "Owner", key: "owner", width: 22 },
+      { header: "User", key: "owner", width: 22 },
       { header: "ช่อง", key: "field", width: 12 },
       { header: "เดิม", key: "old_value", width: 12 },
       { header: "ใหม่", key: "new_value", width: 12 },

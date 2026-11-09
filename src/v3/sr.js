@@ -594,13 +594,17 @@ function mount(api, { wrap }) {
 
   api.get("/profile", wrap(async (req, res) => {
     const u = await one("SELECT id, email, display_name, role, phone, department, job_title, profile_confirmed_at FROM users WHERE id = $1", [req.user.id]);
-    res.json({ profile: u, missing: profileMissing(u) });
+    res.json({ profile: u, missing: profileMissing(u), departments: await require("./departments").activeNames() });
   }));
   api.put("/profile", wrap(async (req, res) => {
     const b = req.body || {};
     const phone = clean(b.phone, 60);
     if (phone && (phone.replace(/\D/g, "").length < 6 || !/^[+0-9(]/.test(phone))) throw bad("เบอร์โทรไม่ถูกต้อง เช่น 081-234-5678 หรือ 02-123-4567 ต่อ 105");
-    const vals = [req.user.id, clean(b.display_name, 120) || null, phone || null, clean(b.department, 120) || null, clean(b.job_title, 120) || null];
+    const deps = require("./departments");
+    const cur = await one("SELECT department FROM users WHERE id = $1", [req.user.id]);
+    const dep = await deps.check(b.department, b.department_other, cur && cur.department);
+    if (dep.requested) await deps.notifyRequest(req.user, dep.value);
+    const vals = [req.user.id, clean(b.display_name, 120) || null, phone || null, dep.value, clean(b.job_title, 120) || null];
     await q(`UPDATE users SET display_name = COALESCE($2, display_name), phone = $3, department = $4, job_title = $5, profile_confirmed_at = now(), updated_at = now() WHERE id = $1`, vals);
     await audit(req.user, "profile_update", req.user.email, { phone: !!phone, department: vals[3], job_title: vals[4] });
     const u = await one("SELECT id, email, display_name, role, phone, department, job_title, profile_confirmed_at FROM users WHERE id = $1", [req.user.id]);
@@ -672,6 +676,6 @@ function mount(api, { wrap }) {
 }
 
 /** Requests a requester-only account may make (everything else is refused). */
-const REQUESTER_PATHS = [/^\/me$/, /^\/profile(\/avatar)?$/, /^\/avatar\/\d+$/, /^\/sr(\/|$)/, /^\/sr-files\//];
+const REQUESTER_PATHS = [/^\/me$/, /^\/departments$/, /^\/profile(\/avatar|\/lang)?$/, /^\/avatar\/\d+$/, /^\/sr(\/|$)/, /^\/sr-files\//];
 
 module.exports = { mount, runReminders, kpiByAssignee, REQUESTER_PATHS, SEV, STATUS, OUTCOME, isWorkday, addWorkdays, workdaysBetween, holidays, profileMissing };
