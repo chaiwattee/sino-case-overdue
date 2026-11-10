@@ -46,7 +46,7 @@ async function template() {
   ws.addRow({ email: "manager@sinostech.co.th", name: "Team Manager", role: "Manager", teams: teams.map((t) => t.code).join(", "), auth: "Microsoft" });
   ws.addRow({ email: "partner@example.com", name: "Vendor Partner", role: "Viewer", teams: teams[1]?.code || "NEXIDIA", auth: "Password" });
   for (let r = 2; r <= 500; r++) {
-    ws.getCell(`C${r}`).dataValidation = { type: "list", allowBlank: true, formulae: ['"Admin,Manager,Engineer,Viewer"'] };
+    ws.getCell(`C${r}`).dataValidation = { type: "list", allowBlank: true, formulae: ['"Admin,Manager,Observer,User,Viewer"'] };
     ws.getCell(`E${r}`).dataValidation = { type: "list", allowBlank: true, formulae: ['"Microsoft,Password"'] };
   }
   ws.views = [{ state: "frozen", ySplit: 1 }];
@@ -56,7 +56,7 @@ async function template() {
     ["คอลัมน์", "คำอธิบาย"],
     ["Email", "จำเป็น ใช้เป็นตัวระบุผู้ใช้ ถ้ามีอยู่แล้วระบบจะอัปเดตชื่อ บทบาท และทีมแทนการสร้างใหม่"],
     ["ชื่อที่แสดง", "ไม่บังคับ ถ้าเว้นว่าง ผู้ใช้ใหม่จะใช้อีเมลเป็นชื่อ ผู้ใช้เดิมคงชื่อเดิม"],
-    ["บทบาท", "Admin, Manager, User (Engineer เดิม) หรือ Viewer ถ้าเว้นว่าง ผู้ใช้ใหม่เป็น User ผู้ใช้เดิมคงบทบาทเดิม"],
+    ["บทบาท", "Admin, Manager, Observer (ดูได้ทุกทีม ไม่แก้ข้อมูล), User หรือ Viewer ถ้าเว้นว่าง ผู้ใช้ใหม่เป็น User ผู้ใช้เดิมคงบทบาทเดิม (ไฟล์เก่าที่ใส่ Engineer ยังนำเข้าได้ นับเป็น User)"],
     ["ทีม", `ใส่รหัสทีมคั่นด้วย , ได้หลายทีม: ${teams.map((t) => `${t.code} (${t.label})`).join(", ")} หรือ ALL = ทุกทีม ถ้าเว้นว่าง ผู้ใช้เดิมคงทีมเดิม`],
     ["วิธีเข้าระบบ", "Microsoft = บัญชีบริษัท (ค่าเริ่มต้น) · Password = คนนอกบริษัท ระบบสร้างรหัสชั่วคราวให้และบังคับเปลี่ยนตอนเข้าครั้งแรก"],
     ["", "ระบบไม่ลบหรือปิดใช้งานผู้ใช้จากไฟล์นี้ และไม่เปลี่ยนวิธีเข้าระบบของผู้ใช้เดิม"],
