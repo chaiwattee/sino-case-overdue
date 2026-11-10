@@ -140,13 +140,13 @@ const ok = crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(req.headers
   "customer": "KTB",
   "subject": "Agent login เข้าระบบไม่ได้",
   "severity": "Critical",
-  "owner": { "name": "ภาณุวัฒน์ ทูวาศิน", "phone": "08x-xxx-xxxx", "email": "engineer@sinostech.co.th" },
+  "owner": { "name": "สมชาย ตัวอย่าง", "phone": "08x-xxx-xxxx", "email": "engineer@sinostech.co.th" },
   "claimedAt": "2026-11-03T02:46:00.000Z",
   "lineUserId": "U4af4980629...",
   "externalRef": "chat-88123",
   "contact": { "name": "สมหญิง ใจดี", "phone": "081-234-5678" },
   "updateUrl": "https://case.sinostech.co.th:9443/u/c-Xy...",
-  "message": "An engineer has taken your case.\nREQ-2026-0012 → CASE-2026-0042\nAgent login เข้าระบบไม่ได้\n\nEngineer: ภาณุวัฒน์ ทูวาศิน\nWe will contact you at 081-234-5678\n\nAdd details or screenshots: https://case.sinostech.co.th:9443/u/c-Xy..."
+  "message": "An engineer has taken your case.\nREQ-2026-0012 → CASE-2026-0042\nAgent login เข้าระบบไม่ได้\n\nEngineer: สมชาย ตัวอย่าง\nWe will contact you at 081-234-5678\n\nAdd details or screenshots: https://case.sinostech.co.th:9443/u/c-Xy..."
 }
 ```
 
@@ -175,7 +175,7 @@ const ok = crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(req.headers
   "customer": "KTB",
   "subject": "Agent login เข้าระบบไม่ได้",
   "resolution": "แก้ไข config SSO แล้ว ทดสอบ login ผ่าน",
-  "owner": { "name": "ภาณุวัฒน์ ทูวาศิน" },
+  "owner": { "name": "สมชาย ตัวอย่าง" },
   "lineUserId": "U4af4980629...",
   "externalRef": "chat-88123",
   "surveyUrl": "https://case.sinostech.co.th:9443/csat/Ab3...",
