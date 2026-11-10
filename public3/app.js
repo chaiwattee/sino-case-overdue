@@ -1686,7 +1686,9 @@ ${list.map((u) => `<tr class="click" data-href="#/users?id=${u.id}" style="${sel
 <dialog id="dlg"></dialog>`;
     bindRowLinks();
     const uq = document.getElementById("uq");
-    uq.onkeydown = (e) => e.key === "Enter" && (location.hash = "#/users?" + qs({ q: uq.value, role: params.role }));
+    uq.onkeydown = (e) => {
+      if (e.key === "Enter") location.hash = "#/users?" + qs({ q: uq.value, role: params.role });
+    };
     document.getElementById("ur").onchange = (e) => (location.hash = "#/users?" + qs({ q: params.q, role: e.target.value }));
     document.getElementById("u-add").onclick = () => openAddUser();
     document.getElementById("u-import").onclick = () => openImportUsers();
@@ -2012,7 +2014,9 @@ ${audit.map((r) => { const a = ACTION[r.action] || ["closed", r.action]; return 
     const go = () => (location.hash = "#/audit-log?" + qs({ days: f.days.value, group: f.group.value, q: f.q.value }));
     f.days.onchange = go;
     f.group.onchange = go;
-    f.q.onkeydown = (e) => e.key === "Enter" && go();
+    f.q.onkeydown = (e) => {
+      if (e.key === "Enter") go();
+    };
   }
 
   // ------------------------------------------------------------ settings (admin)
@@ -3369,8 +3373,12 @@ ${rows.map((r) => `<tr data-go="#/sr/${r.id}" tabindex="0"><td><span class="mono
 <td>${r.targetDate ? `${dlong(r.targetDate)}${r.status === "in_progress" && r.daysLeft != null ? `<br><span class="hint">อีก ${r.daysLeft} วันทำการ</span>` : r.status === "overdue" ? `<br><span class="hint" style="color:var(--bad,#C0283C)">เลย ${r.overdueDays} วันทำการ</span>` : ""}` : `${dlong(r.requestedDate)}<br><span class="hint">ที่ขอ</span>`}</td></tr>`).join("") || `<tr><td colspan="5" class="muted" style="padding:28px;text-align:center">ไม่มีคำขอ${g[0] ? "ในสถานะนี้" : ""}</td></tr>`}
 </tbody></table></div></section>`;
     $app.querySelectorAll("tr[data-go]").forEach((tr) => {
-      tr.onclick = (e) => !e.target.closest("a") && (location.hash = tr.dataset.go);
-      tr.onkeydown = (e) => e.key === "Enter" && (location.hash = tr.dataset.go);
+      tr.onclick = (e) => {
+        if (!e.target.closest("a")) location.hash = tr.dataset.go;
+      };
+      tr.onkeydown = (e) => {
+        if (e.key === "Enter") location.hash = tr.dataset.go;
+      };
     });
   }
 
