@@ -23,7 +23,7 @@ const jsonFile = express.json({ limit: "4mb" });
 const jsonSr = express.json({ limit: "40mb" }); // service-request attachments (base64, up to 10 files of 10 MB)
 const jsonRca = express.json({ limit: "15mb" }); // RCA file from NICE (base64, up to 10 MB)
 api.use((req, res, next) =>
-  (req.path === "/users/import" ? jsonFile
+  (req.path === "/users/import" || req.path === "/skills/import" ? jsonFile
     : /^\/sr(\/|$)/.test(req.path) && req.method !== "GET" ? jsonSr
     : /^\/case\/\d+\/rca$/.test(req.path) ? jsonRca
     : /^\/case\/\d+\/files$/.test(req.path) ? jsonRca // photos / files up to 10 MB (base64)
@@ -67,6 +67,7 @@ api.put("/profile/lang", wrap(async (req, res) => {
 require("./customers").mount(api, { wrap });
 require("./teamsnotify").mount(api, { wrap, need });
 require("./teamadmin").mount(api, { wrap, need });
+require("./skills").mount(api, { wrap });
 require("./insights").mount(api, { wrap });
 require("./custreport").mount(api, { wrap, need, perms });
 require("./pm").mount(api, { wrap, loadVisible });

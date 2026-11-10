@@ -362,6 +362,7 @@ ${edit || !csOf(c) ? "" : `<div class="rca-sec" id="rca-sec"></div>`}
       ["owner", "#/owner", "ราย User", true],
       ["customer", "#/customer", "ราย ลูกค้า", true],
       ["pm", "#/pm", "งาน PM", ME.user.role !== "viewer"],
+      ["skills", "#/skills", "Skill Map", ["admin", "manager", "observer"].includes(ME.user.role)],
       ["kpi", "#/kpi", "KPI (ทดลองใช้)", ME.user.role !== "viewer"],
       ["rank", "#/rank", "อันดับ KPI", !!(ME.leaderboard && ME.leaderboard.visible)],
       ["reports", "#/reports", "Report &amp; Export", lvl("export") !== "none" || lvl("reports_manage") !== "none"],
@@ -4633,6 +4634,107 @@ ${info.enabled && pushOk && perm !== "denied" ? (sub ? `<span style="display:fle
       };
   }
 
+  // ------------------------------------------------------------ skill map
+  async function viewSkills(params) {
+    setNav("skills");
+    const team = params.team || "";
+    const m = await api(`/skills${team ? "?team=" + encodeURIComponent(team) : ""}`);
+    const lv = (n) => m.levels.find((l) => l.level === n);
+    const cnt = (p, min) => m.people.filter((x) => ((m.skills[x.id] || {})[p] || {}).level >= min).length;
+    const teamLabel = Object.fromEntries(ME.teams.map((t) => [t.key, t.label]));
+    const cell = (p, prod) => {
+      const s = (m.skills[p.id] || {})[prod];
+      const n = (m.exp[p.id] || {})[prod] || 0;
+      const low = n >= 5 && (!s || s.level <= 1);
+      const tip = s ? `${lv(s.level).label}: ${lv(s.level).hint}${s.note ? " · " + s.note : ""} · แก้โดย ${s.by || "-"} ${fdt(s.at)}` : "ยังไม่ประเมิน";
+      return `<td class="sk-td"><button type="button" class="sk-cell ${s ? "l" + s.level : "none"}" data-u="${p.id}" data-p="${esc(prod)}" ${m.canEdit ? "" : "disabled"} title="${esc(tip)}" aria-label="${esc(p.name)} ${esc(prod)}: ${esc(s ? lv(s.level).label : "ยังไม่ประเมิน")}">
+<b>${s ? s.level : "–"}</b><span>${s ? esc(lv(s.level).label) : "ยังไม่ประเมิน"}</span></button>
+${n ? `<div class="sk-exp ${low ? "warn" : ""}" title="${low ? "ทำเคสนี้หลายครั้ง แต่ระดับยังต่ำ ลองทบทวน" : "จำนวนเคสที่ดูแลใน 12 เดือน"}">${low ? "⚠ " : ""}${n} เคส</div>` : ""}</td>`;
+    };
+    $app.innerHTML = `
+<div class="head"><div><h1>Skill Map</h1><p>ระดับความสามารถของแต่ละคนในทุก Product · ตัวเลขใต้ช่องคือจำนวนเคสที่ดูแลจริงใน 12 เดือน ใช้ตรวจว่าระดับที่ประเมินสมเหตุสมผล</p></div>
+<div class="actions">${m.teams.length > 1 ? `<select id="sk-team" aria-label="ทีม" style="max-width:260px"><option value="">ทุกทีม</option>${m.teams.map((t) => `<option value="${t.code}" ${t.code === team ? "selected" : ""}>${esc(t.label)}</option>`).join("")}</select>` : ""}
+${m.canEdit ? `<a class="btn" href="api/skills/template${team ? "?team=" + encodeURIComponent(team) : ""}">ดาวน์โหลด Excel ไปกรอก</a><label class="btn primary" style="cursor:pointer"><input type="file" id="sk-file" accept=".xlsx" hidden>นำเข้า Excel</label>` : ""}</div></div>
+<div class="sk-legend">${m.levels.map((l) => `<span class="sk-lg"><span class="sk-cell l${l.level}" aria-hidden="true"><b>${l.level}</b></span><span><b>${esc(l.label)}</b><br><small>${esc(l.hint)}</small></span></span>`).join("")}</div>
+<section class="card">${m.people.length && m.products.length ? `<div class="tablewrap"><table class="sk-table" style="min-width:${260 + m.products.length * 112}px"><thead><tr><th class="sk-name">ชื่อ</th>${m.products.map((p) => `<th class="sk-th">${esc(p)}</th>`).join("")}<th class="sk-th">ทำเองได้</th></tr></thead><tbody>
+${m.people.map((p) => `<tr><td class="sk-name"><b>${esc(p.name)}</b><div class="muted" style="font-size:12px">${esc(p.teams.map((t) => teamLabel[t] || t).join(", "))}${p.role === "manager" ? " · Manager" : ""}</div></td>${m.products.map((pr) => cell(p, pr)).join("")}
+<td class="sk-td sk-sum">${m.products.filter((pr) => ((m.skills[p.id] || {})[pr] || {}).level >= 2).length} / ${m.products.length}</td></tr>`).join("")}
+</tbody><tfoot>
+<tr><td class="sk-name">ทำเองได้ (ระดับ 2 ขึ้นไป)</td>${m.products.map((pr) => { const n = cnt(pr, 2); return `<td class="sk-td"><span class="chip ${n < 2 ? "c-overdue" : "c-normal"}">${n} คน${n < 2 ? " · เสี่ยง" : ""}</span></td>`; }).join("")}<td></td></tr>
+<tr><td class="sk-name">ชำนาญขึ้นไป (3–4)</td>${m.products.map((pr) => `<td class="sk-td">${cnt(pr, 3)} คน</td>`).join("")}<td></td></tr>
+</tfoot></table></div>
+<p class="hint" style="margin:10px 0 0">“เสี่ยง” = มีคนทำเองได้น้อยกว่า 2 คน ถ้าคนนั้นลาหรือลาออก จะไม่มีคนแทน ควรวางแผนสอนงาน · ⚠ = ดูแลเคสของ Product นั้นตั้งแต่ 5 เคสขึ้นไป แต่ระดับยังเป็น 0–1${m.canEdit ? " · กดที่ช่องเพื่อแก้ระดับ" : ""}</p>` : `<div class="empty">${m.products.length ? "ไม่มีผู้ใช้ในทีมนี้" : "ยังไม่มี Product ในรายการ"}</div>`}</section>
+<dialog id="dlg"></dialog>`;
+    const ts = document.getElementById("sk-team");
+    if (ts) ts.onchange = () => (location.hash = "#/skills" + (ts.value ? "?team=" + encodeURIComponent(ts.value) : ""));
+    const dlg = document.getElementById("dlg");
+    if (m.canEdit)
+      document.querySelectorAll(".sk-table .sk-cell[data-u]").forEach(
+        (b) =>
+          (b.onclick = () => {
+            const p = m.people.find((x) => x.id === Number(b.dataset.u));
+            const prod = b.dataset.p;
+            const s = (m.skills[p.id] || {})[prod];
+            const n = (m.exp[p.id] || {})[prod] || 0;
+            dlg.innerHTML = `<form class="card" method="dialog" id="skf" style="width:min(520px,92vw)"><h2>${esc(p.name)} · ${esc(prod)}</h2>
+<p class="muted" style="margin:0;font-size:14px">ดูแลเคส ${esc(prod)} ${n} เคสใน 12 เดือน</p>
+<div class="sk-pick">${m.levels.map((l) => `<label class="sk-opt"><input type="radio" name="lv" value="${l.level}" ${s && s.level === l.level ? "checked" : ""}><span class="sk-cell l${l.level}" aria-hidden="true"><b>${l.level}</b></span><span><b>${esc(l.label)}</b><br><small class="muted">${esc(l.hint)}</small></span></label>`).join("")}
+<label class="sk-opt"><input type="radio" name="lv" value="" ${s ? "" : "checked"}><span class="sk-cell none" aria-hidden="true"><b>–</b></span><span><b>ยังไม่ประเมิน</b></span></label></div>
+<label class="f">หมายเหตุ (ไม่บังคับ)<input name="note" maxlength="300" value="${esc(s ? s.note : "")}" placeholder="เช่น ผ่าน training NICE Engage 7.x แล้ว"></label>
+<div class="right"><button class="btn" value="cancel" formnovalidate>ยกเลิก</button><button class="btn primary" value="ok">บันทึก</button></div></form>`;
+            const f = dlg.querySelector("#skf");
+            dlg.onclose = async () => {
+              if (dlg.returnValue !== "ok") return;
+              try {
+                await post("/skills", { user_id: p.id, product: prod, level: f.lv.value, note: f.note.value }, "PUT");
+                viewSkills(params);
+              } catch (e) {
+                toast(e.message, 6000);
+              }
+            };
+            dlg.showModal();
+          })
+      );
+    const fileIn = document.getElementById("sk-file");
+    if (fileIn)
+      fileIn.onchange = async () => {
+        const file = fileIn.files[0];
+        if (!file) return;
+        const b64 = await new Promise((res, rej) => {
+          const r = new FileReader();
+          r.onload = () => res(String(r.result).split(",")[1]);
+          r.onerror = () => rej(new Error("อ่านไฟล์ไม่ได้"));
+          r.readAsDataURL(file);
+        });
+        fileIn.value = "";
+        let pv;
+        try {
+          pv = await post("/skills/import", { file: b64 });
+        } catch (e) {
+          return toast(e.message, 7000);
+        }
+        const sm = pv.summary;
+        const changed = pv.rows.filter((r) => r.changes.length || r.errors.length);
+        dlg.innerHTML = `<form class="card" method="dialog" style="width:min(760px,94vw)"><h2>ตรวจก่อนนำเข้า Skill</h2>
+<p style="margin:0">${sm.people} คนในไฟล์ · จะเปลี่ยน <b>${sm.changes}</b> ค่า${sm.errors ? ` · <span style="color:var(--over)"><b>${sm.errors} แถวผิด</b> ต้องแก้ก่อน</span>` : ""}${sm.unknownColumns.length ? `<br><span class="muted" style="font-size:13px">ข้ามคอลัมน์ที่ไม่ใช่ Product ในระบบ: ${sm.unknownColumns.map(esc).join(", ")}</span>` : ""}</p>
+${changed.length ? `<div class="tablewrap" style="max-height:50vh"><table style="min-width:520px"><thead><tr><th>แถว</th><th>ชื่อ / Email</th><th>สิ่งที่เปลี่ยน</th></tr></thead><tbody>${changed
+          .map((r) => `<tr><td>${r.row}</td><td>${esc(r.name || r.email || "-")}</td><td>${r.errors.map((e) => `<div style="color:var(--over)">${esc(e)}</div>`).join("")}${r.changes.map((c) => `<span class="gchip">${esc(c.product)}: ${c.from == null ? "–" : c.from} → <b>${c.to}</b></span>`).join(" ")}</td></tr>`)
+          .join("")}</tbody></table></div>` : `<p class="muted">ค่าทั้งหมดในไฟล์ตรงกับในระบบแล้ว ไม่มีอะไรเปลี่ยน</p>`}
+<div class="right"><button class="btn" value="cancel">ปิด</button>${!sm.errors && sm.changes ? `<button class="btn primary" value="ok">นำเข้า ${sm.changes} ค่า</button>` : ""}</div></form>`;
+        dlg.onclose = async () => {
+          if (dlg.returnValue !== "ok") return;
+          try {
+            const r = await post("/skills/import", { file: b64, apply: true });
+            toast(`นำเข้าแล้ว ${r.applied} ค่า`);
+            viewSkills(params);
+          } catch (e) {
+            toast(e.message, 7000);
+          }
+        };
+        dlg.showModal();
+      };
+  }
+
   // ------------------------------------------------------------ router
   async function route() {
     const { parts, params } = (() => {
@@ -4661,6 +4763,7 @@ ${info.enabled && pushOk && perm !== "denied" ? (sub ? `<span style="display:fle
         case "password": return viewPassword();
         case "intake": return parts[1] ? await viewIntakeItem(parts[1]) : await viewIntake(params);
         case "intake-admin": return await viewIntakeAdmin();
+        case "skills": return await viewSkills(params);
         case "kpi": return await viewKpi(params);
         case "rank": return await viewRank(params);
         case "sr": return parts[1] === "new" ? await viewSrNew() : parts[1] ? await viewSrItem(parts[1]) : await viewSr(params);
