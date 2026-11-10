@@ -371,11 +371,19 @@ ${edit || !csOf(c) ? "" : `<div class="rca-sec" id="rca-sec"></div>`}
       ["settings", "#/settings", "ตั้งค่า", lvl("settings_manage") !== "none"],
     ];
     tabs.splice(3, 0, ["sr", "#/sr", "คำขอบริการ", ME.user.role !== "viewer"]);
-    document.getElementById("tabs").innerHTML = tabs
-      .filter((t) => t[3] && (ME.user.role !== "requester" || t[0] === "sr"))
-      .map(([k, h, l]) => `<a href="${h}" data-nav="${k}">${l}</a>`)
-      .join("");
+    const shown = tabs.filter((t) => t[3] && (ME.user.role !== "requester" || t[0] === "sr"));
+    const link = ([k, h, l]) => `<a href="${h}" data-nav="${k}">${l}</a>`;
+    // Pages are grouped into a few dropdowns; a group with one page is a plain link.
+    const html = NAV_GROUPS.map(([gk, gl, keys]) => {
+      const items = keys.map((k) => shown.find((t) => t[0] === k)).filter(Boolean);
+      if (!items.length) return "";
+      if (items.length === 1) return `<div class="ngrp solo" data-grp="${gk}">${link(items[0])}</div>`;
+      return `<div class="ngrp" data-grp="${gk}"><button type="button" class="ngrp-btn" aria-expanded="false" aria-haspopup="true"><span class="ngrp-l">${gl}</span><span class="badge gbadge" hidden></span><svg class="ngrp-car" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+<div class="ngrp-menu">${items.map(link).join("")}</div></div>`;
+    }).join("");
+    document.getElementById("tabs").innerHTML = html;
     bindNavBtn();
+    bindNavGroups();
     const u = ME.user;
     paintMeAvatar();
     document.getElementById("me-name").innerHTML = `${esc(u.display_name.split(" ")[0])} <span class="muted">· ${ROLE[u.role]}</span>`;
@@ -413,12 +421,72 @@ ${edit || !csOf(c) ? "" : `<div class="rca-sec" id="rca-sec"></div>`}
     };
   }
   const teamLabel = (code) => (ME.teams.find((t) => t.key === code) || {}).label || code;
+  // Top menu groups: [key, label, page keys]. Pages a user can't open are left out.
+  const NAV_GROUPS = [
+    ["work", "งานของฉัน", ["mine", "intake", "sr", "pm"]],
+    ["view", "ภาพรวม", ["overview", "owner", "customer"]],
+    ["team", "ทีมและผลงาน", ["kpi", "rank", "skills"]],
+    ["report", "Report", ["reports"]],
+    ["admin", "ผู้ดูแลระบบ", ["users", "settings", "audit"]],
+  ];
+  function closeGroups(except) {
+    document.querySelectorAll("#tabs .ngrp.open").forEach((g) => {
+      if (g === except) return;
+      g.classList.remove("open");
+      const b = g.querySelector(".ngrp-btn");
+      if (b) b.setAttribute("aria-expanded", "false");
+    });
+  }
+  function bindNavGroups() {
+    const t = document.getElementById("tabs");
+    t.querySelectorAll(".ngrp-btn").forEach((b) => {
+      const g = b.parentElement;
+      b.onclick = (e) => {
+        e.stopPropagation();
+        const open = !g.classList.contains("open");
+        closeGroups(g);
+        g.classList.toggle("open", open);
+        b.setAttribute("aria-expanded", String(open));
+        if (open && e.detail === 0) {
+          const first = g.querySelector(".ngrp-menu a");
+          if (first) first.focus();
+        }
+      };
+      g.addEventListener("keydown", (e) => {
+        if (!["ArrowDown", "ArrowUp"].includes(e.key) || !g.classList.contains("open")) return;
+        const links = [...g.querySelectorAll(".ngrp-menu a")];
+        const i = links.indexOf(document.activeElement);
+        const n = e.key === "ArrowDown" ? (i + 1) % links.length : (i - 1 + links.length) % links.length;
+        e.preventDefault();
+        links[n].focus();
+      });
+    });
+    document.addEventListener("click", (e) => !e.target.closest("#tabs .ngrp") && closeGroups());
+    document.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") return;
+      const g = document.querySelector("#tabs .ngrp.open");
+      closeGroups();
+      if (g) g.querySelector(".ngrp-btn").focus();
+    });
+    // A group's badge is the sum of the waiting counts of the pages inside it.
+    const sumBadges = () =>
+      t.querySelectorAll(".ngrp:not(.solo)").forEach((g) => {
+        const n = [...g.querySelectorAll(".ngrp-menu .badge:not([hidden])")].reduce((s, b) => s + (parseInt(b.textContent, 10) || 0), 0);
+        const gb = g.querySelector(".gbadge");
+        if (String(n || "") !== gb.textContent) gb.textContent = n || "";
+        if (gb.hidden !== !n) gb.hidden = !n;
+      });
+    new MutationObserver(sumBadges).observe(t, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["hidden"] });
+    sumBadges();
+  }
   function setNav(name) {
     let cur = null;
     document.querySelectorAll("#tabs a[data-nav]").forEach((a) => {
       a.classList.toggle("active", a.dataset.nav === name);
       if (a.dataset.nav === name) cur = a;
     });
+    document.querySelectorAll("#tabs .ngrp").forEach((g) => g.classList.toggle("on", !!(cur && g.contains(cur))));
+    closeGroups();
     // Phone: the menu button shows the current page; the menu closes after choosing.
     const lbl = document.getElementById("nav-cur");
     if (lbl) lbl.textContent = cur ? cur.firstChild.textContent.trim() : "เมนู";
@@ -445,7 +513,10 @@ ${edit || !csOf(c) ? "" : `<div class="rca-sec" id="rca-sec"></div>`}
     document.addEventListener("keydown", (e) => e.key === "Escape" && closeNav());
     // A red dot on the menu button when any tab has a waiting-count badge.
     const dot = document.getElementById("nav-dot");
-    const sync = () => (dot.hidden = !t.querySelector(".badge:not([hidden]), .nbadge:not([hidden]), .count:not([hidden])"));
+    const sync = () => {
+      const on = !!t.querySelector(".badge:not([hidden]), .nbadge:not([hidden]), .count:not([hidden])");
+      if (dot.hidden === on) dot.hidden = !on;
+    };
     new MutationObserver(sync).observe(t, { childList: true, subtree: true, attributes: true, attributeFilter: ["hidden"] });
     sync();
   }

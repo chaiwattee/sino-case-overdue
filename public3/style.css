@@ -64,10 +64,25 @@ a:hover { text-decoration-thickness: 2px; }
 .brand { display: inline-flex; align-items: center; gap: 8px; color: var(--ink); text-decoration: none; font-weight: 600; font-size: 16px; white-space: nowrap; }
 .brand .mark { width: 22px; height: 22px; flex: none; color: var(--accent); }
 .brand b { color: var(--accent); font-weight: 700; }
-.tabs { display: flex; gap: 2px; flex: 1 1 auto; overflow-x: auto; }
+.tabs { display: flex; gap: 2px; flex: 1 1 auto; }
 .tabs a { padding: 20px 14px 18px; color: var(--muted); text-decoration: none; font-weight: 500; white-space: nowrap; border-bottom: 2px solid transparent; }
 .tabs a:hover { color: var(--ink); }
 .tabs a.active { color: var(--ink); border-bottom-color: var(--accent); }
+/* grouped top menu */
+.ngrp { position: relative; display: flex; }
+.ngrp-btn { display: inline-flex; align-items: center; gap: 6px; padding: 20px 14px 18px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--muted); font: inherit; font-weight: 500; white-space: nowrap; cursor: pointer; }
+.ngrp-btn:hover, .ngrp.open > .ngrp-btn { color: var(--ink); }
+.ngrp.on > .ngrp-btn { color: var(--ink); border-bottom-color: var(--accent); }
+.ngrp-car { opacity: .6; transition: transform .15s; }
+.ngrp.open .ngrp-car { transform: rotate(180deg); }
+.ngrp .gbadge { display: inline-block; min-width: 18px; padding: 0 6px; border-radius: 9px; background: var(--fail-fg, #C0283C); color: #fff; font-size: 12px; font-weight: 700; line-height: 18px; text-align: center; }
+.ngrp .gbadge[hidden] { display: none; }
+.ngrp-menu { display: none; position: absolute; left: 0; top: 100%; z-index: 20; min-width: 240px; padding: 6px; flex-direction: column; gap: 2px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 16px 40px rgba(15, 25, 45, .16); }
+.ngrp.open .ngrp-menu { display: flex; }
+.tabs .ngrp-menu a { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border: 0; border-radius: 8px; color: var(--ink); }
+.tabs .ngrp-menu a:hover, .tabs .ngrp-menu a:focus-visible { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.tabs .ngrp-menu a.active { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); font-weight: 600; }
+.ngrp:last-child .ngrp-menu { left: auto; right: 0; }
 .status { display: flex; align-items: center; gap: 10px; margin-left: auto; }
 .pill { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; font-size: 13px; color: var(--soft); white-space: nowrap; }
 .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--normal); box-shadow: 0 0 0 0 var(--normal); animation: pulse 2.4s ease-out infinite; }
@@ -724,8 +739,15 @@ tr.off td { opacity: .55; }
   #me-name { display: none; }
   .status { gap: 6px; }
   .tabs { display: none; order: 10; flex-basis: 100%; overflow: visible; }
-  .tabs.open { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 4px 0 8px; }
+  .tabs.open { display: flex; flex-direction: column; gap: 4px; padding: 4px 0 8px; max-height: calc(100vh - 72px); overflow-y: auto; }
+  /* phone: every group is a small heading over its boxes, always expanded */
+  .tabs.open .ngrp { display: block; }
+  .tabs.open .ngrp-btn { padding: 8px 2px 4px; border: 0; pointer-events: none; font-size: 12px; font-weight: 600; color: var(--muted); }
+  .tabs.open .ngrp-car, .tabs.open .gbadge { display: none; }
+  .tabs.open .ngrp-menu, .tabs.open .ngrp.solo { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; position: static; min-width: 0; padding: 0; border: 0; background: none; box-shadow: none; }
+  .tabs.open .ngrp.solo { padding-top: 8px; }
   .tabs.open a { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 12px; min-height: 48px; border: 1px solid var(--line); border-bottom-width: 1px; border-radius: 10px; color: var(--ink); background: var(--surface); white-space: normal; line-height: 1.3; }
+  .tabs.open .ngrp-menu a { border: 1px solid var(--line); padding: 12px; }
   .tabs.open a.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); font-weight: 600; }
 }
 #team-card td { vertical-align: middle; }
