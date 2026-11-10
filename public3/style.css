@@ -756,3 +756,6 @@ tr.off td { opacity: .55; }
 .sk-pick { display: flex; flex-direction: column; gap: 6px; }
 .sk-opt { display: flex; gap: 10px; align-items: center; padding: 6px 8px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; }
 .sk-opt input { width: 18px; height: 18px; }
+.sk-table .sk-group th { text-align: center; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); border-bottom: 0; padding-bottom: 0; }
+.sk-table th.sk-x { color: #0F6E6E; }
+:root[data-theme="dark"] .sk-table th.sk-x { color: #5CC8C8; }

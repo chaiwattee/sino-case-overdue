@@ -4654,16 +4654,16 @@ ${n ? `<div class="sk-exp ${low ? "warn" : ""}" title="${low ? "ทำเคส�
     $app.innerHTML = `
 <div class="head"><div><h1>Skill Map</h1><p>ระดับความสามารถของแต่ละคนในทุก Product · ตัวเลขใต้ช่องคือจำนวนเคสที่ดูแลจริงใน 12 เดือน ใช้ตรวจว่าระดับที่ประเมินสมเหตุสมผล</p></div>
 <div class="actions">${m.teams.length > 1 ? `<select id="sk-team" aria-label="ทีม" style="max-width:260px"><option value="">ทุกทีม</option>${m.teams.map((t) => `<option value="${t.code}" ${t.code === team ? "selected" : ""}>${esc(t.label)}</option>`).join("")}</select>` : ""}
-${m.canEdit ? `<a class="btn" href="api/skills/template${team ? "?team=" + encodeURIComponent(team) : ""}">ดาวน์โหลด Excel ไปกรอก</a><label class="btn primary" style="cursor:pointer"><input type="file" id="sk-file" accept=".xlsx" hidden>นำเข้า Excel</label>` : ""}</div></div>
+${m.canEdit ? `<button class="btn" type="button" id="sk-extras">จัดการ Skill อื่น</button><a class="btn" href="api/skills/template${team ? "?team=" + encodeURIComponent(team) : ""}">ดาวน์โหลด Excel ไปกรอก</a><label class="btn primary" style="cursor:pointer"><input type="file" id="sk-file" accept=".xlsx" hidden>นำเข้า Excel</label>` : ""}</div></div>
 <div class="sk-legend">${m.levels.map((l) => `<span class="sk-lg"><span class="sk-cell l${l.level}" aria-hidden="true"><b>${l.level}</b></span><span><b>${esc(l.label)}</b><br><small>${esc(l.hint)}</small></span></span>`).join("")}</div>
-<section class="card">${m.people.length && m.products.length ? `<div class="tablewrap"><table class="sk-table" style="min-width:${260 + m.products.length * 112}px"><thead><tr><th class="sk-name">ชื่อ</th>${m.products.map((p) => `<th class="sk-th">${esc(p)}</th>`).join("")}<th class="sk-th">ทำเองได้</th></tr></thead><tbody>
+<section class="card">${m.people.length && m.products.length ? `<div class="tablewrap"><table class="sk-table" style="min-width:${260 + m.products.length * 112}px"><thead>${m.extras.length ? `<tr class="sk-group"><th class="sk-name"></th><th colspan="${m.products.length - m.extras.length}">Product</th><th colspan="${m.extras.length}" class="sk-x">Skill อื่น</th><th></th></tr>` : ""}<tr><th class="sk-name">ชื่อ</th>${m.products.map((p) => `<th class="sk-th ${m.extras.includes(p) ? "sk-x" : ""}">${esc(p)}</th>`).join("")}<th class="sk-th">ทำเองได้</th></tr></thead><tbody>
 ${m.people.map((p) => `<tr><td class="sk-name"><b>${esc(p.name)}</b><div class="muted" style="font-size:12px">${esc(p.teams.map((t) => teamLabel[t] || t).join(", "))}${p.role === "manager" ? " · Manager" : ""}</div></td>${m.products.map((pr) => cell(p, pr)).join("")}
 <td class="sk-td sk-sum">${m.products.filter((pr) => ((m.skills[p.id] || {})[pr] || {}).level >= 2).length} / ${m.products.length}</td></tr>`).join("")}
 </tbody><tfoot>
 <tr><td class="sk-name">ทำเองได้ (ระดับ 2 ขึ้นไป)</td>${m.products.map((pr) => { const n = cnt(pr, 2); return `<td class="sk-td"><span class="chip ${n < 2 ? "c-overdue" : "c-normal"}">${n} คน${n < 2 ? " · เสี่ยง" : ""}</span></td>`; }).join("")}<td></td></tr>
 <tr><td class="sk-name">ชำนาญขึ้นไป (3–4)</td>${m.products.map((pr) => `<td class="sk-td">${cnt(pr, 3)} คน</td>`).join("")}<td></td></tr>
 </tfoot></table></div>
-<p class="hint" style="margin:10px 0 0">“เสี่ยง” = มีคนทำเองได้น้อยกว่า 2 คน ถ้าคนนั้นลาหรือลาออก จะไม่มีคนแทน ควรวางแผนสอนงาน · ⚠ = ดูแลเคสของ Product นั้นตั้งแต่ 5 เคสขึ้นไป แต่ระดับยังเป็น 0–1${m.canEdit ? " · กดที่ช่องเพื่อแก้ระดับ" : ""}</p>` : `<div class="empty">${m.products.length ? "ไม่มีผู้ใช้ในทีมนี้" : "ยังไม่มี Product ในรายการ"}</div>`}</section>
+<p class="hint" style="margin:10px 0 0">จำนวนเคสแสดงเฉพาะ Product (Skill อื่นไม่มีเคสให้นับ) · “เสี่ยง” = มีคนทำเองได้น้อยกว่า 2 คน ถ้าคนนั้นลาหรือลาออก จะไม่มีคนแทน ควรวางแผนสอนงาน · ⚠ = ดูแลเคสของ Product นั้นตั้งแต่ 5 เคสขึ้นไป แต่ระดับยังเป็น 0–1${m.canEdit ? " · กดที่ช่องเพื่อแก้ระดับ" : ""}</p>` : `<div class="empty">${m.products.length ? "ไม่มีผู้ใช้ในทีมนี้" : "ยังไม่มี Product ในรายการ"}</div>`}</section>
 <dialog id="dlg"></dialog>`;
     const ts = document.getElementById("sk-team");
     if (ts) ts.onchange = () => (location.hash = "#/skills" + (ts.value ? "?team=" + encodeURIComponent(ts.value) : ""));
@@ -4695,6 +4695,27 @@ ${m.people.map((p) => `<tr><td class="sk-name"><b>${esc(p.name)}</b><div class="
             dlg.showModal();
           })
       );
+    const xb = document.getElementById("sk-extras");
+    if (xb)
+      xb.onclick = () => {
+        dlg.innerHTML = `<form class="card" method="dialog" id="skx" style="width:min(520px,92vw)"><h2>Skill อื่น (นอกจาก Product)</h2>
+<p class="muted" style="margin:0;font-size:14px">เช่น Presale, Project Management, Network, SQL · 1 บรรทัด = 1 Skill · Product มาจากรายการ Product ในระบบอยู่แล้ว ไม่ต้องใส่ซ้ำ</p>
+<label class="f">รายการ Skill<textarea name="x" rows="8" maxlength="1500">${esc(m.extras.join("\n"))}</textarea></label>
+<p class="hint" style="margin:0">ลบชื่อออกเพื่อซ่อนคอลัมน์ ระดับที่กรอกไว้ยังเก็บอยู่ ใส่ชื่อเดิมกลับมาก็แสดงเหมือนเดิม</p>
+<div class="right"><button class="btn" value="cancel" formnovalidate>ยกเลิก</button><button class="btn primary" value="ok">บันทึก</button></div></form>`;
+        const f = dlg.querySelector("#skx");
+        dlg.onclose = async () => {
+          if (dlg.returnValue !== "ok") return;
+          try {
+            await post("/skills/extras", { extras: f.x.value.split("\n") }, "PUT");
+            toast("บันทึกรายการ Skill แล้ว");
+            viewSkills(params);
+          } catch (e) {
+            toast(e.message, 6000);
+          }
+        };
+        dlg.showModal();
+      };
     const fileIn = document.getElementById("sk-file");
     if (fileIn)
       fileIn.onchange = async () => {

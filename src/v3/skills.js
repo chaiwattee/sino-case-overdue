@@ -1,7 +1,7 @@
 // Skill map: each User's level (0–4) in every product. Managers fill it on the page or with an Excel sheet;
 // the page also shows how many cases each person actually handled per product, as a check on the levels.
 const ExcelJS = require("exceljs");
-const { q, one, all, tx, audit } = require("./db");
+const { q, one, all, tx, audit, getSetting, setSetting } = require("./db");
 const perms = require("./perms");
 
 const LEVELS = [
@@ -15,8 +15,20 @@ const bad = (m, s = 400) => Object.assign(new Error(m), { status: s });
 const canEdit = (user) => user.role === "admin" || user.role === "manager";
 const canView = (user) => ["admin", "manager", "observer"].includes(user.role);
 
-async function products() {
+// Columns of the map: every product, then the other skills the Admin listed (e.g. Presale, Project management).
+const EXTRA_KEY = "skill_extras";
+const DEFAULT_EXTRAS = ["Presale", "Project Management", "Training ลูกค้า"];
+async function extras() {
+  const v = await getSetting(EXTRA_KEY, null);
+  return Array.isArray(v) ? v : DEFAULT_EXTRAS;
+}
+async function productList() {
   return (await all("SELECT value FROM lookups WHERE kind = 'product' AND active AND NOT pending ORDER BY sort, value")).map((r) => r.value);
+}
+async function products() {
+  const p = await productList();
+  const low = new Set(p.map((x) => x.toLowerCase()));
+  return [...p, ...(await extras()).filter((x) => !low.has(x.toLowerCase()))];
 }
 
 /** Users and Managers the viewer may see on the map (a User sees only their own row). */
@@ -39,6 +51,7 @@ async function matrix(user, team) {
   const list = await people(user, team);
   const ids = list.map((p) => p.id);
   const prods = await products();
+  const m0 = await productList();
   const skills = {};
   const exp = {};
   if (ids.length) {
@@ -59,7 +72,8 @@ async function matrix(user, team) {
   }
   const teams = await all("SELECT code, label FROM teams ORDER BY sort");
   const scope = perms.teamScope(user);
-  return { levels: LEVELS, products: prods, people: list, skills, exp, canEdit: canEdit(user), canView: canView(user), teams: scope ? teams.filter((t) => scope.includes(t.code)) : teams };
+  const ex = new Set((await extras()).map((x) => x.toLowerCase()));
+  return { levels: LEVELS, products: prods, extras: prods.filter((p) => ex.has(p.toLowerCase()) && !(m0 || []).includes(p)), people: list, skills, exp, canEdit: canEdit(user), canView: canView(user), teams: scope ? teams.filter((t) => scope.includes(t.code)) : teams };
 }
 
 async function checkTarget(user, userId) {
@@ -71,7 +85,7 @@ async function setOne(user, { user_id, product, level, note }) {
   if (!canEdit(user)) throw bad("เฉพาะ Admin / Manager แก้ Skill ได้", 403);
   const uid = Number(user_id);
   await checkTarget(user, uid);
-  if (!(await products()).includes(product)) throw bad("ไม่พบ Product นี้ในรายการ");
+  if (!(await products()).includes(product)) throw bad("ไม่พบ Skill นี้ในรายการ");
   if (level === null || level === "") {
     await q("DELETE FROM user_skills WHERE user_id = $1 AND product = $2", [uid, product]);
   } else {
@@ -116,6 +130,10 @@ async function template(user, team) {
   head.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F3A5F" } };
   head.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
   head.height = 30;
+  // Other skills (not products) get a different header colour.
+  m.products.forEach((p, i) => {
+    if (m.extras.includes(p)) ws.getCell(1, 4 + i).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0F6E6E" } };
+  });
   for (const p of m.people) {
     const row = { email: p.email, name: p.name, team: p.teams.map((t) => teamLabel[t] || t).join(", ") };
     for (const pr of m.products) {
@@ -145,7 +163,7 @@ async function template(user, team) {
   ws.views = [{ state: "frozen", xSplit: 2, ySplit: 1 }];
   const help = wb.addWorksheet("ระดับ");
   help.columns = [{ width: 10 }, { width: 18 }, { width: 70 }];
-  [["ระดับ", "ชื่อ", "ความหมาย"], ...LEVELS.map((l) => [l.level, l.label, l.hint]), [], ["", "วิธีกรอก", "ใส่ตัวเลข 0–4 ในช่องของแต่ละ Product · ช่องที่เว้นว่างจะไม่เปลี่ยนค่าเดิมในระบบ"], ["", "", "อย่าแก้คอลัมน์ Email (ใช้จับคู่คน) และหัวคอลัมน์ Product · คอลัมน์ ชื่อ และ ทีม ไว้ดูเท่านั้น"], ["", "", "เพิ่ม Product ใหม่ได้ที่หน้าตั้งค่าของระบบก่อน แล้วดาวน์โหลดแม่แบบใหม่"]].forEach((r, i) => {
+  [["ระดับ", "ชื่อ", "ความหมาย"], ...LEVELS.map((l) => [l.level, l.label, l.hint]), [], ["", "วิธีกรอก", "ใส่ตัวเลข 0–4 ในช่องของแต่ละ Product · ช่องที่เว้นว่างจะไม่เปลี่ยนค่าเดิมในระบบ"], ["", "", "อย่าแก้คอลัมน์ Email (ใช้จับคู่คน) และหัวคอลัมน์ Product · คอลัมน์ ชื่อ และ ทีม ไว้ดูเท่านั้น"], ["", "", "Product มาจากรายการ Product ในระบบ ส่วน Skill อื่น (เช่น Presale) เพิ่มได้ที่หน้า Skill Map → “จัดการ Skill อื่น” แล้วดาวน์โหลดแม่แบบใหม่"]].forEach((r, i) => {
     const row = help.addRow(r);
     if (i === 0) row.font = { bold: true };
     if (i >= 1 && i <= 5) row.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: COLORS[i - 1] } };
@@ -179,7 +197,7 @@ async function plan(user, buf) {
     else if (h) unknown.push(h);
   });
   if (!col.email) throw bad("ไม่พบคอลัมน์ Email ในแถวแรก ใช้แม่แบบจากปุ่มดาวน์โหลด");
-  if (!prodCols.length) throw bad("ไม่พบคอลัมน์ Product ที่ตรงกับในระบบ");
+  if (!prodCols.length) throw bad("ไม่พบคอลัมน์ Product / Skill ที่ตรงกับในระบบ");
   const visible = new Map((await people(user)).map((p) => [p.email.toLowerCase(), p]));
   const allUsers = new Map((await all("SELECT id, lower(email) AS email FROM users")).map((u) => [u.email, u.id]));
   const ids = [...visible.values()].map((p) => p.id);
@@ -236,6 +254,22 @@ async function apply(user, planned) {
 }
 
 function mount(api, { wrap }) {
+  // The other skills (not products): Admin and Managers can edit the list. Removing one only hides its column; levels stay.
+  api.put("/skills/extras", wrap(async (req, res) => {
+    if (!canEdit(req.user)) throw bad("เฉพาะ Admin / Manager", 403);
+    const list = [];
+    for (const raw of Array.isArray(req.body && req.body.extras) ? req.body.extras : []) {
+      const x = String(raw || "").replace(/\s+/g, " ").trim().slice(0, 40);
+      if (x && !list.some((y) => y.toLowerCase() === x.toLowerCase())) list.push(x);
+    }
+    if (list.length > 30) throw bad("ใส่ Skill อื่นได้ไม่เกิน 30 รายการ");
+    const prods = (await productList()).map((p) => p.toLowerCase());
+    const dup = list.find((x) => prods.includes(x.toLowerCase()));
+    if (dup) throw bad(`“${dup}” เป็นชื่อ Product อยู่แล้ว`);
+    await setSetting(EXTRA_KEY, list);
+    await audit(req.user, "skill_extras", null, { extras: list });
+    res.json({ ok: true, extras: list });
+  }));
   api.get("/skills", wrap(async (req, res) => res.json(await matrix(req.user, req.query.team || ""))));
   api.put("/skills", wrap(async (req, res) => {
     await setOne(req.user, req.body || {});

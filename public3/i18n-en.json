@@ -2286,5 +2286,13 @@
 "ค่าทั้งหมดในไฟล์ตรงกับในระบบแล้ว ไม่มีอะไรเปลี่ยน": "Everything in the file already matches the system; nothing to change",
 "ทำเคสนี้หลายครั้ง แต่ระดับยังต่ำ ลองทบทวน": "Handled many of these cases but the level is still low; review it",
 "จำนวนเคสที่ดูแลใน 12 เดือน": "Cases handled in 12 months",
-"เช่น ผ่าน training NICE Engage 7.x แล้ว": "e.g. passed NICE Engage 7.x training"
+"เช่น ผ่าน training NICE Engage 7.x แล้ว": "e.g. passed NICE Engage 7.x training",
+"Skill อื่น": "Other skills",
+"จัดการ Skill อื่น": "Manage other skills",
+"Skill อื่น (นอกจาก Product)": "Other skills (besides products)",
+"รายการ Skill": "Skills",
+"เช่น Presale, Project Management, Network, SQL · 1 บรรทัด = 1 Skill · Product มาจากรายการ Product ในระบบอยู่แล้ว ไม่ต้องใส่ซ้ำ": "e.g. Presale, Project Management, Network, SQL · one per line · products come from the system's product list already",
+"ลบชื่อออกเพื่อซ่อนคอลัมน์ ระดับที่กรอกไว้ยังเก็บอยู่ ใส่ชื่อเดิมกลับมาก็แสดงเหมือนเดิม": "Remove a name to hide its column; levels already entered are kept and come back if you add the name again",
+"บันทึกรายการ Skill แล้ว": "Skills saved",
+"จำนวนเคสแสดงเฉพาะ Product (Skill อื่นไม่มีเคสให้นับ)": "Case counts show for products only (other skills have no cases to count)"
 }
