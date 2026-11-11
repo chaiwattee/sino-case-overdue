@@ -483,12 +483,29 @@ function mount(api, { wrap, need }) {
   const canAdjust = (u) => ["admin", "manager"].includes(u.role);
   api.get("/kpi", wrap(async (req, res) => {
     const r = await compute(req.query.month);
-    if (!canAll(req.user)) r.owners = r.owners.filter((o) => o.id === req.user.id);
-    else {
-      const mates = await require("./perms").teamMateIds(req.user); // a manager sees the engineers of their own teams
-      if (mates) r.owners = r.owners.filter((o) => mates.has(o.id));
-    }
-    res.json({ ...r, canAll: canAll(req.user), canAdjust: canAdjust(req.user), canEditCategories: req.user.role === "admin" });
+    // One team at a time. Admin / observer pick any team (or "all"); a manager picks among their own teams;
+    // an engineer sees only their own KPI, compared with the average of their own team.
+    const scope = require("./perms").teamScope(req.user);
+    const allTeams = await all("SELECT code, label FROM teams ORDER BY sort, code");
+    const teams = scope ? allTeams.filter((t) => scope.includes(t.code)) : allTeams;
+    let team = String(req.query.team || "");
+    if (team === "all" && !scope) team = "";
+    else if (!teams.some((t) => t.code === team)) team = teams[0] ? teams[0].code : "";
+    if (!scope && !req.query.team && teams[0]) team = teams[0].code;
+    let inTeam = r.owners;
+    if (team) {
+      const ids = new Set((await all("SELECT user_id FROM user_teams WHERE team = $1", [team])).map((x) => x.user_id));
+      inTeam = r.owners.filter((o) => ids.has(o.id));
+    } else if (scope) inTeam = [];
+    const scored = inTeam.filter((o) => !o.insufficient);
+    r.team = {
+      ...r.team,
+      avgScore: scored.length ? Math.round(scored.reduce((a, o) => a + o.score, 0) / scored.length) : null,
+      avgDiversity: inTeam.length ? Math.round((inTeam.reduce((a, o) => a + o.metrics.diversity, 0) / inTeam.length) * 100) / 100 : null,
+      members: inTeam.length,
+    };
+    r.owners = canAll(req.user) ? inTeam : r.owners.filter((o) => o.id === req.user.id);
+    res.json({ ...r, teams, teamCode: team, allTeams: !scope, canAll: canAll(req.user), canAdjust: canAdjust(req.user), canEditCategories: req.user.role === "admin" });
   }));
   api.get("/kpi/trend/:id(\\d+)", wrap(async (req, res) => {
     const id = Number(req.params.id);

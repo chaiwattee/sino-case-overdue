@@ -3091,13 +3091,15 @@ ${d.outbox.map((o) => `<tr><td>${fdt(o.created_at)}</td><td class="mono">${esc(o
       months.push(`${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}`);
     }
     const month = params.month || months[1];
-    const r = await api("/kpi?month=" + month);
+    const r = await api("/kpi?" + qs({ month, team: params.team }));
     const owners = r.owners;
+    const teamName = r.teamCode ? (r.teams.find((t) => t.code === r.teamCode) || {}).label || r.teamCode : "ทุกทีม";
     const sel = owners.find((o) => String(o.id) === String(params.owner)) || owners.find((o) => o.id === ME.user.id) || owners[0];
     const current = month === months[0];
     const head = `<div class="banner warn kp-trial"><strong>ทดลองใช้</strong> · เกณฑ์และคะแนนอยู่ระหว่างทดลอง ยังไม่ใช้ประเมินผลงานจริง ถ้าเห็นตัวเลขที่ไม่ตรงกับงานจริง แจ้ง Admin เพื่อปรับเกณฑ์</div>
-<div class="head"><div><h1>KPI ราย User · ${ymLabel(month, true)} <span class="kp-beta">ทดลองใช้</span></h1><p>คำนวณจากข้อมูลเคสในระบบ${current ? " · <strong>เดือนนี้ยังไม่จบ ตัวเลขยังเปลี่ยนได้</strong>" : ""} · Manager ปรับคะแนนได้ ±10 พร้อมเหตุผล</p></div>
+<div class="head"><div><h1>KPI ราย User · ${ymLabel(month, true)} <span class="kp-beta">ทดลองใช้</span></h1>${r.canAll || r.teams.length ? `<p class="kp-team">ทีม ${esc(teamName)}${r.canAll ? ` · ${r.team.members} คนที่มีเคสเดือนนี้` : ""}</p>` : ""}<p>คำนวณจากข้อมูลเคสในระบบ${current ? " · <strong>เดือนนี้ยังไม่จบ ตัวเลขยังเปลี่ยนได้</strong>" : ""} · Manager ปรับคะแนนได้ ±10 พร้อมเหตุผล</p></div>
 <div class="actions" style="flex-direction:row;align-items:center">
+${r.canAll && (r.teams.length > 1 || r.allTeams) ? `<select id="kp-team" aria-label="ทีม" style="width:auto">${r.teams.map((t) => `<option value="${esc(t.code)}" ${t.code === r.teamCode ? "selected" : ""}>${esc(t.label)}</option>`).join("")}${r.allTeams ? `<option value="all" ${!r.teamCode ? "selected" : ""}>ทุกทีม</option>` : ""}</select>` : ""}
 ${r.canAll && owners.length ? `<select id="kp-owner" aria-label="User" style="width:auto">${owners.map((o) => `<option value="${o.id}" ${sel && o.id === sel.id ? "selected" : ""}>${esc(o.name)}</option>`).join("")}</select>` : ""}
 <select id="kp-month" aria-label="เดือน" style="width:auto">${months.map((m) => `<option value="${m}" ${m === month ? "selected" : ""}>${ymLabel(m)}</option>`).join("")}</select>
 <button class="btn" type="button" onclick="window.print()">พิมพ์ / PDF</button></div></div>`;
@@ -3123,7 +3125,7 @@ ${sel.insufficient ? `<div class="banner warn">${esc(sel.name)} ปิดเค�
 <div class="kp-g3">
 <section class="card"><h2>คะแนนรวม</h2>
 <div><span class="kp-score">${sel.score}</span>${sel.grade ? `<span class="kp-grade">${sel.grade}</span>` : `<span class="kp-grade na">ข้อมูลไม่พอ</span>`}</div>
-<p class="muted" style="margin:6px 0 0">จาก 100 (+ โบนัส 10)${r.team.avgScore != null ? ` · ทีมเฉลี่ย ${r.team.avgScore}` : ""}</p>
+<p class="muted" style="margin:6px 0 0">จาก 100 (+ โบนัส 10)${r.team.avgScore != null ? ` · ค่าเฉลี่ยทีม ${esc(teamName)} ${r.team.avgScore}` : ""}</p>
 <div class="kp-trend" id="kp-trend"><div class="hint">กำลังโหลดแนวโน้ม…</div></div></section>
 <section class="card"><h2>คะแนนแยกตามเกณฑ์</h2>${bars}
 <div class="kp-bar"><span>+ โบนัส รับเคสจากลูกค้า</span><div class="t"><div style="width:${(sel.parts.bonus / 5) * 100}%;background:#7A4FBF"></div></div><b>+${sel.parts.bonus}</b></div>
@@ -3163,9 +3165,9 @@ ${r.canAdjust ? `<section class="card noprint"><h2>ปรับคะแนน�
 <label class="f" style="grid-column:span 2">เหตุผล<input id="kp-why" value="${esc(sel.adjust ? sel.adjust.reason : "")}" placeholder="เช่น CASE-2026-0012 ช้าเพราะรอ Vendor ไม่ใช่ความผิดของ User"></label>
 <div class="actions"><button class="btn primary" type="button" id="kp-save">บันทึก</button></div></div></section>` : ""}
 
-${r.canAll ? `<section class="card"><div class="title"><h2>เทียบทั้งทีม · ${ymLabel(month)}</h2><span>คลิกชื่อเพื่อดูรายละเอียด</span></div>
+${r.canAll ? `<section class="card"><div class="title"><h2>เทียบในทีม ${esc(teamName)} · ${ymLabel(month)}</h2><span>คลิกชื่อเพื่อดูรายละเอียด</span></div>
 <div class="tablewrap"><table style="min-width:900px"><thead><tr><th>User</th><th class="n">คะแนน</th><th class="n">ดูแล / ปิด</th><th class="n">ทัน SLA</th><th class="n">ตอบสนอง</th><th class="n">อัปเดตทุก</th><th class="n">หลากหลาย</th><th>Skill หลัก</th></tr></thead><tbody>
-${owners.map((o) => `<tr class="click" data-href="#/kpi?${qs({ month, owner: o.id })}"><td style="font-weight:600">${esc(o.name)}</td><td class="n" style="font-weight:700">${o.score} ${o.grade || `<span class="muted" style="font-weight:400">ข้อมูลไม่พอ</span>`}</td>
+${owners.map((o) => `<tr class="click" data-href="#/kpi?${qs({ month, team: params.team, owner: o.id })}"><td style="font-weight:600">${esc(o.name)}</td><td class="n" style="font-weight:700">${o.score} ${o.grade || `<span class="muted" style="font-weight:400">ข้อมูลไม่พอ</span>`}</td>
 <td class="n">${o.handled} / ${o.metrics.closed}</td><td class="n">${o.metrics.slaPct == null ? "-" : o.metrics.slaPct + "%"}</td><td class="n">${o.metrics.firstResponseHrs == null ? "-" : o.metrics.firstResponseHrs + " ชม."}</td>
 <td class="n">${o.metrics.updateEveryDays == null ? "-" : o.metrics.updateEveryDays + " วัน"}</td><td class="n">${o.metrics.diversity.toFixed(2)}</td><td>${esc(Object.entries(o.products).sort((a, b) => b[1] - a[1]).slice(0, 2).map((x) => x[0]).join(", ") || "-")}</td></tr>`).join("")}</tbody></table></div></section>` : ""}
 
@@ -3220,9 +3222,11 @@ ${r.canEditCategories ? `<section class="card noprint"><details><summary style="
   function bindKpiNav() {
     const o = document.getElementById("kp-owner");
     const mo = document.getElementById("kp-month");
-    const go = () => (location.hash = "#/kpi?" + qs({ month: mo.value, owner: o ? o.value : "" }));
-    if (o) o.onchange = go;
-    if (mo) mo.onchange = go;
+    const tm = document.getElementById("kp-team");
+    const go = (keepOwner) => (location.hash = "#/kpi?" + qs({ month: mo.value, team: tm ? tm.value : "", owner: keepOwner && o ? o.value : "" }));
+    if (o) o.onchange = () => go(true);
+    if (mo) mo.onchange = () => go(true);
+    if (tm) tm.onchange = () => go(false);
   }
 
   // ------------------------------------------------------------ service requests (internal, SR-…)
