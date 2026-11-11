@@ -138,6 +138,7 @@ function ser(s, hol, viewer) {
     requestKind: s.request_kind || "general", meetingMode: s.meeting_mode || "", meetingModeLabel: MEETING_MODE[s.meeting_mode] || "", meetingReason: s.meeting_reason || "",
     outcome: s.outcome, outcomeLabel: s.outcome ? OUTCOME[s.outcome] : "", resolution: s.resolution || "",
     closedBy: s.closed_by_name || "", closedAt: s.closed_at, reopenCount: s.reopen_count,
+    confirmedAt: s.confirmed_at || null, rating: s.rating || null, ratingNote: s.rating_note || "",
     canReopenUntil: s.status === "done" && closedIso ? d.toISODate(d.addDays(d.fromISODate(closedIso), REOPEN_DAYS)) : null,
     ext: s.ext_target ? { target: isoDay(s.ext_target), reason: s.ext_reason, by: s.ext_by_name, at: s.ext_at } : null,
     onTime: s.status === "done" && target && closedIso ? closedIso <= target : null,
@@ -514,9 +515,25 @@ async function close(user, s, b) {
   await audit(user, "sr_close", n.sr_no, { outcome: b.outcome });
   notifyClosed(n, user).catch((e) => console.error("[sr] notify closed:", e.message));
 }
+/** The requester confirms the finished work and rates it 1–5 (used in the KPI of internal service teams). */
+async function confirmDone(user, s, b) {
+  if (s.requester_id !== user.id) throw bad("ยืนยันรับงานได้เฉพาะผู้ขอ", 403);
+  if (s.status !== "done") throw bad("ยืนยันรับงานได้เฉพาะคำขอที่เสร็จแล้ว");
+  if (s.confirmed_at) throw bad("ยืนยันรับงานไปแล้ว");
+  const rating = Number(b.rating);
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) throw bad("เลือกคะแนน 1–5");
+  const note = clean(b.note, 1000);
+  if (rating <= 2 && note.length < 5) throw bad("ให้คะแนน 1–2 ช่วยบอกเหตุผลสั้นๆ ให้ทีมปรับปรุง");
+  await tx(async (c) => {
+    await c.query("UPDATE service_requests SET confirmed_at = now(), rating = $2, rating_note = $3, updated_at = now() WHERE id = $1", [s.id, rating, note || null]);
+    await addEvent(c, s.id, "confirmed", note || null, { rating }, user.id);
+  });
+  await audit(user, "sr_confirm", s.sr_no, { rating });
+}
 async function reopen(user, s, b) {
   if (s.requester_id !== user.id) throw bad("ขอเปิดใหม่ได้เฉพาะผู้ขอ", 403);
   if (s.status !== "done") throw bad("เปิดใหม่ได้เฉพาะคำขอที่เสร็จแล้ว");
+  if (s.confirmed_at) throw bad("ยืนยันรับงานแล้ว เปิดใหม่ไม่ได้ ส่งคำขอใหม่แทน");
   const until = d.toISODate(d.addDays(d.fromISODate(d.toISODate(new Date(s.closed_at))), REOPEN_DAYS));
   if (todayIso() > until) throw bad(`เปิดใหม่ได้ภายใน ${REOPEN_DAYS} วันหลังปิด (ถึง ${thai(until)}) ส่งคำขอใหม่แทน`);
   const reason = clean(b.reason, 1000);
@@ -525,7 +542,7 @@ async function reopen(user, s, b) {
   // The assignee gets at least one more working day.
   const target = isoDay(s.target_date) > todayIso() ? isoDay(s.target_date) : addWorkdays(todayIso(), 2, hol);
   await tx(async (c) => {
-    await c.query("UPDATE service_requests SET status='in_progress', outcome=NULL, closed_by=NULL, closed_at=NULL, target_date=$2, reopen_count=reopen_count+1, reminded='{}'::jsonb, updated_at=now() WHERE id=$1", [s.id, target]);
+    await c.query("UPDATE service_requests SET status='in_progress', outcome=NULL, closed_by=NULL, closed_at=NULL, confirmed_at=NULL, rating=NULL, rating_note=NULL, target_date=$2, reopen_count=reopen_count+1, reminded='{}'::jsonb, updated_at=now() WHERE id=$1", [s.id, target]);
     await addEvent(c, s.id, "reopened", reason, { target }, user.id);
   });
   notifyReopened(await load(s.id), user, reason).catch(() => {});
@@ -615,7 +632,8 @@ function mount(api, { wrap }) {
         extend: fresh.status === "in_progress" && !fresh.ext_target && (fresh.assignee_id === req.user.id || manage),
         decideExt: manage && !!fresh.ext_target,
         reassign: manage && fresh.status === "in_progress",
-        reopen: fresh.requester_id === req.user.id && fresh.status === "done" && ser(fresh, hol).canReopenUntil >= todayIso(),
+        reopen: fresh.requester_id === req.user.id && fresh.status === "done" && !fresh.confirmed_at && ser(fresh, hol).canReopenUntil >= todayIso(),
+        confirm: fresh.requester_id === req.user.id && fresh.status === "done" && !fresh.confirmed_at,
       },
       assignees: manage ? await assignees(fresh.team) : [],
     });
@@ -688,6 +706,7 @@ function mount(api, { wrap }) {
   api.post("/sr/:id/extend/decide", act(decideExtension));
   api.post("/sr/:id/close", act(close));
   api.post("/sr/:id/reopen", act(reopen));
+  api.post("/sr/:id/confirm", act(confirmDone));
   api.get("/sr-files/:fid", wrap(async (req, res) => {
     const f = await one("SELECT * FROM sr_files WHERE id = $1", [Number(req.params.fid)]);
     if (!f) throw bad("ไม่พบไฟล์", 404);
@@ -710,6 +729,6 @@ function mount(api, { wrap }) {
 }
 
 /** Requests a requester-only account may make (everything else is refused). */
-const REQUESTER_PATHS = [/^\/me$/, /^\/departments$/, /^\/profile(\/avatar|\/lang)?$/, /^\/push(\/subscribe|\/unsubscribe|\/test)?$/, /^\/avatar\/\d+$/, /^\/sr(\/|$)/, /^\/sr-files\//];
+const REQUESTER_PATHS = [/^\/me$/, /^\/departments$/, /^\/profile(\/avatar|\/lang)?$/, /^\/push(\/subscribe|\/unsubscribe|\/test)?$/, /^\/avatar\/\d+$/, /^\/sr(\/|$)/, /^\/sr-files\//, /^\/kpi\/response$/];
 
 module.exports = { mount, runReminders, kpiByAssignee, REQUESTER_PATHS, SEV, STATUS, OUTCOME, isWorkday, addWorkdays, workdaysBetween, holidays, profileMissing };

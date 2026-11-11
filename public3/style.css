@@ -783,3 +783,74 @@ tr.off td { opacity: .55; }
 :root[data-theme="dark"] .sk-table th.sk-x { color: #5CC8C8; }
 
 .kp-team { margin: 4px 0 0; font-weight: 600; color: var(--accent); }
+
+/* overview by team */
+.tm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; margin: 16px 0; }
+.tm-card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; color: inherit; text-decoration: none; }
+.tm-card:hover { border-color: var(--accent); }
+.tm-card h3 { margin: 0; font-size: 18px; display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.tm-nums { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.tm-nums div { font-size: 12px; color: var(--muted); } .tm-nums b { display: block; font-size: 22px; color: var(--ink); }
+.tm-bar { flex: 1; height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; min-width: 80px; } .tm-bar i { display: block; height: 100%; }
+.tm-foot { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; color: var(--muted); } .tm-foot b { color: var(--ink); }
+.tm-load { display: flex; align-items: center; gap: 8px; } .tm-load b { width: 20px; }
+
+/* customer details + installed solution */
+.ci-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr); gap: 16px; margin-bottom: 16px; }
+.ci-grid > .card { margin: 0; }
+.ci-dl { display: grid; grid-template-columns: 130px 1fr; gap: 8px 12px; font-size: 14px; margin: 0; }
+.ci-dl dt { color: var(--muted); } .ci-dl dd { margin: 0; white-space: pre-line; }
+.ci-prod { display: grid; grid-template-columns: 1.3fr .7fr 1.4fr 1fr; gap: 6px 12px; align-items: center; padding: 12px 0; border-top: 1px solid var(--line); font-size: 14px; }
+.ci-prod:first-of-type { border-top: 0; }
+.ci-prod .nm { font-weight: 600; } .ci-prod .sub, .ci-mods .sub { font-size: 12px; color: var(--muted); }
+.ci-mods { display: flex; flex-wrap: wrap; gap: 4px; }
+.ci-mods span { font-size: 12px; padding: 2px 8px; border-radius: 6px; background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
+.ci-erow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px 12px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; margin-bottom: 10px; }
+.ci-rm { display: flex; align-items: flex-end; justify-content: flex-end; }
+@media (max-width: 900px) { .ci-grid { grid-template-columns: 1fr; } .ci-prod { grid-template-columns: 1fr 1fr; } .ci-erow { grid-template-columns: 1fr 1fr; } }
+
+/* KPI by team */
+.kt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.kt { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; color: inherit; text-decoration: none; display: block; }
+.kt:hover { border-color: var(--accent); }
+.kt.on { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent); }
+.kt h4 { margin: 0 0 6px; font-size: 15px; display: flex; justify-content: space-between; gap: 8px; }
+.kt-sc { font-size: 30px; font-weight: 700; } .kt-sc span { font-size: 13px; font-weight: 400; }
+.kt-row { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); margin-top: 4px; } .kt-row b { color: var(--ink); }
+.kt-gd { display: flex; height: 10px; border-radius: 5px; overflow: hidden; margin-top: 8px; } .kt-gd i { display: block; }
+
+/* "by User" search box */
+.us-wrap { position: relative; flex: 0 1 320px; }
+.us-wrap input { width: 100%; padding-left: 34px; }
+.us-ic { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
+.us-list { position: absolute; top: calc(100% + 6px); left: 0; right: 0; min-width: 300px; max-height: 360px; overflow-y: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 16px 40px rgba(15, 25, 45, .2); padding: 6px; z-index: 30; }
+.us-list a { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 8px; color: var(--ink); text-decoration: none; font-size: 14px; }
+.us-list a.on, .us-list a:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.us-list small { color: var(--muted); font-size: 12px; }
+.us-list mark { background: none; color: var(--accent); font-weight: 700; }
+
+/* SR: confirm + rate */
+.sr-rate { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+.sr-rate label { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 10px 4px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; text-align: center; }
+.sr-rate input { position: absolute; opacity: 0; pointer-events: none; }
+.sr-rate span { font-size: 22px; font-weight: 700; } .sr-rate small { font-size: 11px; color: var(--muted); }
+.sr-rate label:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.sr-rate label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* response score */
+.rs-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 16px; }
+.rs-grid > .card { margin: 0; }
+.rs-big { font-size: 56px; font-weight: 700; line-height: 1; }
+@media (max-width: 900px) { .rs-grid { grid-template-columns: 1fr; } }
+
+/* settings: KPI profiles */
+.kpf-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.kpf { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.kpf h3 { margin: 0; font-size: 16px; }
+.kpf-tbl th.c, .kpf-tbl td.c { text-align: center; width: 22%; }
+.kpf-tbl input[type=radio] { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
+.kpf-w { display: flex; flex-direction: column; gap: 6px; }
+.kpf-w label { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 14px; }
+.kpf-w input { width: 72px; text-align: right; }
+.kpf-sum { text-align: right; font-weight: 700; color: #2E9E6A; font-size: 14px; } .kpf-sum.bad { color: var(--over-fg); }
+@media (max-width: 1000px) { .kpf-grid { grid-template-columns: 1fr; } }

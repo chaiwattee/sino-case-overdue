@@ -361,9 +361,11 @@ ${edit || !csOf(c) ? "" : `<div class="rca-sec" id="rca-sec"></div>`}
       ["intake", "#/intake", "เคสจากลูกค้า", true],
       ["owner", "#/owner", "ราย User", true],
       ["customer", "#/customer", "ราย ลูกค้า", true],
+      ["team", "#/team", "ราย ทีม", ["admin", "manager", "observer"].includes(ME.user.role)],
       ["pm", "#/pm", "งาน PM", ME.user.role !== "viewer"],
       ["skills", "#/skills", "Skill Map", ["admin", "manager", "observer"].includes(ME.user.role)],
-      ["kpi", "#/kpi", "KPI (ทดลองใช้)", ME.user.role !== "viewer"],
+      ["kpi", "#/kpi", "KPI (ทดลองใช้)", ME.user.role !== "viewer" && ME.user.role !== "requester" && (ME.kpiProfile !== "response" || ["admin", "manager", "observer"].includes(ME.user.role))],
+      ["response", "#/response", "การตอบกลับ", ME.kpiProfile === "response" || !!ME.responseTeams],
       ["rank", "#/rank", "อันดับ KPI", !!(ME.leaderboard && ME.leaderboard.visible)],
       ["reports", "#/reports", "Report &amp; Export", lvl("export") !== "none" || lvl("reports_manage") !== "none"],
       ["audit", "#/audit", "ประวัติแก้ไข", lvl("audit_view") !== "none"],
@@ -371,7 +373,7 @@ ${edit || !csOf(c) ? "" : `<div class="rca-sec" id="rca-sec"></div>`}
       ["settings", "#/settings", "ตั้งค่า", lvl("settings_manage") !== "none"],
     ];
     tabs.splice(3, 0, ["sr", "#/sr", "คำขอบริการ", ME.user.role !== "viewer"]);
-    const shown = tabs.filter((t) => t[3] && (ME.user.role !== "requester" || t[0] === "sr"));
+    const shown = tabs.filter((t) => t[3] && (ME.user.role !== "requester" || t[0] === "sr" || t[0] === "response"));
     const link = ([k, h, l]) => `<a href="${h}" data-nav="${k}">${l}</a>`;
     // Pages are grouped into a few dropdowns; a group with one page is a plain link.
     const html = NAV_GROUPS.map(([gk, gl, keys]) => {
@@ -424,8 +426,8 @@ ${edit || !csOf(c) ? "" : `<div class="rca-sec" id="rca-sec"></div>`}
   // Top menu groups: [key, label, page keys]. Pages a user can't open are left out.
   const NAV_GROUPS = [
     ["work", "งานของฉัน", ["mine", "intake", "sr", "pm"]],
-    ["view", "ภาพรวม", ["overview", "owner", "customer"]],
-    ["team", "ทีมและผลงาน", ["kpi", "rank", "skills"]],
+    ["view", "ภาพรวม", ["overview", "team", "owner", "customer"]],
+    ["team", "ทีมและผลงาน", ["kpi", "response", "rank", "skills"]],
     ["report", "Report", ["reports"]],
     ["admin", "ผู้ดูแลระบบ", ["users", "settings", "audit"]],
   ];
@@ -1275,6 +1277,65 @@ ${actsHtml(data.activities)}</section>`}
   }
 
   // ------------------------------------------------------------ owner page
+  /** Search box on the "by User" page: type part of a name or email, pick with the mouse or arrow keys + Enter. */
+  function bindUserSearch(month) {
+    const inp = document.getElementById("us-q");
+    const box = document.getElementById("us-list");
+    if (!inp) return;
+    const wrap = inp.closest(".us-wrap");
+    let items = [];
+    let cur = -1;
+    let timer = null;
+    let seq = 0;
+    const hi = (txt, qv) => {
+      const i = qv ? txt.toLowerCase().indexOf(qv) : -1;
+      return i < 0 ? esc(txt) : esc(txt.slice(0, i)) + "<mark>" + esc(txt.slice(i, i + qv.length)) + "</mark>" + esc(txt.slice(i + qv.length));
+    };
+    const close = () => {
+      box.hidden = true;
+      wrap.setAttribute("aria-expanded", "false");
+    };
+    const go = (it) => (location.hash = "#/owner/" + encodeURIComponent(it.id) + (month ? "?month=" + month : ""));
+    const draw = (qv) => {
+      box.innerHTML = items.length
+        ? items.map((it, i) => `<a role="option" id="us-o${i}" aria-selected="${i === cur}" class="${i === cur ? "on" : ""}" href="#/owner/${encodeURIComponent(it.id)}${month ? "?month=" + month : ""}"><span>${hi(it.name, qv)}</span><small>${ROLE[it.role] || it.role}${it.teams.length ? " · " + esc(it.teams.join(", ")) : ""}</small></a>`).join("")
+        : `<div class="hint" style="padding:10px">ไม่พบ User ที่ตรงกับ “${esc(qv)}”</div>`;
+      box.hidden = false;
+      wrap.setAttribute("aria-expanded", "true");
+      inp.setAttribute("aria-activedescendant", cur >= 0 ? "us-o" + cur : "");
+    };
+    const search = async () => {
+      const qv = inp.value.trim().toLowerCase();
+      const mine = ++seq;
+      try {
+        const r = await api("/owners/search?q=" + encodeURIComponent(qv));
+        if (mine !== seq) return;
+        items = r.items;
+        cur = items.length ? 0 : -1;
+        draw(qv);
+      } catch (e) {
+        toast(e.message, 5000);
+      }
+    };
+    inp.oninput = () => {
+      clearTimeout(timer);
+      timer = setTimeout(search, 180);
+    };
+    inp.onfocus = () => !box.innerHTML && search();
+    inp.onkeydown = (e) => {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        if (box.hidden || !items.length) return;
+        e.preventDefault();
+        cur = (cur + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+        draw(inp.value.trim().toLowerCase());
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        if (items[cur]) go(items[cur]);
+      } else if (e.key === "Escape") close();
+    };
+    document.addEventListener("click", (e) => !wrap.contains(e.target) && close());
+  }
+
   async function viewOwner(id, params = {}) {
     setNav("owner");
     if (!id) {
@@ -1310,8 +1371,8 @@ ${actsHtml(data.activities)}</section>`}
 <section class="card owner-head" style="flex-direction:row">
 <div style="display:flex;align-items:center;gap:16px">${avHtml({ id: o.user ? o.user.id : 0, name: o.owner, avatar: o.user && o.user.avatar }, "lg")}
 <div><h1 style="font-size:24px">${esc(o.owner)}</h1><div class="muted" style="font-size:14px">${esc(o.email || "-")} · ${esc(o.sources.join(", "))}</div></div></div>
-<div class="actions"><label class="f" style="flex:0 1 240px;flex-direction:row;align-items:center;gap:8px">เปลี่ยน User
-<select id="pick">${o.owners.map((x) => `<option value="${esc(x.id)}" ${x.id === o.id ? "selected" : ""}>${esc(x.owner || x.id)}</option>`).join("")}</select></label>
+<div class="actions"><div class="us-wrap" role="combobox" aria-expanded="false" aria-haspopup="listbox"><svg class="us-ic" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M11 11l3.5 3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+<input id="us-q" type="search" placeholder="ค้นหา User ด้วยชื่อหรือ email" aria-label="ค้นหา User" autocomplete="off" aria-controls="us-list"><div class="us-list" id="us-list" role="listbox" hidden></div></div>
 <span class="seg2" role="group" aria-label="เดือน">${o.months.map((ym) => `<button type="button" data-month="${ym}" aria-pressed="${ym === M.ym}">${esc(mLabel(ym))}</button>`).join("")}</span>
 <a class="btn primary" href="#/owner/${encodeURIComponent(o.id)}/meeting">มุมมองประชุม</a>
 ${lvl("export") === "all" ? `<a class="btn" href="api/export?${qs({ from: daysAgo(29), to: daysAgo(0), owner: o.id })}">Export เคสของ User นี้</a>` : ""}</div>
@@ -1340,7 +1401,7 @@ ${extTable(o.extensions || [], `${esc(o.owner)} · การขอขยาย�
 ${o.changes.length && lvl("audit_view") !== "none" ? `<section class="card"><h2>การแก้ไขในเคสของ User นี้</h2>${changeRows(o.changes)}</section>` : ""}
 <section class="card"><div class="title"><h2>ปิดแล้วใน ${esc(mLabel(M.ym))}</h2><span>${closed.length} เคส</span></div>${closed.length ? caseTable(closed, { showOwner: false }) : `<div class="empty">ไม่มีเคสที่ปิดในเดือนนี้</div>`}</section>`;
     document.querySelectorAll("[data-month]").forEach((b) => (b.onclick = () => (location.hash = `#/owner/${encodeURIComponent(o.id)}?month=${b.dataset.month}`)));
-    document.getElementById("pick").onchange = (e) => (location.hash = "#/owner/" + encodeURIComponent(e.target.value) + (params.month ? "?month=" + params.month : ""));
+    bindUserSearch(params.month);
     bindRowLinks();
   }
 
@@ -2108,6 +2169,7 @@ ${(() => {
 ${newSites.length ? `<div class="banner warn">มีรายการที่ผู้ใช้เพิ่มใหม่ ${newSites.length} รายการ รอตรวจ (มีป้าย “ใหม่”) กด “แก้” เพื่อยืนยัน แก้ชื่อ หรือรวมกับรายการเดิม</div>` : ""}
 <section class="card" id="tn-card"><div class="title"><h2>แจ้งเตือนผ่าน Microsoft Teams</h2><span>แต่ละทีมส่งเข้าช่อง Teams ของตัวเอง</span></div><div id="tn-body">กำลังโหลด…</div></section>
 <section class="card" id="team-card"><div class="title"><h2>ทีม</h2><span>เพิ่ม เปลี่ยนชื่อ และเรียงลำดับทีม</span></div><div id="team-body">กำลังโหลด…</div></section>
+<section class="card" id="kpf-card"><div class="title"><h2>เกณฑ์ KPI ราย ทีม</h2><span>เลือกชุดเกณฑ์ของแต่ละทีม และน้ำหนักคะแนน</span></div><div id="kpf-body">กำลังโหลด…</div></section>
 <section class="card" id="dept-card"><div class="title"><h2>หน่วยงาน</h2><span>รายการให้ผู้ใช้เลือกในบัญชีของฉัน</span></div><div id="dept-body">กำลังโหลด…</div></section>
 <section class="card" id="lb-card"><div class="title"><h2>อันดับ KPI</h2><span>กำลังโหลด…</span></div></section>
 <section class="card" id="hol-card"><div class="title"><h2>วันหยุดบริษัท</h2><span>กำลังโหลด…</span></div></section>
@@ -2185,6 +2247,7 @@ ${s.annualReports.map((a) => `<tr><td style="font-weight:600">${a.year + 543} ($
     bindDepartments();
     bindTeamsNotify();
     bindTeamAdmin();
+    bindKpiProfiles();
     document.getElementById("ae-save").onclick = async () => {
       const ccTypes = [...document.querySelectorAll("input[name=cct]:checked")].map((x) => x.value);
       try {
@@ -3081,6 +3144,57 @@ ${d.outbox.map((o) => `<tr><td>${fdt(o.created_at)}</td><td class="mono">${esc(o
     return `${full ? TH_FULL[m - 1] : TH_MONTHS[m - 1]} ${y + 543}`;
   };
   const kpiColor = (v, max) => (v == null ? "#9AA3AF" : v / max >= 0.8 ? "#1C6B45" : v / max >= 0.6 ? "#1764D8" : v / max >= 0.4 ? "#B07800" : "#9A1B30");
+  /** KPI page of a person in an internal service team (scored on service requests). */
+  function renderServiceKpi({ r, sel, owners, month, head, teamCards, teamName, params }) {
+    const m = sel.metrics;
+    const W = Object.fromEntries(sel.partDefs.map(([k, , w]) => [k, w]));
+    const bars = sel.partDefs
+      .filter(([, , w]) => w > 0)
+      .map(([k, label, max], i) => {
+        const v = sel.parts[k];
+        return `<div class="kp-bar"><span>${i + 1}. ${esc(label)} (${max})</span><div class="t"><div style="width:${v == null ? 0 : Math.min(100, (v / max) * 100)}%;background:${kpiColor(v, max)}"></div></div><b>${v == null ? "-" : Math.round(v)} / ${max}</b></div>`;
+      })
+      .join("");
+    const stat = (k, v) => `<div><div class="k">${k}</div><div class="v">${v}</div></div>`;
+    $app.innerHTML = `${head}${teamCards}
+${sel.insufficient ? `<div class="banner warn">${esc(sel.name)} ทำคำขอบริการเสร็จในเดือนนี้ ${m.srDone} งาน น้อยกว่า 3 งาน คะแนนจึงยังไม่ให้เกรด ใช้ดูแนวโน้มเท่านั้น</div>` : ""}
+<div class="kp-g3">
+<section class="card"><h2>คะแนนรวม</h2>
+<div><span class="kp-score">${sel.score}</span>${sel.grade ? `<span class="kp-grade">${sel.grade}</span>` : `<span class="kp-grade na">ข้อมูลไม่พอ</span>`}</div>
+<p class="muted" style="margin:6px 0 0">จาก 100 (+ โบนัส 5) · ชุดเกณฑ์ งานบริการภายใน${r.team.avgScore != null ? ` · ค่าเฉลี่ยทีม ${esc(teamName)} ${r.team.avgScore}` : ""}</p>
+<div class="kp-trend" id="kp-trend"><div class="hint">กำลังโหลดแนวโน้ม…</div></div></section>
+<section class="card"><h2>คะแนนแยกตามเกณฑ์</h2>${bars}
+<div class="kp-bar"><span>+ โบนัส ความพอใจของผู้ขอ</span><div class="t"><div style="width:${((sel.parts.csat || 0) / 5) * 100}%;background:#C2410C"></div></div><b>+${sel.parts.csat || 0}</b></div>
+<p class="hint" style="margin:6px 0 0">รวม ${Math.round(sel.base)} + โบนัส ${sel.parts.csat || 0}${sel.adjust ? ` ${sel.adjust.points > 0 ? "+" : ""}${sel.adjust.points} (ปรับโดย ${esc(sel.adjust.by || "-")}: ${esc(sel.adjust.reason)})` : ""} = ${sel.score}</p></section>
+<section class="card"><h2>ตัวเลขของเดือน</h2><div class="stat2" style="grid-template-columns:1fr 1fr">
+${stat("คำขอที่ทำเสร็จ", `${m.srDone} <span class="muted" style="font-size:14px">(ค่ากลางทีม ${m.teamMedianDone})</span>`)}
+${stat("ทันกำหนด", m.srOnTimePct == null ? "-" : `${m.srOnTime} <span class="muted" style="font-size:14px">(${m.srOnTimePct}%)</span>`)}
+${stat("เสร็จหลังเลื่อน Target", m.srAfterExt)}
+${stat("เสร็จช้ากว่ากำหนด", `<span class="${m.srLate ? "t-over" : ""}">${m.srLate}</span>`)}
+${stat("ค้างอยู่ตอนนี้", `${m.srOpen}${m.srOverdueNow ? ` <span class="t-over" style="font-size:14px">(เลย Target ${m.srOverdueNow})</span>` : ""}`)}
+${stat("คะแนนจากผู้ขอ", m.ratingCount ? `${m.ratingAvg}/5 · ${m.ratingCount} งาน` : "-")}</div></section></div>
+${Object.keys(sel.types).length ? `<section class="card"><h2>ประเภทงานที่ทำ</h2><div>${Object.entries(sel.types).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<span class="kp-tag">${esc(k)} · ${v}</span>`).join("")}</div></section>` : ""}
+<section class="card"><h2>สรุปการทำงาน</h2><div class="kp-ai">${esc(sel.summary || "-").replace(/\n/g, "<br>")}</div></section>
+${r.canAdjust ? `<section class="card noprint"><h2>ปรับคะแนนโดย Manager</h2><p class="hint" style="margin:0">ใช้กรณีที่ข้อมูลในระบบไม่สะท้อนงานจริง · บันทึกในประวัติการใช้งาน</p>
+<div class="formgrid" style="align-items:end"><label class="f">คะแนน (−10 ถึง +10)<input type="number" id="kp-pts" min="-10" max="10" value="${sel.adjust ? sel.adjust.points : 0}"></label>
+<label class="f" style="grid-column:span 2">เหตุผล<input id="kp-why" value="${esc(sel.adjust ? sel.adjust.reason : "")}" placeholder="เช่น งาน POC ใหญ่ 1 งานใช้เวลาทั้งเดือน"></label>
+<div class="actions"><button class="btn primary" type="button" id="kp-save">บันทึก</button></div></div></section>` : ""}
+${r.canAll ? `<section class="card"><div class="title"><h2>เทียบในทีม ${esc(teamName)} · ${ymLabel(month)}</h2><span>คลิกชื่อเพื่อดูรายละเอียด</span></div>
+<div class="tablewrap"><table style="min-width:760px"><thead><tr><th>User</th><th class="n">คะแนน</th><th class="n">ทำเสร็จ</th><th class="n">ทันกำหนด</th><th class="n">ช้า</th><th class="n">ค้างอยู่</th><th class="n">คะแนนผู้ขอ</th></tr></thead><tbody>
+${owners.map((o) => {
+  const x = o.metrics;
+  return o.profile === "service"
+    ? `<tr class="click" data-href="#/kpi?${qs({ month, team: params.team, owner: o.id })}"><td style="font-weight:600">${esc(o.name)}</td><td class="n" style="font-weight:700">${o.score} ${o.grade || `<span class="muted" style="font-weight:400">ข้อมูลไม่พอ</span>`}</td><td class="n">${x.srDone}</td><td class="n">${x.srOnTimePct == null ? "-" : x.srOnTimePct + "%"}</td><td class="n">${x.srLate}</td><td class="n">${x.srOpen}</td><td class="n">${x.ratingCount ? x.ratingAvg + "/5" : "-"}</td></tr>`
+    : `<tr class="click" data-href="#/kpi?${qs({ month, team: params.team, owner: o.id })}"><td style="font-weight:600">${esc(o.name)} <span class="muted" style="font-weight:400;font-size:12px">เกณฑ์ Support</span></td><td class="n" style="font-weight:700">${o.score} ${o.grade || ""}</td><td class="n" colspan="5"><span class="muted">ดูแล ${o.handled} เคส · ปิด ${x.closed}</span></td></tr>`;
+}).join("")}</tbody></table></div></section>` : ""}
+<section class="card noprint"><details><summary style="cursor:pointer;font-weight:600">เกณฑ์การให้คะแนน (งานบริการภายใน)</summary>
+<div class="tablewrap" style="margin-top:10px"><table><thead><tr><th>เกณฑ์</th><th class="n">คะแนน</th><th>วิธีคิด</th></tr></thead><tbody>
+<tr><td>1. ปริมาณงาน</td><td class="n">${W.volume}</td><td>จำนวนคำขอบริการที่ทำเสร็จในเดือน (ไม่นับคำขอซ้ำ) เทียบกับค่ากลางของทีม ทุกงานนับ 1 เท่ากัน · เท่าค่ากลางได้ประมาณ 3 ใน 4 · มากกว่าค่ากลาง 1.7 เท่าได้เต็ม</td></tr>
+<tr><td>2. ทำได้ตามเวลาที่กำหนด</td><td class="n">${W.ontime}</td><td>เสร็จภายใน Target แรกที่อนุมัติ = เต็ม · เสร็จหลังขอเลื่อนแต่ทัน Target ใหม่ = ครึ่ง · ช้ากว่านั้น = 0</td></tr>
+<tr><td>+ โบนัส ความพอใจของผู้ขอ</td><td class="n">5</td><td>คะแนน 1–5 ที่ผู้ขอให้ตอนยืนยันรับงาน ตั้งแต่ 2 งานในเดือน: เฉลี่ย ≥4.5 ได้ 5 · ≥4 ได้ 3 · ≥3.5 ได้ 1 (ไม่หักคะแนน)</td></tr>
+</tbody></table></div><p class="hint">เกรด A ≥85 · A- 80–84 · B+ 75–79 · B 70–74 · C 60–69 · D ต่ำกว่า 60 · ทำเสร็จน้อยกว่า 3 งานยังไม่ให้เกรด · เทียบคะแนนกันได้เฉพาะในทีมเดียวกัน</p></details></section>`;
+  }
+
   async function viewKpi(params) {
     setNav("kpi");
     const months = [];
@@ -3092,24 +3206,45 @@ ${d.outbox.map((o) => `<tr><td>${fdt(o.created_at)}</td><td class="mono">${esc(o
     }
     const month = params.month || months[1];
     const r = await api("/kpi?" + qs({ month, team: params.team }));
+    // A team without KPI (Sales): its own response page.
+    if (r.teamProfile === "response" || (!r.canAll && r.myProfile === "response")) return location.replace("#/response?" + qs({ month, team: r.canAll ? r.teamCode : "" }));
     const owners = r.owners;
     const teamName = r.teamCode ? (r.teams.find((t) => t.code === r.teamCode) || {}).label || r.teamCode : "ทุกทีม";
     const sel = owners.find((o) => String(o.id) === String(params.owner)) || owners.find((o) => o.id === ME.user.id) || owners[0];
     const current = month === months[0];
     const head = `<div class="banner warn kp-trial"><strong>ทดลองใช้</strong> · เกณฑ์และคะแนนอยู่ระหว่างทดลอง ยังไม่ใช้ประเมินผลงานจริง ถ้าเห็นตัวเลขที่ไม่ตรงกับงานจริง แจ้ง Admin เพื่อปรับเกณฑ์</div>
-<div class="head"><div><h1>KPI ราย User · ${ymLabel(month, true)} <span class="kp-beta">ทดลองใช้</span></h1>${r.canAll || r.teams.length ? `<p class="kp-team">ทีม ${esc(teamName)}${r.canAll ? ` · ${r.team.members} คนที่มีเคสเดือนนี้` : ""}</p>` : ""}<p>คำนวณจากข้อมูลเคสในระบบ${current ? " · <strong>เดือนนี้ยังไม่จบ ตัวเลขยังเปลี่ยนได้</strong>" : ""} · Manager ปรับคะแนนได้ ±10 พร้อมเหตุผล</p></div>
+<div class="head"><div><h1>KPI ราย User · ${ymLabel(month, true)} <span class="kp-beta">ทดลองใช้</span></h1>${r.canAll || r.teams.length ? `<p class="kp-team">ทีม ${esc(teamName)}${r.canAll ? ` · ${r.team.members} คนที่มีงานเดือนนี้` : ""}</p>` : ""}<p>คำนวณจากข้อมูลเคสในระบบ${current ? " · <strong>เดือนนี้ยังไม่จบ ตัวเลขยังเปลี่ยนได้</strong>" : ""} · Manager ปรับคะแนนได้ ±10 พร้อมเหตุผล</p></div>
 <div class="actions" style="flex-direction:row;align-items:center">
 ${r.canAll && (r.teams.length > 1 || r.allTeams) ? `<select id="kp-team" aria-label="ทีม" style="width:auto">${r.teams.map((t) => `<option value="${esc(t.code)}" ${t.code === r.teamCode ? "selected" : ""}>${esc(t.label)}</option>`).join("")}${r.allTeams ? `<option value="all" ${!r.teamCode ? "selected" : ""}>ทุกทีม</option>` : ""}</select>` : ""}
 ${r.canAll && owners.length ? `<select id="kp-owner" aria-label="User" style="width:auto">${owners.map((o) => `<option value="${o.id}" ${sel && o.id === sel.id ? "selected" : ""}>${esc(o.name)}</option>`).join("")}</select>` : ""}
 <select id="kp-month" aria-label="เดือน" style="width:auto">${months.map((m) => `<option value="${m}" ${m === month ? "selected" : ""}>${ymLabel(m)}</option>`).join("")}</select>
 <button class="btn" type="button" onclick="window.print()">พิมพ์ / PDF</button></div></div>`;
+    const GCOL = { A: "#2E9E6A", B: "#7DB9E8", C: "#D9822B", D: "#E5484D" };
+    const teamCards = r.teamSummary && r.teamSummary.length > 1
+      ? `<section class="card noprint"><div class="title"><h2>KPI ราย ทีม · ${ymLabel(month)}</h2><span>${r.allTeams ? "ทุกทีม" : "ทีมของคุณ"} · กดการ์ดเพื่อดูคนในทีม</span></div><div class="kt-grid">${r.teamSummary
+          .map((t) => {
+            const g = Object.entries(t.grades).filter(([, n]) => n);
+            return `<a class="kt ${t.code === r.teamCode ? "on" : ""}" href="#/kpi?${qs({ month, team: t.code })}"><h4><span>${esc(t.label)}</span><span class="muted" style="font-weight:400">${t.people} คน</span></h4>
+<div class="kt-sc">${t.avgScore ?? "-"}<span class="muted"> เฉลี่ย${t.scored < t.people ? ` (${t.scored} คนมีเกรด)` : ""}</span></div>
+<div class="kt-row"><span>${t.profile === "service" ? "ทันกำหนด" : "ทัน SLA"}</span><b>${t.slaPct == null ? "-" : t.slaPct + "%"}</b></div>
+<div class="kt-gd">${g.map(([k, n]) => `<i style="flex:${n};background:${GCOL[k]}" title="${k} ${n} คน"></i>`).join("") || "<i style=\"flex:1;background:var(--line)\"></i>"}</div>
+<div class="kt-row"><span>${["A", "B", "C", "D"].map((k) => `${k} ${t.grades[k] || 0}`).join(" · ")}</span></div></a>`;
+          })
+          .join("")}</div></section>`
+      : "";
     if (!sel) {
-      $app.innerHTML = head + `<div class="empty">ไม่มีเคสในเดือนนี้</div>`;
+      $app.innerHTML = head + teamCards + `<div class="empty">ไม่มีงานในเดือนนี้</div>`;
       bindKpiNav();
       return;
     }
+    if (sel.profile === "service") renderServiceKpi({ r, sel, owners, month, head, teamCards, teamName, params });
+    else renderSupportKpi();
+    bindKpiAfter();
+    return;
+    function renderSupportKpi() {
     const m = sel.metrics;
-    const bars = KPI_PARTS.map(([k, label, max]) => {
+    const W = Object.fromEntries((sel.partDefs || KPI_PARTS).map(([k, , w]) => [k, w]));
+    const bars = (sel.partDefs ? sel.partDefs.map(([k, l, w], i) => [k, `${i + 1}. ${l}`, w]) : KPI_PARTS).filter(([, , max]) => max > 0).map(([k, label, max]) => {
       const v = sel.parts[k];
       return `<div class="kp-bar"><span>${label} (${max})</span><div class="t"><div style="width:${v == null ? 0 : Math.min(100, (v / max) * 100)}%;background:${kpiColor(v, max)}"></div></div><b>${v == null ? "-" : Math.round(v)} / ${max}</b></div>`;
     }).join("");
@@ -3120,7 +3255,7 @@ ${r.canAll && owners.length ? `<select id="kp-owner" aria-label="User" style="wi
     };
     const tags = (obj, cls = "") => Object.entries(obj).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<span class="kp-tag ${cls}">${esc(k)} · ${v}</span>`).join("") || `<span class="hint">-</span>`;
     const stat = (k, v) => `<div><div class="k">${k}</div><div class="v">${v}</div></div>`;
-    $app.innerHTML = `${head}
+    $app.innerHTML = `${head}${teamCards}
 ${sel.insufficient ? `<div class="banner warn">${esc(sel.name)} ปิดเคสในเดือนนี้ ${m.closed} เคส น้อยกว่า 3 เคส คะแนนจึงยังไม่ให้เกรด ใช้ดูแนวโน้มเท่านั้น</div>` : ""}
 <div class="kp-g3">
 <section class="card"><h2>คะแนนรวม</h2>
@@ -3173,12 +3308,12 @@ ${owners.map((o) => `<tr class="click" data-href="#/kpi?${qs({ month, team: para
 
 <section class="card noprint"><details><summary style="cursor:pointer;font-weight:600">เกณฑ์การให้คะแนน</summary>
 <div class="tablewrap" style="margin-top:10px"><table><thead><tr><th>เกณฑ์</th><th class="n">คะแนน</th><th>วิธีคิด</th></tr></thead><tbody>
-<tr><td>1. ปิดทัน SLA</td><td class="n">30</td><td>% เคสที่ปิดทัน Due เดิม (ก่อนขยาย) · ปิดทันเวลาที่ขยายได้ครึ่งหนึ่ง · Critical นับ 2 เท่า</td></tr>
-<tr><td>2. ความเร็วตอบสนอง</td><td class="n">15</td><td>Activity แรกหลังเปิดเคส ≤4 ชม. 8 · ≤8 ชม. 6 · ≤24 ชม. 4 · ≤48 ชม. 2 และอัปเดตเคสที่เปิดอยู่ทุก ≤2 วัน 7 · ≤3 วัน 5 · ≤5 วัน 3</td></tr>
-<tr><td>3. แต้มงาน (ปริมาณ × ความยาก)</td><td class="n">20</td><td>แต้มต่อเคสที่ปิด = Severity (Critical 3, High 2, Medium 1.5, Deploy Product Patch 1.5, Low 1, Deploy MS Patch 1, ขอข้อมูล 0.5) × (1 + ส่ง NICE/มี CS Number 0.5 + Onsite 0.3 + Meeting Onsite 0.4 / Meeting Online 0.2 ต่อครั้ง นับ 2 ครั้งที่มากสุด ไม่เกิน 0.6 + Deploy Product Patch 0.3 / Deploy MS Patch 0.15 (ครั้งเดียวต่อเคส) + เปิดนานเกิน 7 วัน 0.2) × ความยากที่ Manager ปรับ (0.8–1.5) · เทียบค่ากลางของทีมเดียวกันแบบรากที่สอง: 20 × √(แต้ม ÷ ค่ากลาง) ÷ 1.3 สูงสุด 20 · เคสมากขึ้น 4 เท่าได้คะแนนเพิ่มประมาณ 2 เท่า</td></tr>
-<tr><td>4. ความหลากหลาย / Skill</td><td class="n">15</td><td>ความกระจายของประเภทงาน Product และลูกค้า (0–1) × 10.5 + Product หรือประเภทงานที่ทำครั้งแรก 1.5 ต่อรายการ (สูงสุด 4.5) · Meeting กับลูกค้านับเป็นประเภทงานหนึ่ง Deploy Patch นับเป็นงาน Upgrade / Patch และครั้งแรกของทั้งสองอย่างนับเป็น Skill ใหม่ · คนที่ตั้งเป็น "ดูแลลูกค้าประจำ" ไม่นับความหลากหลายของลูกค้า</td></tr>
-<tr><td>5. งานค้างและการขยายเวลา</td><td class="n">10</td><td>เริ่ม 10 · หัก 2 ต่อเคสเกิน Due สิ้นเดือน · หัก 1 ต่อการขยายที่อนุมัติ (สูงสุด 3)</td></tr>
-<tr><td>6. คุณภาพการบันทึก</td><td class="n">10</td><td>เคสที่ปิดมีบันทึกสุดท้าย ≥20 ตัวอักษร 5 · Activity ที่มีเนื้อหาเฉลี่ย ≥3 ต่อเคส 5</td></tr>
+<tr><td>1. ปิดทัน SLA</td><td class="n">${W.sla}</td><td>% เคสที่ปิดทัน Due เดิม (ก่อนขยาย) · ปิดทันเวลาที่ขยายได้ครึ่งหนึ่ง · Critical นับ 2 เท่า</td></tr>
+<tr><td>2. ความเร็วตอบสนอง</td><td class="n">${W.resp}</td><td>Activity แรกหลังเปิดเคส ≤4 ชม. 8 · ≤8 ชม. 6 · ≤24 ชม. 4 · ≤48 ชม. 2 และอัปเดตเคสที่เปิดอยู่ทุก ≤2 วัน 7 · ≤3 วัน 5 · ≤5 วัน 3</td></tr>
+<tr><td>3. แต้มงาน (ปริมาณ × ความยาก)</td><td class="n">${W.work}</td><td>แต้มต่อเคสที่ปิด = Severity (Critical 3, High 2, Medium 1.5, Deploy Product Patch 1.5, Low 1, Deploy MS Patch 1, ขอข้อมูล 0.5) × (1 + ส่ง NICE/มี CS Number 0.5 + Onsite 0.3 + Meeting Onsite 0.4 / Meeting Online 0.2 ต่อครั้ง นับ 2 ครั้งที่มากสุด ไม่เกิน 0.6 + Deploy Product Patch 0.3 / Deploy MS Patch 0.15 (ครั้งเดียวต่อเคส) + เปิดนานเกิน 7 วัน 0.2) × ความยากที่ Manager ปรับ (0.8–1.5) · เทียบค่ากลางของทีมเดียวกันแบบรากที่สอง: 20 × √(แต้ม ÷ ค่ากลาง) ÷ 1.3 สูงสุด 20 · เคสมากขึ้น 4 เท่าได้คะแนนเพิ่มประมาณ 2 เท่า</td></tr>
+<tr><td>4. ความหลากหลาย / Skill</td><td class="n">${W.div}</td><td>ความกระจายของประเภทงาน Product และลูกค้า (0–1) × 10.5 + Product หรือประเภทงานที่ทำครั้งแรก 1.5 ต่อรายการ (สูงสุด 4.5) · Meeting กับลูกค้านับเป็นประเภทงานหนึ่ง Deploy Patch นับเป็นงาน Upgrade / Patch และครั้งแรกของทั้งสองอย่างนับเป็น Skill ใหม่ · คนที่ตั้งเป็น "ดูแลลูกค้าประจำ" ไม่นับความหลากหลายของลูกค้า</td></tr>
+<tr><td>5. งานค้างและการขยายเวลา</td><td class="n">${W.back}</td><td>เริ่ม 10 · หัก 2 ต่อเคสเกิน Due สิ้นเดือน · หัก 1 ต่อการขยายที่อนุมัติ (สูงสุด 3)</td></tr>
+<tr><td>6. คุณภาพการบันทึก</td><td class="n">${W.doc}</td><td>เคสที่ปิดมีบันทึกสุดท้าย ≥20 ตัวอักษร 5 · Activity ที่มีเนื้อหาเฉลี่ย ≥3 ต่อเคส 5</td></tr>
 <tr><td>+ โบนัส</td><td class="n">5</td><td>รับเคสจากลูกค้าภายใน 1 ชม. ทุก 2 เคสได้ 1 (สูงสุด 5)</td></tr>
 <tr><td>+ โบนัส ความพึงพอใจลูกค้า</td><td class="n">5</td><td>คะแนนแบบสอบถามหลังปิดเคสที่ลูกค้าตอบในเดือนนั้น ต้องมีอย่างน้อย 2 คำตอบ · เฉลี่ย ≥4.5 ได้ 5 · ≥4 ได้ 3 · ≥3.5 ได้ 1 · ให้เพิ่มอย่างเดียว ไม่หักคะแนน (คะแนน 1–2 แจ้ง Manager ให้ติดตามแทน)</td></tr></tbody></table></div>
 <p class="hint">เกรด A ≥85 · A- 80–84 · B+ 75–79 · B 70–74 · C 60–69 · D ต่ำกว่า 60 · ปิดเคสน้อยกว่า 3 เคสไม่ให้เกรด</p></details></section>
@@ -3187,6 +3322,8 @@ ${r.canEditCategories ? `<section class="card noprint"><details><summary style="
 <p class="hint">1 บรรทัดต่อ 1 ประเภท รูปแบบ <span class="mono">ชื่อประเภท: คำ1, คำ2, คำ3</span> · ระบบเลือกประเภทที่เจอคำมากที่สุดในหัวข้อเคสและ Activity · ไม่เจอเลย = อื่นๆ</p>
 <textarea id="kp-cats" rows="12" style="width:100%;font-family:var(--mono, monospace);font-size:13px">${esc(r.categories.map((c) => `${c.name}: ${c.keywords}`).join("\n"))}</textarea>
 <div class="actions"><button class="btn primary" type="button" id="kp-cats-save">บันทึกประเภทงาน</button></div></details></section>` : ""}`;
+    }
+    function bindKpiAfter() {
     bindKpiNav();
     bindRowLinks();
     const sv = document.getElementById("kp-save");
@@ -3194,7 +3331,7 @@ ${r.canEditCategories ? `<section class="card noprint"><details><summary style="
       try {
         await post("/kpi/adjust", { month, userId: sel.id, points: Number(document.getElementById("kp-pts").value), reason: document.getElementById("kp-why").value }, "PUT");
         toast("บันทึกการปรับคะแนนแล้ว");
-        viewKpi({ month, owner: sel.id });
+        viewKpi({ month, team: params.team, owner: sel.id });
       } catch (e) {
         toast(e.message, 6000);
       }
@@ -3208,7 +3345,7 @@ ${r.canEditCategories ? `<section class="card noprint"><details><summary style="
       try {
         await post("/kpi/categories", { categories }, "PUT");
         toast("บันทึกประเภทงานแล้ว คำนวณใหม่ทันที");
-        viewKpi({ month, owner: sel.id });
+        viewKpi({ month, team: params.team, owner: sel.id });
       } catch (e) {
         toast(e.message, 6000);
       }
@@ -3218,6 +3355,7 @@ ${r.canEditCategories ? `<section class="card noprint"><details><summary style="
       if (!el) return;
       el.innerHTML = trend.map((t) => `<div class="${t.month === month ? "now" : ""}"><span class="c" style="height:${t.score == null ? 2 : Math.max(4, t.score)}%;${t.insufficient ? "opacity:.45" : ""}"></span>${ymLabel(t.month).split(" ")[0]}<br>${t.score == null ? "-" : t.score}</div>`).join("");
     }).catch(() => {});
+    }
   }
   function bindKpiNav() {
     const o = document.getElementById("kp-owner");
@@ -3227,6 +3365,128 @@ ${r.canEditCategories ? `<section class="card noprint"><details><summary style="
     if (o) o.onchange = () => go(true);
     if (mo) mo.onchange = () => go(true);
     if (tm) tm.onchange = () => go(false);
+  }
+
+  // ------------------------------------------------------------ response score (teams without KPI, e.g. Sales)
+  async function viewResponse(params) {
+    setNav("response");
+    const months = [];
+    for (let i = 0; i < 12; i++) {
+      const t = new Date();
+      t.setDate(1);
+      t.setMonth(t.getMonth() - i);
+      months.push(`${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}`);
+    }
+    const month = params.month || months[0];
+    const r = await api("/kpi/response?" + qs({ month, user: params.user }));
+    const s = r.sel;
+    const head = `<div class="head"><div><h1>การตอบกลับ · ${ymLabel(month, true)}</h1><p class="kp-team">${r.teams.length ? "ทีม " + esc(r.teams.map((t) => t.label).join(", ")) + " · " : ""}ไม่คิด KPI · ใช้ดูว่าคำขอบริการไม่ติดอยู่ที่ฝั่งผู้ขอ</p></div>
+<div class="actions" style="flex-direction:row;align-items:center">
+${r.canAll && r.people.length ? `<select id="rs-user" aria-label="ผู้ใช้" style="width:auto">${r.people.map((p) => `<option value="${p.id}" ${s && p.id === s.id ? "selected" : ""}>${esc(p.name)}${p.score != null ? ` (${p.score})` : ""}</option>`).join("")}</select>` : ""}
+<select id="rs-month" aria-label="เดือน" style="width:auto">${months.map((m) => `<option value="${m}" ${m === month ? "selected" : ""}>${ymLabel(m)}</option>`).join("")}</select></div></div>`;
+    const bind = () => {
+      const u = document.getElementById("rs-user");
+      const mo = document.getElementById("rs-month");
+      const go = () => (location.hash = "#/response?" + qs({ month: mo.value, user: u ? u.value : "" }));
+      if (u) u.onchange = go;
+      mo.onchange = go;
+      bindRowLinks();
+    };
+    if (!s) {
+      $app.innerHTML = head + `<div class="empty">ยังไม่มีคนในทีมที่วัดเฉพาะการตอบกลับ</div>`;
+      return bind();
+    }
+    const st = s.stats;
+    const col = (v) => (v == null ? "var(--muted)" : v >= 80 ? "#1F7A4D" : v >= 60 ? "#B26B00" : "var(--over-fg)");
+    const stat = (k, v) => `<div><div class="k">${k}</div><div class="v">${v}</div></div>`;
+    $app.innerHTML = `${head}
+<div class="rs-grid"><section class="card"><h2>คะแนนการตอบกลับ${r.canAll ? ` · ${esc(s.name)}` : ""}</h2>
+<div class="rs-big" style="color:${col(s.score)}">${s.score ?? "-"}</div>
+<p class="muted" style="margin:6px 0 12px">${s.score == null ? "ไม่มีคำขอบริการในเดือนนี้" : "จาก 100"}${r.teamAvg != null ? ` · ทีมเฉลี่ย ${r.teamAvg}` : ""}</p>
+${r.partDefs.filter(([, , w]) => w > 0).map(([k, l, w]) => `<div class="kp-bar"><span>${esc(l)} (${w})</span><div class="t"><div style="width:${Math.min(100, ((s.parts[k] || 0) / w) * 100)}%;background:${kpiColor(s.parts[k], w)}"></div></div><b>${Math.round(s.parts[k] || 0)} / ${w}</b></div>`).join("")}
+<div class="stat2" style="grid-template-columns:1fr 1fr;margin-top:12px">
+${stat("ส่งคำขอ", st.sent)}
+${stat("ตอบเมื่อทีมขอข้อมูล (มัธยฐาน)", st.medianReplyHrs == null ? "-" : `${st.medianReplyHrs} ชม.`)}
+${stat("ทีมขอข้อมูลเพิ่ม", `${st.answered} / ${st.asked} ตอบแล้ว`)}
+${stat("ยืนยันรับงาน", st.decided ? `${st.confirmed} / ${st.decided}` : "-")}</div></section>
+<section class="card"><div class="title"><h2>คำขอที่รอ${r.canAll && s.id !== ME.user.id ? esc(s.name) : "คุณ"}อยู่</h2><span>ทีมรับงานรอคำตอบ 2 วันทำการขึ้นไป</span></div>
+${s.waiting.length ? `<div class="tablewrap"><table><thead><tr><th>คำขอ</th><th>รออะไร</th><th class="n">รอมาแล้ว</th></tr></thead><tbody>
+${s.waiting.map((w) => `<tr class="click" data-href="#/sr/${w.id}"><td><span class="mono muted">${esc(w.srNo)}</span><br><a href="#/sr/${w.id}" style="font-weight:600">${esc(w.title)}</a></td><td>${esc(w.what)}</td><td class="n"><span class="chip ${w.days >= 3 ? "c-overdue" : "c-r1"}">${w.days} วันทำการ</span></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">ไม่มีคำขอที่รออยู่</div>`}
+<details style="margin-top:14px"><summary style="cursor:pointer;font-weight:600">วิธีคิดคะแนน</summary><ul style="margin:8px 0 0;padding-left:18px;font-size:14px;line-height:1.8">
+<li>ตอบเมื่อทีมขอข้อมูลเพิ่ม: ภายใน 1 วันทำการ เต็ม · 2 วัน 60% · 3 วัน 30% · ช้ากว่านั้นหรือยังไม่ตอบ 0</li>
+<li>ยืนยันรับงานที่เสร็จ: % ของงานที่กดยืนยันภายใน 7 วันหลังทีมปิดงาน</li>
+<li>ไม่มีคำขอค้างรอตัวเอง: หัก 34% ต่อคำขอที่รอคุณเกิน 2 วันทำการ (นับเฉพาะเดือนปัจจุบัน)</li>
+<li>เดือนที่ไม่มีเรื่องให้ตอบ ข้อนั้นได้เต็ม · ไม่มีเกรด และไม่อยู่ในหน้าอันดับ KPI</li></ul></details></section></div>`;
+    bind();
+  }
+
+  // ------------------------------------------------------------ overview by team
+  const monthOpts = (cur, n = 6) => {
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const t = new Date();
+      t.setDate(1);
+      t.setMonth(t.getMonth() - i);
+      const ym = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}`;
+      out.push(`<option value="${ym}" ${ym === cur ? "selected" : ""}>${ymLabel(ym)}</option>`);
+    }
+    return out.join("");
+  };
+  const slaColor = (p) => (p == null ? "var(--line)" : p < 85 ? "var(--over)" : p < 95 ? "#D9822B" : "#2E9E6A");
+  const teamKpis = (t) => `<div class="kpis">
+<div class="kpi"><div class="l">ยังไม่ปิด</div><div class="v">${t.open}</div></div>
+<div class="kpi"><div class="l">เกิน Due</div><div class="v" style="${t.overdue ? "color:var(--over-fg)" : ""}">${t.overdue}</div></div>
+<div class="kpi"><div class="l">ใกล้ Due</div><div class="v">${t.soon}</div></div>
+<div class="kpi"><div class="l">ปิดในเดือน</div><div class="v">${t.closed}</div></div>
+<div class="kpi"><div class="l">ทัน SLA</div><div class="v">${t.slaPct == null ? "-" : t.slaPct + "%"}</div></div>
+<div class="kpi"><div class="l">คำขอบริการค้าง</div><div class="v">${t.srOpen}</div></div></div>`;
+
+  async function viewTeams(params) {
+    setNav("team");
+    const r = await api("/teams/overview?" + qs({ month: params.month }));
+    $app.innerHTML = `<div class="head"><div><h1>ภาพรวม ราย ทีม</h1><p>เทียบงานของแต่ละทีม · ปิดในเดือนและ % ทัน SLA ตามเดือนที่เลือก · ยังไม่ปิด เกิน Due และใกล้ Due คือสถานะตอนนี้ · กดการ์ดเพื่อดูคนในทีม</p></div>
+<div class="actions" style="flex-direction:row"><select id="tm-month" aria-label="เดือน" style="width:auto">${monthOpts(r.month)}</select></div></div>
+${teamKpis(r.total)}
+<div class="tm-grid">${r.teams
+      .map(
+        (t) => `<a class="tm-card" href="#/team/${encodeURIComponent(t.code)}?${qs({ month: params.month })}"><h3><span>${esc(t.label)}</span>${t.overdue ? `<span class="chip c-overdue">เกิน Due ${t.overdue}</span>` : `<span class="chip c-ok">ปกติ</span>`}</h3>
+<div class="tm-nums"><div>ยังไม่ปิด<b>${t.open}</b></div><div>ใกล้ Due<b>${t.soon}</b></div><div>ปิดในเดือน<b>${t.closed}</b></div><div>คำขอค้าง<b>${t.srOpen}</b></div></div>
+<div><div class="tm-foot"><span>ทัน SLA</span><b>${t.slaPct == null ? "-" : t.slaPct + "%"}</b></div><div class="tm-bar"><i style="width:${t.slaPct || 0}%;background:${slaColor(t.slaPct)}"></i></div></div>
+<div class="tm-foot"><span>${t.members} คน${t.members ? ` · งานเฉลี่ย ${(t.open / t.members).toFixed(1)} เคส/คน` : ""}</span><span>${t.topCustomers.length ? "ลูกค้าหลัก: " + esc(t.topCustomers.join(", ")) : ""}</span></div></a>`
+      )
+      .join("") || `<div class="empty">ไม่มีทีม</div>`}</div>`;
+    document.getElementById("tm-month").onchange = (e) => (location.hash = "#/team?" + qs({ month: e.target.value }));
+  }
+
+  async function viewTeam(code, params) {
+    setNav("team");
+    const r = await api(`/teams/overview/${encodeURIComponent(code)}?` + qs({ month: params.month }));
+    const mx = Math.max(1, ...r.members.map((m) => m.open));
+    $app.innerHTML = `<div class="crumb"><a href="#/team?${qs({ month: params.month })}">ภาพรวม ราย ทีม</a> / ${esc(r.team.label)}</div>
+<div class="head"><div><h1>${esc(r.team.label)}</h1><p>${r.members.length} คน · ${ymLabel(r.month, true)} · กดชื่อเพื่อดูหน้า ราย User</p></div>
+<div class="actions" style="flex-direction:row">${r.teams.length > 1 ? `<select id="tm-team" aria-label="ทีม" style="width:auto">${r.teams.map((t) => `<option value="${esc(t.code)}" ${t.code === r.team.code ? "selected" : ""}>${esc(t.label)}</option>`).join("")}</select>` : ""}
+<select id="tm-month" aria-label="เดือน" style="width:auto">${monthOpts(r.month)}</select></div></div>
+${teamKpis(r.total)}
+<section class="card"><div class="title"><h2>คนในทีม</h2><span>เรียงจากงานค้างมากสุด</span></div>
+${r.members.length ? `<div class="tablewrap"><table style="min-width:880px"><thead><tr><th>ชื่อ</th><th>งานค้าง</th><th class="n">เกิน Due</th><th class="n">ใกล้ Due</th><th class="n">ปิดในเดือน</th><th class="n">ทัน SLA</th><th class="n">คำขอค้าง</th><th>ลูกค้าที่ดูแลอยู่</th></tr></thead><tbody>
+${r.members
+  .map(
+    (m) => `<tr class="click" data-href="#/owner/${encodeURIComponent(m.ownerKey)}"><td><a href="#/owner/${encodeURIComponent(m.ownerKey)}" style="font-weight:600">${esc(m.name)}</a> <span class="muted" style="font-size:13px">${ROLE[m.role] || m.role}</span></td>
+<td><div class="tm-load"><b>${m.open}</b><div class="tm-bar"><i style="width:${(m.open / mx) * 100}%;background:${m.open >= mx * 0.8 && m.open >= 5 ? "#D9822B" : "#2E9E6A"}"></i></div></div></td>
+<td class="n">${m.overdue ? `<span class="chip c-overdue">${m.overdue}</span>` : 0}</td><td class="n">${m.soon}</td><td class="n">${m.closed}</td>
+<td class="n" style="${m.slaPct != null && m.slaPct < 85 ? "color:var(--over-fg)" : ""}">${m.slaPct == null ? "-" : m.slaPct + "%"}</td><td class="n">${m.srOpen}</td><td>${esc(m.customers.join(", ") || "-")}</td></tr>`
+  )
+  .join("")}</tbody></table></div>` : `<div class="empty">ยังไม่มีคนในทีมนี้</div>`}</section>
+<section class="card"><div class="title"><h2>เคสที่ต้องดูแลก่อน</h2><span>เกิน Due และใกล้ Due ของทั้งทีม</span></div>
+${r.urgent.length ? `<div class="tablewrap"><table style="min-width:760px"><thead><tr><th>เคส</th><th>ลูกค้า</th><th>งาน</th><th>ผู้ดูแล</th><th>Severity</th><th>สถานะ</th></tr></thead><tbody>
+${r.urgent.map((c) => `<tr class="click" data-href="#/case/${c.id}"><td><a href="#/case/${c.id}">${esc(caseRef(c))}</a></td><td>${esc(c.site)}</td><td>${esc(c.task)}</td><td>${esc(c.owner)}</td><td>${sevChip(c.severity)}</td><td>${chip(c.stage, c.stage === "overdue" && c.daysOverdue ? `เกิน Due ${c.daysOverdue} วัน` : "")}</td></tr>`).join("")}
+</tbody></table></div>` : `<div class="empty">ไม่มีเคสเกินหรือใกล้ Due</div>`}</section>`;
+    bindRowLinks();
+    const tm = document.getElementById("tm-team");
+    const mo = document.getElementById("tm-month");
+    const go = () => (location.hash = `#/team/${encodeURIComponent(tm ? tm.value : r.team.code)}?` + qs({ month: mo.value }));
+    if (tm) tm.onchange = go;
+    mo.onchange = go;
   }
 
   // ------------------------------------------------------------ service requests (internal, SR-…)
@@ -3348,7 +3608,13 @@ ${showAssignee ? `<td>${r.assignee ? esc(r.assignee.name) : "-"}</td>` : ""}
     const isReq = ME.user.role === "requester";
     const scopes = isReq ? [["mine", "คำขอของฉัน"]] : [...(m.canManage || ME.user.role === "observer" ? [["team", "คำขอถึงทีม"]] : []), ["assigned", "ได้รับมอบหมาย"], ["mine", "ที่ฉันขอ"]];
     const scope = scopes.some((x) => x[0] === params.scope) ? params.scope : scopes[0][0];
-    const { items } = await api("/sr?scope=" + scope);
+    const { items: all } = await api("/sr?scope=" + scope);
+    // Team filter: shown when the list holds requests to more than one team.
+    const teamCount = {};
+    all.forEach((r) => (teamCount[r.team] = teamCount[r.team] || { label: r.teamLabel, n: 0 }) && teamCount[r.team].n++);
+    const teamOrder = ME.teams.map((t) => t.key).filter((k) => teamCount[k]).concat(Object.keys(teamCount).filter((k) => !ME.teams.some((t) => t.key === k)));
+    const team = teamCount[params.team] ? params.team : "";
+    const items = team ? all.filter((r) => r.team === team) : all;
     const groups = [
       ["", "ทั้งหมด", () => true],
       ["pending", "รออนุมัติ", (r) => r.status === "pending"],
@@ -3360,11 +3626,12 @@ ${showAssignee ? `<td>${r.assignee ? esc(r.assignee.name) : "-"}</td>` : ""}
     ];
     const g = groups.find((x) => x[0] === (params.status || "")) || groups[0];
     const rows = items.filter(g[2]);
-    const link = (o) => "#/sr?" + qs({ scope, status: params.status || "", ...o });
+    const link = (o) => "#/sr?" + qs({ scope, team, status: params.status || "", ...o });
     $app.innerHTML = `<div class="pagehead"><div><h1>คำขอบริการ</h1><p class="muted" style="margin:0">ขอให้ทีม Engineer ช่วยทำงานภายใน เช่น ข้อมูล รายงาน ตั้งค่า · แยกจากเคสลูกค้า</p></div>
 <a class="btn primary" href="#/sr/new">+ คำขอใหม่</a></div>
 ${m.profileMissing.length ? `<div class="banner warn">กรอกหน่วยงาน ตำแหน่ง และเบอร์โทรของคุณก่อนส่งคำขอแรก <a href="#/profile">กรอกข้อมูล</a></div>` : ""}
 ${scopes.length > 1 ? `<div class="fpills" role="tablist">${scopes.map(([k, l]) => `<a class="fpill ${k === scope ? "on" : ""}" role="tab" aria-selected="${k === scope}" href="#/sr?${qs({ scope: k })}">${l}</a>`).join("")}</div>` : ""}
+${teamOrder.length > 1 ? `<div class="fpills" style="margin-top:8px" aria-label="ทีม"><span class="hint" style="align-self:center;margin-right:2px">ทีม</span><a class="fpill ${team ? "" : "on"}" href="${link({ team: "", status: "" })}">ทุกทีม <b>${all.length}</b></a>${teamOrder.map((k) => `<a class="fpill ${k === team ? "on" : ""}" href="${link({ team: k, status: "" })}">${esc(teamCount[k].label)} <b>${teamCount[k].n}</b></a>`).join("")}</div>` : ""}
 <div class="fpills" style="margin-top:8px">${groups.map(([k, l, f]) => {
       const n = items.filter(f).length;
       return k && !n && k !== (params.status || "") ? "" : `<a class="fpill ${k === (params.status || "") ? "on" : ""}" href="${link({ status: k })}">${l} <b>${n}</b></a>`;
@@ -3528,7 +3795,7 @@ ${fileBox(m)}
 
   const SR_EV = {
     submitted: "ส่งคำขอ", edited: "แก้ไขคำขอ", resubmitted: "แก้ไขและส่งใหม่", info: "ขอข้อมูลเพิ่ม", approved: "อนุมัติ", rejected: "ไม่อนุมัติ", cancelled: "ยกเลิก",
-    update: "ผู้ขอเพิ่มข้อมูล", note: "บันทึกจากทีม", reassigned: "เปลี่ยนผู้รับผิดชอบ", ext_asked: "ขอเลื่อน Target", ext_approved: "อนุมัติเลื่อน Target", ext_rejected: "ไม่อนุมัติการเลื่อน", closed: "ปิดคำขอ", reopened: "ขอเปิดใหม่",
+    update: "ผู้ขอเพิ่มข้อมูล", note: "บันทึกจากทีม", reassigned: "เปลี่ยนผู้รับผิดชอบ", ext_asked: "ขอเลื่อน Target", ext_approved: "อนุมัติเลื่อน Target", ext_rejected: "ไม่อนุมัติการเลื่อน", closed: "ปิดคำขอ", reopened: "ขอเปิดใหม่", confirmed: "ยืนยันรับงาน",
   };
   function srEventLine(e, files) {
     const dd = e.data || {};
@@ -3538,6 +3805,7 @@ ${fileBox(m)}
       : ["ext_asked", "ext_approved", "ext_rejected"].includes(e.kind) ? `${dlong(dd.from)} → ${dlong(dd.to)}`
       : e.kind === "reassigned" ? `${esc(dd.from || "-")} → ${esc(dd.to)}`
       : e.kind === "reopened" ? `Target ${dlong(dd.target)}`
+      : e.kind === "confirmed" ? `ให้คะแนน ${"★".repeat(dd.rating || 0)}${"☆".repeat(5 - (dd.rating || 0))} ${dd.rating}/5`
       : e.kind === "closed" ? esc({ delivered: "ส่งงานแล้ว", not_possible: "ทำไม่ได้", duplicate: "ซ้ำกับคำขออื่น" }[dd.outcome] || "") : "";
     const fs = files.filter((f) => f.event_id === e.id);
     return `<li class="ev-${esc(e.kind)}"><div><b>${SR_EV[e.kind] || esc(e.kind)}</b> โดย ${esc(e.by_name || "ระบบ")}${extra ? ` · ${extra}` : ""}</div>
@@ -3616,6 +3884,7 @@ ${e.text ? `<div class="srtext">${esc(e.text)}</div>` : ""}${fs.length ? `<div>$
       c.reassign ? `<button class="btn" type="button" id="b-re">เปลี่ยนผู้รับผิดชอบ</button>` : "",
       c.edit ? `<button class="btn" type="button" id="b-edit">${r.status === "info" ? "แก้ไขและส่งใหม่" : "แก้ไขคำขอ"}</button>` : "",
       c.cancel ? `<button class="btn danger" type="button" id="b-cancel">ยกเลิกคำขอ</button>` : "",
+      c.confirm ? `<button class="btn ok" type="button" id="b-confirm">ยืนยันรับงาน</button>` : "",
       c.reopen ? `<button class="btn" type="button" id="b-reopen">ขอเปิดใหม่</button>` : "",
     ].join("");
     const infoEv = r.status === "info" ? data.events.filter((e) => e.kind === "info").pop() : null;
@@ -3633,7 +3902,8 @@ ${approvePanel}
 ${c.update ? `<form id="upf" class="stack" style="border-top:1px solid var(--line);padding-top:14px"><label class="f">${r.mine ? "เพิ่มข้อมูลถึงผู้รับผิดชอบ" : "บันทึก / ตอบผู้ขอ"}<textarea name="text" rows="2" maxlength="3000" placeholder="${r.mine ? "เช่น แนบ template เพิ่ม" : "เช่น กำลังดึงข้อมูล คาดว่าส่งได้พรุ่งนี้"}"></textarea></label>${fileBox(m)}<div class="right"><button class="btn primary" type="submit">ส่ง</button></div></form>` : ""}
 </section></div>
 <aside class="side"><section class="card"><h2>ข้อมูลคำขอ</h2><table class="kvt">${info.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join("")}</table>
-${r.canReopenUntil && c.reopen ? `<p class="hint">ถ้างานยังไม่ตรงที่ขอ กด “ขอเปิดใหม่” ได้ถึง ${dlong(r.canReopenUntil)}</p>` : ""}</section></aside></div>`;
+${c.confirm ? `<p class="hint">ได้รับงานแล้ว กด “ยืนยันรับงาน” และให้คะแนน 1–5${c.reopen ? ` · ถ้างานยังไม่ตรงที่ขอ กด “ขอเปิดใหม่” ได้ถึง ${dlong(r.canReopenUntil)}` : ""}</p>` : r.canReopenUntil && c.reopen ? `<p class="hint">ถ้างานยังไม่ตรงที่ขอ กด “ขอเปิดใหม่” ได้ถึง ${dlong(r.canReopenUntil)}</p>` : ""}
+${r.confirmedAt ? `<p class="hint">ผู้ขอยืนยันรับงานแล้ว · ${"★".repeat(r.rating || 0)}${"☆".repeat(5 - (r.rating || 0))} ${r.rating}/5 · ${fdt(r.confirmedAt)}</p>` : ""}</section></aside></div>`;
 
     const $ = (x) => document.getElementById(x);
     const up = $("upf");
@@ -3687,6 +3957,17 @@ ${r.canReopenUntil && c.reopen ? `<p class="hint">ถ้างานยังไ
     if ($("b-re"))
       $("b-re").onclick = () => srDialog("เปลี่ยนผู้รับผิดชอบ", `<label class="f">ผู้รับผิดชอบใหม่<select name="a" required>${asgOpt(r.assignee && r.assignee.id)}</select></label><label class="f">หมายเหตุ (ไม่บังคับ)<input name="note" maxlength="500"></label>`, (f) => act("reassign", { assigneeId: f.a.value, note: f.note.value }, "เปลี่ยนผู้รับผิดชอบแล้ว"), "บันทึก");
     if ($("b-cancel")) $("b-cancel").onclick = () => srDialog("ยกเลิกคำขอ", `<label class="f">เหตุผล (ไม่บังคับ)<input name="reason" maxlength="500"></label>`, (f) => act("cancel", { reason: f.reason.value }, "ยกเลิกคำขอแล้ว"), "ยกเลิกคำขอ");
+    if ($("b-confirm"))
+      $("b-confirm").onclick = () =>
+        srDialog(
+          "ยืนยันรับงาน",
+          `<p class="muted" style="margin:0">งานจาก ${esc(r.assignee ? r.assignee.name : "ทีม")} ตรงกับที่ขอแค่ไหน</p>
+<div class="sr-rate" role="radiogroup" aria-label="คะแนน">${[1, 2, 3, 4, 5].map((n) => `<label><input type="radio" name="rating" value="${n}" required ${n === 5 ? "" : ""}><span>${n}</span><small>${["", "ไม่ตรงเลย", "ต้องแก้หลายจุด", "พอใช้", "ดี", "ดีมาก"][n]}</small></label>`).join("")}</div>
+<label class="f">ความเห็น (ไม่บังคับ · ให้ 1–2 ต้องใส่)<textarea name="note" rows="2" maxlength="1000"></textarea></label>
+<p class="hint" style="margin:0">ยืนยันแล้วจะขอเปิดใหม่ไม่ได้</p>`,
+          (f) => act("confirm", { rating: Number(f.rating.value), note: f.note.value }, "ยืนยันรับงานแล้ว ขอบคุณสำหรับคะแนน"),
+          "ยืนยันรับงาน"
+        );
     if ($("b-reopen")) $("b-reopen").onclick = () => srDialog("ขอเปิดคำขอใหม่", `<p class="muted" style="margin:0">คำขอกลับไปที่ ${esc(r.assignee ? r.assignee.name : "ผู้รับผิดชอบเดิม")}</p><label class="f">งานยังไม่ตรงที่ขออย่างไร<textarea name="reason" rows="3" required minlength="10" maxlength="1000"></textarea></label>`, (f) => act("reopen", { reason: f.reason.value }, "เปิดคำขอใหม่แล้ว ระบบแจ้งผู้รับผิดชอบ"), "ขอเปิดใหม่");
     if ($("b-edit"))
       $("b-edit").onclick = () => {
@@ -4073,6 +4354,71 @@ ${me.sr ? `<p class="hint" style="margin:0">ทำคำขอบริการ
     run();
   }
 
+  /** Settings: which team uses which KPI criteria set, and the weights, from a chosen month. */
+  async function bindKpiProfiles() {
+    const host = document.getElementById("kpf-body");
+    if (!host) return;
+    let r;
+    try {
+      r = await api("/kpi/profiles");
+    } catch (e) {
+      host.innerHTML = `<div class="banner err">${esc(e.message)}</div>`;
+      return;
+    }
+    const nextMonths = [];
+    for (let i = -3; i <= 3; i++) {
+      const t = new Date();
+      t.setDate(1);
+      t.setMonth(t.getMonth() + i);
+      nextMonths.push(`${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}`);
+    }
+    const keys = Object.keys(r.profiles);
+    host.innerHTML = `<p class="hint" style="margin:0 0 10px">แต่ละทีมใช้ชุดเกณฑ์เดียว · คนที่อยู่หลายทีม ถ้ามีทีม Support อยู่ด้วยใช้ Support · ทีมใหม่อยู่ชุด Support จนกว่าจะย้าย · เดือนก่อนหน้าเดือนที่เลือกไม่เปลี่ยน</p>
+<div class="tablewrap"><table class="kpf-tbl" style="min-width:560px"><thead><tr><th>ทีม</th>${keys.map((k) => `<th class="c">${esc(r.profiles[k].label)}</th>`).join("")}</tr></thead><tbody>
+${r.teams.map((t) => `<tr><td>${esc(t.label)}</td>${keys.map((k) => `<td class="c"><input type="radio" name="kpf-${esc(t.code)}" value="${k}" ${t.profile === k ? "checked" : ""} aria-label="${esc(t.label)}: ${esc(r.profiles[k].label)}"></td>`).join("")}</tr>`).join("")}
+</tbody></table></div>
+<div class="kpf-grid" style="margin-top:14px">${keys
+      .map((k) => {
+        const p = r.profiles[k];
+        return `<div class="kpf" data-p="${k}"><h3>${esc(p.label)}</h3><div class="hint">${esc(p.hint)}</div>
+<div class="kpf-w">${p.parts.map(([pk, l, w]) => `<label><span>${esc(l)}</span><input type="number" min="0" max="100" step="1" data-w="${k}.${pk}" value="${w}" aria-label="${esc(p.label)} ${esc(l)}"></label>`).join("")}</div>
+<div class="kpf-sum" data-sum="${k}"></div></div>`;
+      })
+      .join("")}</div>
+<div class="right" style="align-items:center;margin-top:12px"><span class="hint">มีผลตั้งแต่</span><select id="kpf-from" style="width:auto">${nextMonths.map((m) => `<option value="${m}" ${m === r.month ? "selected" : ""}>${ymLabel(m)}</option>`).join("")}</select>
+<button class="btn primary" type="button" id="kpf-save">บันทึกเกณฑ์ KPI</button></div>
+${r.versions.length ? `<p class="hint" style="margin:8px 0 0">ประวัติ: ${r.versions.map((v) => `เริ่ม ${ymLabel(v.from)} โดย ${esc(v.by || "-")}`).join(" · ")}</p>` : ""}`;
+    // One team = one profile: a team's radios share one name across the columns.
+    const sums = () =>
+      keys.forEach((k) => {
+        const n = [...host.querySelectorAll(`[data-w^="${k}."]`)].reduce((a, i) => a + (Number(i.value) || 0), 0);
+        const el = host.querySelector(`[data-sum="${k}"]`);
+        el.textContent = `รวม ${n} / 100 ${n === 100 ? "✓" : "· ต้องเท่ากับ 100"}`;
+        el.classList.toggle("bad", n !== 100);
+      });
+    host.querySelectorAll("[data-w]").forEach((i) => (i.oninput = sums));
+    sums();
+    document.getElementById("kpf-save").onclick = async () => {
+      const teams = {};
+      r.teams.forEach((t) => {
+        const c = host.querySelector(`input[name="kpf-${t.code}"]:checked`);
+        if (c) teams[t.code] = c.value;
+      });
+      const weights = {};
+      host.querySelectorAll("[data-w]").forEach((i) => {
+        const [p, k] = i.dataset.w.split(".");
+        (weights[p] = weights[p] || {})[k] = Number(i.value);
+      });
+      try {
+        await post("/kpi/profiles", { from: document.getElementById("kpf-from").value, teams, weights }, "PUT");
+        toast("บันทึกเกณฑ์ KPI แล้ว");
+        bindKpiProfiles();
+      } catch (e) {
+        toast(e.message, 6000);
+      }
+    };
+  }
+
   async function bindTeamAdmin() {
     const host = document.getElementById("team-body");
     if (!host) return;
@@ -4269,6 +4615,89 @@ ${s.comment ? `<div class="resol">${esc(s.comment)}</div>` : ""}
 
   // ------------------------------------------------------------ customer page
   const HEALTH = { ok: ["ปกติ", "c-normal"], warn: ["ต้องติดตาม", "c-r1"], bad: ["ต้องระวัง", "c-overdue"] };
+  // ------------------------------------------------------------ customer details + installed solution
+  const CI_FIELDS = [
+    ["full_name", "ชื่อเต็ม", "เช่น ธนาคารกรุงไทย จำกัด (มหาชน)"],
+    ["location", "สถานที่ติดตั้ง", "เช่น Contact Center อาคารสำนักงานใหญ่ · DR site"],
+    ["contact", "ผู้ติดต่อหลัก", "ชื่อ ตำแหน่ง เบอร์โทร"],
+    ["account_manager", "Account Manager", ""],
+    ["engineers", "Engineer ประจำ", "เช่น สมชาย (หลัก) · วิภา (สำรอง)"],
+    ["contract_sla", "SLA ตามสัญญา", "เช่น Critical 4 ชม. · ปกติ 3 วันทำการ"],
+    ["remote_access", "Remote access", "เช่น VPN FortiClient · ขอสิทธิ์ล่วงหน้า 1 วัน"],
+    ["notes", "หมายเหตุ", ""],
+  ];
+  async function loadCustInfo(host, site) {
+    let r;
+    try {
+      r = await api("/customer-info?site=" + encodeURIComponent(site));
+    } catch (e) {
+      host.innerHTML = `<div class="banner err">โหลดข้อมูลลูกค้าไม่สำเร็จ: ${esc(e.message)}</div>`;
+      return;
+    }
+    renderCustInfo(host, site, r);
+  }
+  function renderCustInfo(host, site, r) {
+    const p = r.profile || {};
+    const filled = CI_FIELDS.filter(([k]) => p[k]);
+    const until = (x) => {
+      if (!x.supportUntil) return x.supportKind || "";
+      const left = Math.round((new Date(x.supportUntil + "T00:00:00") - new Date()) / 86400000);
+      return `${esc(x.supportKind || "สัญญา")} ถึง ${new Date(x.supportUntil + "T00:00:00").toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" })}${left < 0 ? ` <span class="chip c-overdue">หมดแล้ว</span>` : left <= 60 ? ` <span class="chip c-r1">อีก ${left} วัน</span>` : ""}`;
+    };
+    host.innerHTML = `<div class="ci-grid">
+<section class="card"><div class="title"><h2>ข้อมูลลูกค้า</h2>${r.canEdit ? `<button class="btn" type="button" data-ci-edit>แก้ไข</button>` : ""}</div>
+${filled.length || r.aliases.length ? `<dl class="ci-dl">${filled.map(([k, l]) => `<dt>${l}</dt><dd>${esc(p[k])}</dd>`).join("")}${r.aliases.length ? `<dt>ชื่อเรียกอื่น</dt><dd>${esc(r.aliases.join(", "))}</dd>` : ""}</dl>` : `<div class="empty" style="padding:16px">ยังไม่มีข้อมูล${r.canEdit ? " กด แก้ไข เพื่อเพิ่ม" : ""}</div>`}
+${p.updatedAt ? `<p class="hint" style="margin:10px 0 0">แก้ล่าสุดโดย ${esc(p.updatedBy || "-")} · ${fdt(p.updatedAt)}</p>` : ""}</section>
+<section class="card"><div class="title"><h2>Solution ที่ติดตั้ง <span class="muted" style="font-weight:400;font-size:14px">${r.products.length} Product</span></h2>${r.canEdit ? `<button class="btn" type="button" data-ci-edit>แก้ไข</button>` : ""}</div>
+${r.products.length ? r.products.map((x) => `<div class="ci-prod"><div><div class="nm">${esc(x.product)}</div><div class="sub">${esc(x.category)}</div></div>
+<div><b>${esc(x.version || "-")}</b><div class="sub">เวอร์ชัน</div></div>
+<div class="ci-mods">${x.modules.map((m) => `<span>${esc(m)}</span>`).join("") || `<span class="sub">-</span>`}</div>
+<div><div style="font-size:13px">${until(x) || "-"}</div><div class="sub">${x.team ? "ทีม " + esc(teamLabel(x.team)) : ""}${x.notes ? (x.team ? " · " : "") + esc(x.notes) : ""}</div></div></div>`).join("") : `<div class="empty" style="padding:16px">ยังไม่มีรายการ Product</div>`}</section></div>`;
+    host.querySelectorAll("[data-ci-edit]").forEach((b) => (b.onclick = () => editCustInfo(host, site, r)));
+  }
+  async function editCustInfo(host, site, r) {
+    const p = r.profile || {};
+    const LK = await lookups().catch(() => ({ product: [] }));
+    const prodRow = (x = {}) => `<div class="ci-erow">
+<label class="f">Product<input name="product" list="ci-prod-list" value="${esc(x.product || "")}" required maxlength="120"></label>
+<label class="f">ประเภท<input name="category" value="${esc(x.category || "")}" placeholder="เช่น Recording" maxlength="80"></label>
+<label class="f">เวอร์ชัน<input name="version" value="${esc(x.version || "")}" maxlength="60"></label>
+<label class="f" style="grid-column:span 2">Module (คั่นด้วย ,)<input name="modules" value="${esc((x.modules || []).join(", "))}" placeholder="เช่น Voice, Screen, QM"></label>
+<label class="f">สัญญา<select name="supportKind"><option value="">-</option>${r.supportKinds.map((k) => `<option ${k === x.supportKind ? "selected" : ""}>${k}</option>`).join("")}</select></label>
+<label class="f">ถึงวันที่<input type="date" name="supportUntil" value="${esc(x.supportUntil || "")}"></label>
+<label class="f">ทีมที่ดูแล<select name="team"><option value="">-</option>${ME.teams.map((t) => `<option value="${esc(t.key)}" ${t.key === x.team ? "selected" : ""}>${esc(t.label)}</option>`).join("")}</select></label>
+<label class="f" style="grid-column:span 3">หมายเหตุ<input name="notes" value="${esc(x.notes || "")}" maxlength="500"></label>
+<div class="ci-rm"><button class="btn" type="button" data-rm>ลบ</button></div></div>`;
+    host.innerHTML = `<form class="card" id="ci-form"><div class="title"><h2>แก้ข้อมูลลูกค้า ${esc(site)}</h2></div>
+<div class="formgrid">${CI_FIELDS.map(([k, l, ph]) => `<label class="f" ${k === "notes" ? 'style="grid-column:1/-1"' : ""}>${l}${k === "notes" ? `<textarea name="${k}" rows="2" maxlength="2000">${esc(p[k] || "")}</textarea>` : `<input name="${k}" value="${esc(p[k] || "")}" placeholder="${esc(ph)}" maxlength="400">`}</label>`).join("")}</div>
+<h2 style="margin-top:18px">Solution ที่ติดตั้ง</h2><div id="ci-rows">${(r.products.length ? r.products : [{}]).map(prodRow).join("")}</div>
+<datalist id="ci-prod-list">${(LK.product || []).map((x) => `<option value="${esc(x)}">`).join("")}</datalist>
+<div class="right" style="justify-content:space-between"><button class="btn" type="button" id="ci-add">+ เพิ่ม Product</button><span><button class="btn" type="button" id="ci-cancel">ยกเลิก</button> <button class="btn primary">บันทึก</button></span></div></form>`;
+    const rows = host.querySelector("#ci-rows");
+    const bindRm = () => rows.querySelectorAll("[data-rm]").forEach((b) => (b.onclick = () => b.closest(".ci-erow").remove()));
+    bindRm();
+    host.querySelector("#ci-add").onclick = () => {
+      rows.insertAdjacentHTML("beforeend", prodRow());
+      bindRm();
+    };
+    host.querySelector("#ci-cancel").onclick = () => renderCustInfo(host, site, r);
+    host.querySelector("#ci-form").onsubmit = async (e) => {
+      e.preventDefault();
+      const f = e.target;
+      const profile = Object.fromEntries(CI_FIELDS.map(([k]) => [k, f.elements[k].value]));
+      const products = [...rows.querySelectorAll(".ci-erow")]
+        .map((row) => Object.fromEntries([...row.querySelectorAll("input,select")].map((i) => [i.name, i.value])))
+        .filter((x) => x.product.trim() || x.version.trim() || x.modules.trim());
+      try {
+        const out = await post("/customer-info", { site, profile, products }, "PUT");
+        toast("บันทึกข้อมูลลูกค้าแล้ว");
+        renderCustInfo(host, site, out);
+      } catch (err) {
+        toast(err.message, 6000);
+      }
+    };
+  }
+
   async function viewCustomer(params) {
     setNav("customer");
     const site = params.site || "";
@@ -4295,6 +4724,7 @@ ${list.map((x) => `<tr class="click" data-href="#/customer?site=${encodeURICompo
 <div class="actions"><label class="f" style="flex:0 1 260px;flex-direction:row;align-items:center;gap:8px">เปลี่ยนลูกค้า
 <select id="cpick">${opts.map((l) => `<option value="${esc(l.site)}" ${l.site.toLowerCase() === site.toLowerCase() ? "selected" : ""}>${esc(l.site)}${l.open ? ` (${l.open})` : ""}</option>`).join("")}</select></label>
 ${lvl("export") === "all" ? `<a class="btn" href="#/reports?site=${encodeURIComponent(x.site)}">Export เคสของลูกค้านี้</a>` : ""}</div></section>
+<div id="cinfo"><div class="hint">กำลังโหลดข้อมูลลูกค้า…</div></div>
 <div class="banner ${x.health === "bad" ? "err" : x.health === "warn" ? "warn" : "ok"} health-reasons"><strong>สุขภาพลูกค้า: ${hl}</strong><ul>${x.reasons.map((r) => `<li>${esc(r.text)}</li>`).join("")}</ul></div>
 <div class="kpis">
 <div class="kpi k-all"><div class="l">ยังไม่ปิด</div><div class="v">${st.open}</div></div>
@@ -4329,6 +4759,7 @@ ${x.recentClosed.length ? `<div class="tablewrap"><table style="min-width:760px"
 ${x.recentClosed.map((c) => `<tr class="click" data-href="#/case/${c.id}"><td><a class="mono" href="#/case/${c.id}">${esc(caseRef(c))}</a></td><td style="font-size:13px">${esc(c.task || "")}${c.resolution ? `<div class="muted">${esc(c.resolution)}</div>` : ""}</td><td>${esc(c.owner || "-")}</td><td>${fd(c.closedAt)}</td><td>${c.onTime ? `<span class="chip c-normal">ทัน</span>` : `<span class="chip c-overdue">ไม่ทัน</span>`}</td></tr>`).join("")}
 </tbody></table></div>` : `<div class="empty">ไม่มีเคสที่ปิดใน 6 เดือน</div>`}</section>`;
     document.getElementById("cpick").onchange = (e) => (location.hash = "#/customer?site=" + encodeURIComponent(e.target.value));
+    loadCustInfo(document.getElementById("cinfo"), x.site);
     bindRowLinks();
     bindCustomerReport(x.site);
   }
@@ -4856,6 +5287,7 @@ ${changed.length ? `<div class="tablewrap" style="max-height:50vh"><table style=
           if (parts[2] === "meeting") return await viewMeeting(decodeURIComponent(parts[1]), params);
           return await viewOwner(parts[1] ? decodeURIComponent(parts[1]) : null, params);
         case "customer": return await viewCustomer(params);
+        case "team": return parts[1] ? await viewTeam(decodeURIComponent(parts[1]), params) : await viewTeams(params);
         case "pm": return await viewPm();
         case "reports": return await viewReports(params);
         case "audit": return await viewAudit(params);
@@ -4869,6 +5301,7 @@ ${changed.length ? `<div class="tablewrap" style="max-height:50vh"><table style=
         case "intake-admin": return await viewIntakeAdmin();
         case "skills": return await viewSkills(params);
         case "kpi": return await viewKpi(params);
+        case "response": return await viewResponse(params);
         case "rank": return await viewRank(params);
         case "sr": return parts[1] === "new" ? await viewSrNew() : parts[1] ? await viewSrItem(parts[1]) : await viewSr(params);
         case "profile": return await viewProfile();

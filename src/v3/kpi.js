@@ -350,15 +350,41 @@ async function compute(ym) {
     o.parts.work = 20 * Math.min(1, Math.sqrt(o.metrics.points / med) / 1.3);
   });
 
+  // Profiles: internal service teams are scored on service requests; requesters (Sales) get no KPI.
+  const P = require("./kpiprofiles");
+  const cfg = await P.configFor(R.ym);
+  const teamsOf = await P.teamsOfUsers();
+  const svc = await P.serviceOwners(R, cfg, teamsOf);
+  const svcIds = new Set(svc.map((o) => o.id));
+  for (let i = owners.length - 1; i >= 0; i--) {
+    if (svcIds.has(owners[i].id) || P.personProfile(cfg, teamsOf.get(owners[i].id)) !== "support") owners.splice(i, 1);
+    else owners[i].profile = "support";
+  }
+  svc.forEach((o) => Object.assign(o.metrics, { slaPct: o.metrics.srOnTimePct, onTime: o.metrics.srOnTime, overdueAtEnd: o.metrics.srOverdueNow, diversity: 0, firstResponseHrs: null, newSkills: [] }));
+  owners.push(...svc);
+  const SUP_MAX = { sla: 30, resp: 15, work: 20, div: 15, back: 10, doc: 10 };
+  const wSup = cfg.weights.support;
+
   const adj = await all("SELECT a.*, u.display_name AS by_name FROM kpi_adjustments a LEFT JOIN users u ON u.id = a.adjusted_by WHERE month = $1", [R.ym]);
   owners.forEach((o) => {
     const p = o.parts;
-    const base = (p.sla ?? 15) + p.resp + p.work + p.div + p.back + p.doc;
+    let base;
+    if (o.profile === "service") base = p.volume + p.ontime;
+    else {
+      // Each part on its own scale, then weighted with the admin's weights (default = the original 30/15/20/15/10/10).
+      base = 0;
+      for (const k of Object.keys(SUP_MAX)) {
+        const raw = k === "sla" && p.sla == null ? SUP_MAX.sla / 2 : p[k];
+        base += (raw / SUP_MAX[k]) * wSup[k];
+        if (p[k] != null) p[k] = (p[k] / SUP_MAX[k]) * wSup[k];
+      }
+    }
+    o.partDefs = P.partDefs(cfg, o.profile);
     const a = adj.find((x) => x.user_id === o.id);
     o.adjust = a ? { points: a.points, reason: a.reason, by: a.by_name, at: a.updated_at } : null;
     o.base = r1(base);
     o.score = Math.round(clamp(base + p.bonus + p.csat + (a ? a.points : 0), 0, 110));
-    o.insufficient = o.metrics.closed < 3;
+    o.insufficient = o.profile === "service" ? o.metrics.srDone < 3 : o.metrics.closed < 3;
     o.grade = o.insufficient ? null : grade(o.score);
     Object.keys(p).forEach((k) => (p[k] = p[k] == null ? null : r1(p[k])));
     o.summary = summarize(o, owners);
@@ -380,6 +406,23 @@ async function compute(ym) {
 const top = (obj, n = 2) => Object.entries(obj).sort((a, b) => b[1] - a[1]).slice(0, n).map(([k]) => k);
 function summarize(o, all) {
   const m = o.metrics;
+  if (o.profile === "service") {
+    if (!m.srDone && !m.srOpen) return "";
+    const good = [];
+    const work = [];
+    if (m.srOnTimePct != null && m.srOnTimePct >= 85) good.push(`ทำเสร็จทันกำหนด ${m.srOnTimePct}%`);
+    if (m.srDone > m.teamMedianDone) good.push(`ปริมาณงานมากกว่าค่ากลางทีม (${m.teamMedianDone})`);
+    if (m.ratingCount >= 2 && m.ratingAvg >= 4) good.push(`ผู้ขอให้คะแนนเฉลี่ย ${m.ratingAvg}/5 (${m.ratingCount} งาน)`);
+    if (m.srLate) work.push(`เสร็จช้ากว่ากำหนด ${m.srLate} งาน`);
+    if (m.srOverdueNow) work.push(`มีคำขอเลย Target ตอนนี้ ${m.srOverdueNow} งาน`);
+    if (m.ratingCount >= 2 && m.ratingAvg < 3.5) work.push(`ผู้ขอให้คะแนนเฉลี่ย ${m.ratingAvg}/5`);
+    const cats = top(o.types);
+    return [
+      `${o.name} ทำคำขอบริการเสร็จ ${m.srDone} งาน (ทันกำหนด ${m.srOnTime} · เสร็จหลังเลื่อน ${m.srAfterExt} · ช้า ${m.srLate}) ยังค้างอยู่ ${m.srOpen} งาน` + (cats.length ? ` เน้นงาน ${cats.join(" และ ")}` : ""),
+      good.length ? `จุดเด่น: ${good.join(" · ")}` : "",
+      work.length ? `ควรพัฒนา: ${work.join(" · ")}` : "",
+    ].filter(Boolean).join("\n");
+  }
   if (!o.handled) return "";
   const avgFirst = median(all.map((x) => x.metrics.firstResponseHrs));
   const good = [];
@@ -504,8 +547,57 @@ function mount(api, { wrap, need }) {
       avgDiversity: inTeam.length ? Math.round((inTeam.reduce((a, o) => a + o.metrics.diversity, 0) / inTeam.length) * 100) / 100 : null,
       members: inTeam.length,
     };
+    // One summary card per team the viewer may see (admin / observer: all; manager: their own).
+    let teamSummary = null;
+    const P0 = require("./kpiprofiles");
+    const cfg0 = await P0.configFor(r.month);
+    if (canAll(req.user)) {
+      const mem = await all("SELECT team, array_agg(user_id) AS ids FROM user_teams WHERE team = ANY($1) GROUP BY team", [teams.map((t) => t.code)]);
+      const idsOf = Object.fromEntries(mem.map((x) => [x.team, new Set(x.ids)]));
+      teamSummary = teams.map((t) => {
+        const list = r.owners.filter((o) => idsOf[t.code] && idsOf[t.code].has(o.id));
+        const sc = list.filter((o) => !o.insufficient);
+        const closed = list.reduce((a, o) => a + (o.metrics.closed || 0), 0);
+        const onTime = list.reduce((a, o) => a + (o.metrics.onTime || 0), 0);
+        const grades = { A: 0, B: 0, C: 0, D: 0 };
+        sc.forEach((o) => (grades[o.grade[0]] = (grades[o.grade[0]] || 0) + 1));
+        return { code: t.code, label: t.label, profile: P0.teamProfile(cfg0, t.code), people: list.length, scored: sc.length, avgScore: sc.length ? Math.round(sc.reduce((a, o) => a + o.score, 0) / sc.length) : null, slaPct: closed ? Math.round((onTime / closed) * 100) : null, grades };
+      }).filter((t) => t.people);
+    }
     r.owners = canAll(req.user) ? inTeam : r.owners.filter((o) => o.id === req.user.id);
-    res.json({ ...r, teams, teamCode: team, allTeams: !scope, canAll: canAll(req.user), canAdjust: canAdjust(req.user), canEditCategories: req.user.role === "admin" });
+    const P = require("./kpiprofiles");
+    const cfg = await P.configFor(r.month);
+    const myProfile = P.personProfile(cfg, req.user.teams || []);
+    res.json({ ...r, teams, teamCode: team, allTeams: !scope, teamSummary, teamProfile: team ? P.teamProfile(cfg, team) : null, myProfile, canAll: canAll(req.user), canAdjust: canAdjust(req.user), canEditCategories: req.user.role === "admin" });
+  }));
+  // Response score of requesters whose team has no KPI (Sales).
+  api.get("/kpi/response", wrap(async (req, res) => {
+    const P = require("./kpiprofiles");
+    const R = monthRange(req.query.month);
+    const cfg = await P.configFor(R.ym);
+    const scope = require("./perms").teamScope(req.user);
+    const rTeams = (await all("SELECT code, label FROM teams ORDER BY sort, code")).filter((t) => P.teamProfile(cfg, t.code) === "response" && (!scope || scope.includes(t.code)));
+    let people;
+    if (canAll(req.user)) {
+      people = rTeams.length
+        ? await all(
+            `SELECT DISTINCT u.id, u.display_name AS name FROM users u JOIN user_teams t ON t.user_id = u.id
+              WHERE u.active AND t.team = ANY($1) ORDER BY u.display_name`,
+            [rTeams.map((t) => t.code)]
+          )
+        : [];
+    } else if (P.personProfile(cfg, req.user.teams || []) === "response") people = [{ id: req.user.id, name: req.user.display_name }];
+    else throw Object.assign(new Error("หน้านี้สำหรับทีมที่วัดเฉพาะการตอบกลับ"), { status: 403 });
+    const scores = await P.responseScores(R, cfg, people.map((x) => x.id));
+    const sel = people.find((x) => String(x.id) === String(req.query.user)) || people.find((x) => x.id === req.user.id) || people[0] || null;
+    const vals = [...scores.values()].map((x) => x.score).filter((x) => x != null);
+    res.json({
+      month: R.ym, teams: rTeams, canAll: canAll(req.user),
+      partDefs: P.partDefs(cfg, "response"),
+      people: people.map((x) => ({ ...x, score: (scores.get(x.id) || {}).score ?? null })),
+      teamAvg: vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null,
+      sel: sel ? { ...sel, ...scores.get(sel.id) } : null,
+    });
   }));
   api.get("/kpi/trend/:id(\\d+)", wrap(async (req, res) => {
     const id = Number(req.params.id);

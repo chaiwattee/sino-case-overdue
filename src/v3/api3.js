@@ -56,6 +56,7 @@ require("./intake").mountInternal(api, { need, wrap });
 const ext = require("./extensions");
 ext.mount(api, { wrap });
 require("./kpi").mount(api, { wrap, need });
+require("./kpiprofiles").mount(api, { wrap, need });
 require("./sr").mount(api, { wrap });
 require("./leaderboard").mount(api, { wrap, need });
 require("./departments").mount(api, { wrap, need });
@@ -69,6 +70,8 @@ require("./teamsnotify").mount(api, { wrap, need });
 require("./teamadmin").mount(api, { wrap, need });
 require("./skills").mount(api, { wrap });
 require("./insights").mount(api, { wrap });
+require("./teamview").mount(api, { wrap });
+require("./custinfo").mount(api, { wrap });
 require("./custreport").mount(api, { wrap, need, perms });
 require("./pm").mount(api, { wrap, loadVisible });
 require("./push").mount(api, { wrap });
@@ -86,8 +89,15 @@ async function teamsList() {
 api.get("/me", wrap(async (req, res) => {
   const lb = require("./leaderboard");
   const lbs = await lb.settings();
+  const KP = require("./kpiprofiles");
+  const t0 = d.today();
+  const kcfg = await KP.configFor(`${t0.getFullYear()}-${String(t0.getMonth() + 1).padStart(2, "0")}`);
+  const scope = perms.teamScope(req.user);
+  const allTeams = await teamsList();
   res.json({
     leaderboard: { visible: lb.canSee(req.user, lbs), visibility: lbs.visibility },
+    kpiProfile: KP.personProfile(kcfg, req.user.teams || []),
+    responseTeams: ["admin", "manager", "observer"].includes(req.user.role) && allTeams.some((t) => KP.teamProfile(kcfg, t.key) === "response" && (!scope || scope.includes(t.key))),
     user: req.user,
     perms: await perms.forUser(req.user),
     teams: await teamsList(),
@@ -192,11 +202,42 @@ api.get("/cases", wrap(async (req, res) => {
   res.json({ cases: cases.map(ser3) });
 }));
 
+// Search people by name or email for the "by User" page: everyone in the teams this person sees, with or without cases.
+api.get("/owners/search", wrap(async (req, res) => {
+  const qy = String(req.query.q || "").trim().toLowerCase().slice(0, 60).replace(/[%_\\]/g, "");
+  const rows = await all(
+    `SELECT u.id, u.display_name AS name, u.email, u.role, array_remove(array_agg(t.team ORDER BY t.team), NULL) AS teams
+       FROM users u LEFT JOIN user_teams t ON t.user_id = u.id
+      WHERE u.active AND u.role <> 'requester' AND u.email IS NOT NULL
+        AND ($1 = '' OR lower(u.display_name) LIKE '%' || $1 || '%' OR lower(u.email) LIKE '%' || $1 || '%')
+      GROUP BY u.id ORDER BY u.display_name LIMIT 300`,
+    [qy]
+  );
+  const mates = await perms.teamMateIds(req.user);
+  const labels = Object.fromEntries((await teamsList()).map((t) => [t.key, t.label]));
+  res.json({
+    items: rows
+      .filter((r) => !mates || mates.has(r.id))
+      .slice(0, 30)
+      .map((r) => ({ id: r.email.toLowerCase(), name: r.name, role: r.role, teams: r.teams.map((t) => labels[t] || t) })),
+  });
+}));
+
 api.get("/owner/:id", wrap(async (req, res) => {
   const cases = await visibleCases(req.user);
   const id = String(req.params.id).toLowerCase();
   const mine = cases.filter((c) => ownerId(c) === id);
-  if (!mine.length) return res.status(404).json({ error: "ไม่พบ User นี้" });
+  // Someone with no case yet (found through the search box): an empty page, if they are in a team this person sees.
+  let person = null;
+  if (!mine.length) {
+    person = await one(
+      `SELECT u.id, u.display_name, u.email, u.avatar, array_remove(array_agg(t.team), NULL) AS teams FROM users u LEFT JOIN user_teams t ON t.user_id = u.id
+        WHERE lower(u.email) = $1 AND u.role <> 'requester' GROUP BY u.id`,
+      [id]
+    );
+    const mates = await perms.teamMateIds(req.user);
+    if (!person || (mates && !mates.has(person.id))) return res.status(404).json({ error: "ไม่พบ User นี้" });
+  }
   const owners = [...new Map(cases.map((c) => [ownerId(c), { id: ownerId(c), owner: c.owner }])).values()].sort((a, b) =>
     String(a.owner).localeCompare(String(b.owner))
   );
@@ -235,8 +276,9 @@ api.get("/owner/:id", wrap(async (req, res) => {
     weeks.push({ from: d.toISODate(from), inMonth: to >= sel.from && from <= sel.to, onTime: closed.filter((c) => c.closedOnTime === true).length, late: closed.filter((c) => c.closedOnTime === false).length });
   }
   res.json({
-    id, owner: mine[0].owner, email: mine[0].ownerEmail, sources: [...new Set(mine.map((c) => c.sourceLabel))],
-    user: await one("SELECT id, avatar FROM users WHERE lower(email) = lower($1)", [mine[0].ownerEmail || ""]),
+    id, owner: person ? person.display_name : mine[0].owner, email: person ? person.email : mine[0].ownerEmail,
+    sources: person ? (await teamsList()).filter((t) => person.teams.includes(t.key)).map((t) => t.label) : [...new Set(mine.map((c) => c.sourceLabel))],
+    user: await one("SELECT id, avatar FROM users WHERE lower(email) = lower($1)", [person ? person.email : mine[0].ownerEmail || ""]),
     kpis: { ...stageCounts(mine), sla: slaStats(mine) }, owners,
     months: months.map((m) => m.ym), month,
     cases: mine.filter((c) => c.stage !== "closed" || inMonth(c.endDate))
