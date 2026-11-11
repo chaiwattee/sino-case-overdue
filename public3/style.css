@@ -796,8 +796,8 @@ tr.off td { opacity: .55; }
 .tm-load { display: flex; align-items: center; gap: 8px; } .tm-load b { width: 20px; }
 
 /* customer details + installed solution */
-.ci-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr); gap: 16px; margin-bottom: 16px; }
-.ci-grid > .card { margin: 0; }
+.ci-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr); gap: 28px; }
+.ci-h { margin: 0 0 4px; font-size: 15px; }
 .ci-dl { display: grid; grid-template-columns: 130px 1fr; gap: 8px 12px; font-size: 14px; margin: 0; }
 .ci-dl dt { color: var(--muted); } .ci-dl dd { margin: 0; white-space: pre-line; }
 .ci-prod { display: grid; grid-template-columns: 1.3fr .7fr 1.4fr 1fr; gap: 6px 12px; align-items: center; padding: 12px 0; border-top: 1px solid var(--line); font-size: 14px; }

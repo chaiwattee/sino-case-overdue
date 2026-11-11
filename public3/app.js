@@ -4644,15 +4644,17 @@ ${s.comment ? `<div class="resol">${esc(s.comment)}</div>` : ""}
       const left = Math.round((new Date(x.supportUntil + "T00:00:00") - new Date()) / 86400000);
       return `${esc(x.supportKind || "สัญญา")} ถึง ${new Date(x.supportUntil + "T00:00:00").toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" })}${left < 0 ? ` <span class="chip c-overdue">หมดแล้ว</span>` : left <= 60 ? ` <span class="chip c-r1">อีก ${left} วัน</span>` : ""}`;
     };
-    host.innerHTML = `<div class="ci-grid">
-<section class="card"><div class="title"><h2>ข้อมูลลูกค้า</h2>${r.canEdit ? `<button class="btn" type="button" data-ci-edit>แก้ไข</button>` : ""}</div>
-${filled.length || r.aliases.length ? `<dl class="ci-dl">${filled.map(([k, l]) => `<dt>${l}</dt><dd>${esc(p[k])}</dd>`).join("")}${r.aliases.length ? `<dt>ชื่อเรียกอื่น</dt><dd>${esc(r.aliases.join(", "))}</dd>` : ""}</dl>` : `<div class="empty" style="padding:16px">ยังไม่มีข้อมูล${r.canEdit ? " กด แก้ไข เพื่อเพิ่ม" : ""}</div>`}
-${p.updatedAt ? `<p class="hint" style="margin:10px 0 0">แก้ล่าสุดโดย ${esc(p.updatedBy || "-")} · ${fdt(p.updatedAt)}</p>` : ""}</section>
-<section class="card"><div class="title"><h2>Solution ที่ติดตั้ง <span class="muted" style="font-weight:400;font-size:14px">${r.products.length} Product</span></h2>${r.canEdit ? `<button class="btn" type="button" data-ci-edit>แก้ไข</button>` : ""}</div>
+    const empty = !filled.length && !r.products.length;
+    host.innerHTML = `<section class="card"><div class="title"><h2>ข้อมูลลูกค้าและ Solution ที่ติดตั้ง</h2>${r.canEdit ? `<button class="btn" type="button" data-ci-edit>${empty ? "เพิ่มข้อมูล" : "แก้ไข"}</button>` : ""}</div>
+${empty ? `<div class="empty" style="padding:12px">ยังไม่มีข้อมูลลูกค้าและรายการ Product${r.aliases.length ? ` · ชื่อเรียกอื่น: ${esc(r.aliases.join(", "))}` : ""}${r.canEdit ? " · กด เพิ่มข้อมูล" : ""}</div>` : `<div class="ci-grid">
+<div>${filled.length || r.aliases.length ? `<dl class="ci-dl">${filled.map(([k, l]) => `<dt>${l}</dt><dd>${esc(p[k])}</dd>`).join("")}${r.aliases.length ? `<dt>ชื่อเรียกอื่น</dt><dd>${esc(r.aliases.join(", "))}</dd>` : ""}</dl>` : `<div class="hint">ยังไม่มีข้อมูลลูกค้า</div>`}
+</div>
+<div><h3 class="ci-h">Solution ที่ติดตั้ง <span class="muted" style="font-weight:400">${r.products.length} Product</span></h3>
 ${r.products.length ? r.products.map((x) => `<div class="ci-prod"><div><div class="nm">${esc(x.product)}</div><div class="sub">${esc(x.category)}</div></div>
 <div><b>${esc(x.version || "-")}</b><div class="sub">เวอร์ชัน</div></div>
 <div class="ci-mods">${x.modules.map((m) => `<span>${esc(m)}</span>`).join("") || `<span class="sub">-</span>`}</div>
-<div><div style="font-size:13px">${until(x) || "-"}</div><div class="sub">${x.team ? "ทีม " + esc(teamLabel(x.team)) : ""}${x.notes ? (x.team ? " · " : "") + esc(x.notes) : ""}</div></div></div>`).join("") : `<div class="empty" style="padding:16px">ยังไม่มีรายการ Product</div>`}</section></div>`;
+<div><div style="font-size:13px">${until(x) || "-"}</div><div class="sub">${x.team ? "ทีม " + esc(teamLabel(x.team)) : ""}${x.notes ? (x.team ? " · " : "") + esc(x.notes) : ""}</div></div></div>`).join("") : `<div class="hint" style="padding:8px 0">ยังไม่มีรายการ Product</div>`}</div></div>
+${p.updatedAt ? `<p class="hint" style="margin:10px 0 0">แก้ล่าสุดโดย ${esc(p.updatedBy || "-")} · ${fdt(p.updatedAt)}</p>` : ""}`}</section>`;
     host.querySelectorAll("[data-ci-edit]").forEach((b) => (b.onclick = () => editCustInfo(host, site, r)));
   }
   async function editCustInfo(host, site, r) {
@@ -4668,7 +4670,7 @@ ${r.products.length ? r.products.map((x) => `<div class="ci-prod"><div><div clas
 <label class="f">ทีมที่ดูแล<select name="team"><option value="">-</option>${ME.teams.map((t) => `<option value="${esc(t.key)}" ${t.key === x.team ? "selected" : ""}>${esc(t.label)}</option>`).join("")}</select></label>
 <label class="f" style="grid-column:span 3">หมายเหตุ<input name="notes" value="${esc(x.notes || "")}" maxlength="500"></label>
 <div class="ci-rm"><button class="btn" type="button" data-rm>ลบ</button></div></div>`;
-    host.innerHTML = `<form class="card" id="ci-form"><div class="title"><h2>แก้ข้อมูลลูกค้า ${esc(site)}</h2></div>
+    host.innerHTML = `<form class="card" id="ci-form"><div class="title"><h2>ข้อมูลลูกค้า ${esc(site)}</h2></div>
 <div class="formgrid">${CI_FIELDS.map(([k, l, ph]) => `<label class="f" ${k === "notes" ? 'style="grid-column:1/-1"' : ""}>${l}${k === "notes" ? `<textarea name="${k}" rows="2" maxlength="2000">${esc(p[k] || "")}</textarea>` : `<input name="${k}" value="${esc(p[k] || "")}" placeholder="${esc(ph)}" maxlength="400">`}</label>`).join("")}</div>
 <h2 style="margin-top:18px">Solution ที่ติดตั้ง</h2><div id="ci-rows">${(r.products.length ? r.products : [{}]).map(prodRow).join("")}</div>
 <datalist id="ci-prod-list">${(LK.product || []).map((x) => `<option value="${esc(x)}">`).join("")}</datalist>
