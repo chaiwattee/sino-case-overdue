@@ -2340,5 +2340,22 @@
 "เสร็จหลังเลื่อน Target": "Done after target moved",
 "เสร็จช้ากว่ากำหนด": "Done late",
 "ค้างอยู่ตอนนี้": "Open now",
-"คะแนนจากผู้ขอ": "Requester rating"
+"คะแนนจากผู้ขอ": "Requester rating",
+"ข้อมูลลูกค้าและ Solution ที่ติดตั้ง": "Customer details and installed solution",
+"เรียงจากงานค้างมากสุด": "Most open work first",
+"ผู้ดูแล": "Owner",
+"กดชื่อเพื่อดูหน้า ราย User": "click a name to open By user",
+"แก้ล่าสุดโดย": "Last edited by",
+"ลูกค้าที่ดูแลอยู่": "Current customers",
+"เกิน Due และใกล้ Due ของทั้งทีม": "Past Due and due soon across the team",
+"ยังไม่มีข้อมูลลูกค้าและรายการ Product": "No customer details or products yet",
+"ยังไม่มีข้อมูลลูกค้า": "No customer details yet",
+"ยังไม่มีรายการ Product": "No products yet",
+"หมดแล้ว": "expired",
+"ไม่มีเคสเกินหรือใกล้ Due": "No cases past or near Due",
+"ยังไม่มีคนในทีมนี้": "No one in this team yet",
+"เทียบงานของแต่ละทีม": "Compare the teams' work",
+"ลูกค้าหลัก": "Main customers",
+"งานเฉลี่ย": "average",
+"เคส/คน": "cases/person"
 }
