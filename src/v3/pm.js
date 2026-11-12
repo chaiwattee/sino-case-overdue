@@ -138,6 +138,32 @@ async function save(user, id, b) {
   return r.id;
 }
 
+/** A PM schedule made when a project is handed over. The project's PM may create it (normally only managers do):
+ *  the owner must be a member of the chosen team, and that team's managers are told by email. */
+async function createFromProject(user, b) {
+  const x = checkBody(b);
+  if (!(await one("SELECT 1 FROM teams WHERE code = $1", [x.team]))) throw bad("เลือกทีมที่ดูแล PM");
+  if (!(await one("SELECT 1 FROM lookups WHERE kind = 'site' AND lower(value) = lower($1) AND NOT pending", [x.site]))) throw bad("เลือกลูกค้าจากรายชื่อลูกค้าในระบบ (ลูกค้าใหม่ให้เพิ่มและอนุมัติชื่อก่อน)");
+  const owner = x.owner_id ? await one("SELECT u.id, u.display_name, u.email FROM users u JOIN user_teams t ON t.user_id = u.id WHERE u.id = $1 AND u.active AND u.role IN ('engineer','manager') AND t.team = $2", [x.owner_id, x.team]) : null;
+  if (!owner) throw bad("เลือกผู้รับผิดชอบ PM จากสมาชิกทีมที่เลือก");
+  const r = await one(
+    `INSERT INTO pm_schedules (title, site, product, team, owner_id, every_months, next_date, checklist, note, created_by, project_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
+    [x.title, x.site, x.product, x.team, owner.id, x.every_months, x.next_date, x.checklist, x.note || `สร้างตอนส่งมอบโปรเจกต์ ${clean(b.project_name, 200)}`, user.id, Number(b.project_id) || null]
+  );
+  await audit(user, "pm_create", x.title, { id: r.id, site: x.site, every: x.every_months, next: x.next_date, project: Number(b.project_id) || null });
+  const mgrs = (await all("SELECT DISTINCT u.email FROM users u JOIN user_teams t ON t.user_id = u.id WHERE u.active AND u.role = 'manager' AND t.team = $1 AND u.email IS NOT NULL", [x.team])).map((m) => m.email);
+  const { esc, shell, fieldTable, button } = require("../emails");
+  const { config3 } = require("./config3");
+  require("../graph")
+    .sendMail({
+      to: [owner.email].filter(Boolean), cc: mgrs.filter((e) => e !== owner.email),
+      subject: `[งาน PM ใหม่] ${x.site} · ${x.title}`,
+      html: shell("#1F5FBF", `<p style="margin:0 0 12px">${esc(user.display_name)} ส่งมอบโปรเจกต์ <strong>${esc(clean(b.project_name, 200))}</strong> และตั้งตาราง PM ของลูกค้าให้ทีมคุณ ระบบจะเปิดเคส PM ตามรอบ</p>${fieldTable([["ลูกค้า", x.site], ["งาน PM", x.title], ["ผู้รับผิดชอบ", owner.display_name], ["รอบ", `ทุก ${x.every_months} เดือน`], ["รอบแรก", d.thaiDate(x.next_date)]])}<p style="margin:16px 0 0">${button(`${config3.baseUrl}/#/pm`, "เปิดงาน PM")}</p>`),
+    })
+    .catch((e) => console.error("[pm] project mail:", e.message));
+  return r.id;
+}
+
 /** Opens the case for one round and moves the schedule to the next round. */
 async function openRound(p, { by = null, startDate } = {}) {
   const repo = require("./caserepo");
@@ -257,4 +283,4 @@ function mount(api, { wrap, loadVisible }) {
   }));
 }
 
-module.exports = { mount, runDue, openRound, checklistFor, checkClose, addMonths, list, maFor };
+module.exports = { mount, runDue, openRound, checklistFor, checkClose, addMonths, list, maFor, createFromProject };

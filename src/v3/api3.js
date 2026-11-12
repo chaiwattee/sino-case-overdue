@@ -23,7 +23,7 @@ const jsonFile = express.json({ limit: "4mb" });
 const jsonSr = express.json({ limit: "40mb" }); // service-request attachments (base64, up to 10 files of 10 MB)
 const jsonRca = express.json({ limit: "15mb" }); // RCA file from NICE (base64, up to 10 MB)
 api.use((req, res, next) =>
-  (req.path === "/users/import" || req.path === "/skills/import" || req.path === "/project-templates/import" ? jsonFile
+  (req.path === "/users/import" || req.path === "/skills/import" || req.path === "/project-templates/import" || /^\/projects\/\d+\/import$/.test(req.path) ? jsonFile
     : /^\/sr(\/|$)/.test(req.path) && req.method !== "GET" ? jsonSr
     : /^\/(projects\/\d+\/files|project-tasks\/\d+\/log)$/.test(req.path) ? jsonSr // project documents (base64, up to 10 files of 20 MB)
     : /^\/case\/\d+\/rca$/.test(req.path) ? jsonRca

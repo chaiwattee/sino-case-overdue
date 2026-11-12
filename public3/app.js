@@ -5617,7 +5617,7 @@ ${m.templates.map((t) => `<tr><td style="font-weight:600">${esc(t.name)}</td><td
 <div class="formgrid"><label class="f">ลูกค้า<input name="customer" list="pj-cust" maxlength="200" value="${esc(p ? p.customer : "")}"><datalist id="pj-cust">${(lk.site || []).map((s) => `<option value="${esc(s)}">`).join("")}</datalist></label>
 ${m.isLead ? `<label class="f">PM<select name="pmId">${m.people.map((u) => `<option value="${u.id}" ${(p ? p.pm && p.pm.id === u.id : u.id === ME.user.id) ? "selected" : ""}>${esc(u.display_name)}</option>`).join("")}</select></label>` : ""}</div>
 <div class="formgrid"><label class="f">วันเริ่ม<input type="date" name="start" required value="${p ? p.start : today}"></label><label class="f">วันส่งมอบ<input type="date" name="end" required value="${p ? p.end : ""}"></label>
-${p ? `<label class="f">สถานะ<select name="status">${[["plan", "วางแผน"], ["active", "กำลังดำเนินการ"], ["delivered", "ส่งมอบแล้ว"], ["cancelled", "ยกเลิก"]].map(([k, l]) => `<option value="${k}" ${k === p.status ? "selected" : ""}>${l}</option>`).join("")}</select></label>` : `<label class="f">Template<select name="templateId"><option value="">ไม่ใช้ template (เริ่มจากโปรเจกต์ว่าง)</option>${m.templates.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join("")}</select></label>`}</div>
+${p ? `<label class="f">สถานะ<select name="status">${[["plan", "วางแผน"], ["active", "กำลังดำเนินการ"], ...(p.status === "delivered" ? [["delivered", "ส่งมอบแล้ว"]] : []), ["cancelled", "ยกเลิก"]].map(([k, l]) => `<option value="${k}" ${k === p.status ? "selected" : ""}>${l}</option>`).join("")}</select></label>` : `<label class="f">Template<select name="templateId"><option value="">ไม่ใช้ template (เริ่มจากโปรเจกต์ว่าง)</option>${m.templates.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join("")}</select></label>`}</div>
 ${p ? "" : `<div class="banner" id="pj-tpl" hidden></div>`}
 <label class="f">รายละเอียด (ไม่บังคับ)<textarea name="description" rows="2" maxlength="3000">${esc(p ? p.description : "")}</textarea></label>`,
       async (f) => {
@@ -5654,15 +5654,15 @@ ${p ? "" : `<div class="banner" id="pj-tpl" hidden></div>`}
     const [m, d] = await Promise.all([pjMeta(), api("/projects/" + encodeURIComponent(id))]);
     const p = d.project;
     const s = d.summary;
-    const tab = ["tasks", "timeline", "docs", "md"].includes(params.tab) ? params.tab : "tasks";
-    const tabs = [["tasks", "Task"], ["timeline", "Timeline"], ["docs", "เอกสาร"], ...(d.full && ME.user.role !== "viewer" ? [["md", "Man-day"]] : [])];
+    const tab = ["tasks", "timeline", "docs", "md", "report"].includes(params.tab) && (params.tab !== "report" || d.can.edit) ? params.tab : "tasks";
+    const tabs = [["tasks", "Task"], ["timeline", "Timeline"], ["docs", "เอกสาร"], ...(d.full && ME.user.role !== "viewer" ? [["md", "Man-day"]] : []), ...(d.can.edit ? [["report", "รายงานลูกค้า"]] : [])];
     const pct = s.total ? Math.round((s.done / s.total) * 100) : 0;
     const left = Math.round((new Date(p.end + "T00:00:00") - new Date(m.today + "T00:00:00")) / 86400000);
-    const body = tab === "timeline" ? pjTimeline(d, m) : tab === "docs" ? pjDocs(d, m) : tab === "md" ? pjManday(d) : pjTasks(d);
+    const body = tab === "timeline" ? pjTimeline(d, m) : tab === "docs" ? pjDocs(d, m) : tab === "md" ? pjManday(d) : tab === "report" ? pjReport(d) : pjTasks(d);
     $app.innerHTML = `<div class="pagehead"><div><a href="#/projects" class="muted">← โปรเจกต์</a>
 <h1 style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">${esc(p.name)} ${pjChip(p)}</h1>
 <p class="muted" style="margin:0">${esc(p.customer || "ไม่ระบุลูกค้า")} · PM ${p.pm ? esc(p.pm.name) : "-"} · ${fd(p.start)} – ${fd(p.end, true)}${p.template ? ` · Template “${esc(p.template)}”` : ""}</p></div>
-${d.can.edit ? `<div class="actions" style="margin:0"><button class="btn" type="button" id="pj-edit">แก้ไขโปรเจกต์</button>${d.can.template ? `<button class="btn" type="button" id="pj-tpl">บันทึกเป็น template</button>` : ""}<button class="btn" type="button" id="pj-ms">+ Milestone</button><button class="btn primary" type="button" id="pj-task">+ เพิ่ม task</button></div>` : ""}</div>
+${d.can.edit ? `<div class="actions" style="margin:0"><button class="btn" type="button" id="pj-edit">แก้ไขโปรเจกต์</button>${d.can.template ? `<button class="btn" type="button" id="pj-tpl">บันทึกเป็น template</button>` : ""}<button class="btn" type="button" id="pj-imp">นำเข้าจาก Excel</button>${d.can.deliver && p.status !== "cancelled" ? `<button class="btn" type="button" id="pj-deliver">ส่งมอบโปรเจกต์</button>` : ""}<button class="btn" type="button" id="pj-ms">+ Milestone</button><button class="btn primary" type="button" id="pj-task">+ เพิ่ม task</button></div>` : ""}</div>
 ${p.description ? `<p class="muted" style="margin:0">${esc(p.description)}</p>` : ""}
 ${d.full ? `<div class="kpis">
 <div class="kpi k-all"><span class="l">ความคืบหน้า</span><span class="v">${pct}%</span><span class="s">เสร็จ ${s.done} จาก ${s.total} task</span></div>
@@ -5683,6 +5683,9 @@ ${body}`;
     if ($("pj-edit")) $("pj-edit").onclick = () => openProjectForm(m, p);
     if ($("pj-ms")) $("pj-ms").onclick = () => openMilestone(p);
     if ($("pj-task")) $("pj-task").onclick = () => openTaskForm(d, m);
+    if ($("pj-imp")) $("pj-imp").onclick = () => openTaskImport(d);
+    if ($("pj-deliver")) $("pj-deliver").onclick = () => openDeliver(d, m);
+    bindPjReport(d);
     if ($("pj-tpl")) $("pj-tpl").onclick = () => srDialog("บันทึกเป็น template", `<p class="muted" style="margin:0">เก็บ milestone, task, ทีมที่ทำ, ระยะเวลา (นับวันทำการจากวันเริ่ม) และ man-day ประมาณการ ไว้ใช้กับโปรเจกต์ถัดไป</p><label class="f">ชื่อ template<input name="n" required minlength="3" maxlength="120" value="${esc(p.template || "")}"></label>`, async (f) => {
       await post(`/projects/${p.id}/template`, { name: f.n.value });
       PJ_META = null;
@@ -5806,6 +5809,119 @@ ${Object.entries(by).map(([k, v]) => `<tr><td>${esc(k)}</td><td class="n">${v.n}
 <tr><td><b>รวม</b></td><td></td><td class="n"><b>${r1(tot.est)}</b></td><td class="n"><b>${r1(tot.act)}</b></td><td></td>${rate ? `<td class="n"><b>${baht(tot.act)}</b></td>` : ""}</tr></tbody></table></div>
 <div class="right"><a class="btn" href="api/projects/${d.project.id}/manday.xlsx">ดาวน์โหลด Excel</a></div>
 <p class="hint" style="margin:0">ผู้รับผิดชอบกรอก man-day ตอนบันทึกกิจกรรมใน task (ทีละครึ่งวัน) · PM ใส่ประมาณการตอนสร้าง task</p></section>`;
+  }
+
+  function pjReport(d) {
+    const r = d.project.report;
+    return `<section class="card"><div class="title"><h2>รายงานความคืบหน้าสำหรับลูกค้า</h2><span>PDF ภาษาอังกฤษ แนบไปกับ email · ไม่แสดงชื่อพนักงาน (ยกเว้นชื่อ PM) man-day และต้นทุน</span></div>
+<form id="pj-rep" class="stack"><div class="formgrid"><label class="f">ส่งถึง (email ลูกค้า คั่นด้วย ,)<input name="to" value="${esc(r.to)}" placeholder="name@customer.com"></label>
+<label class="f">CC (ไม่บังคับ · PM ได้สำเนาทุกครั้ง)<input name="cc" value="${esc(r.cc)}"></label>
+<label class="f">ส่งอัตโนมัติ<select name="freq">${[["off", "ไม่ส่งอัตโนมัติ (PM กดส่งเอง)"], ["monthly", "วันทำการแรกของเดือน"], ["biweekly", "ทุก 2 สัปดาห์"]].map(([k, l]) => `<option value="${k}" ${k === r.freq ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>
+<label class="f">เรื่องที่ต้องการจากลูกค้า (ขึ้นในรายงานหัวข้อ “What we need from you” · เว้นว่างได้)<textarea name="note" rows="3" maxlength="2000" placeholder="เช่น ไฟล์เสียง IVR ภายในวันที่ 20 พ.ย.">${esc(r.note)}</textarea></label>
+<p class="hint" style="margin:0">${r.last ? `ส่งล่าสุด ${fd(r.last, true)} · ` : "ยังไม่เคยส่ง · "}รายงานมี % ความคืบหน้า ตาราง milestone งานที่เสร็จตั้งแต่รายงานครั้งก่อน และงานถัดไป 12 รายการ</p>
+<div class="right"><a class="btn" href="api/projects/${d.project.id}/report.pdf" target="_blank" rel="noopener">ดูตัวอย่าง PDF</a><button class="btn" type="submit">บันทึกการตั้งค่า</button><button class="btn primary" type="button" id="pj-rep-send">บันทึกและส่งให้ลูกค้าตอนนี้</button></div></form></section>`;
+  }
+  function bindPjReport(d) {
+    const f = document.getElementById("pj-rep");
+    if (!f) return;
+    const save = () => post(`/projects/${d.project.id}/report`, { to: f.to.value, cc: f.cc.value, freq: f.freq.value, note: f.note.value }, "PUT");
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      await save().then(() => (toast("บันทึกแล้ว"), route()), (err) => toast(err.message, 6000));
+    };
+    const sb = document.getElementById("pj-rep-send");
+    sb.onclick = async () => {
+      if (!confirmInline(sb, "กดอีกครั้งเพื่อส่ง email ถึงลูกค้า")) return;
+      sb.disabled = true;
+      try {
+        await save();
+        const r = await post(`/projects/${d.project.id}/report/send`, {});
+        toast(`ส่งรายงานถึง ${r.to.join(", ")} แล้ว`, 6000);
+        route();
+      } catch (err) {
+        sb.disabled = false;
+        toast(err.message, 6000);
+      }
+    };
+  }
+
+  /** Adds many tasks to this project from an Excel file (same form as templates); checked first, saved on confirm. */
+  function openTaskImport(d) {
+    const p = d.project;
+    const dlg = pjDialog("นำเข้า task จาก Excel", `<form id="pj-impf" class="stack"><p class="hint" style="margin:0">ใช้แบบฟอร์มเดียวกับ template: <a href="api/project-templates/form.xlsx">ดาวน์โหลดแบบฟอร์ม</a> · ถ้าช่องเริ่ม/เสร็จเป็นวันที่ ระบบใช้วันที่นั้นเลย ถ้าเป็นตัวเลข นับวันทำการจากวันเริ่มโปรเจกต์ (${fd(p.start, true)}) · milestone ชื่อเดียวกับที่มีอยู่จะรวมกัน · task ของทีมอื่นเปิด SR อัตโนมัติก่อนวันเริ่ม 7 วันทำการ</p>
+<label class="f">ไฟล์ .xlsx<input type="file" name="file" accept=".xlsx" required></label><div id="pj-impv"></div>
+<div class="right"><button class="btn" type="submit" value="check">ตรวจไฟล์</button><button class="btn primary" type="submit" value="save" id="pj-imps" disabled>เพิ่ม task เข้าโปรเจกต์</button></div></form>`, { wide: true });
+    dlg.onclose = null;
+    const f = dlg.querySelector("#pj-impf");
+    const prev = dlg.querySelector("#pj-impv");
+    const sb = dlg.querySelector("#pj-imps");
+    f.file.onchange = () => {
+      sb.disabled = true;
+      prev.innerHTML = "";
+    };
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      const save = e.submitter && e.submitter.value === "save";
+      const file = f.file.files[0];
+      if (!file) return toast("เลือกไฟล์ก่อน");
+      if (file.size > 3 * 1048576) return toast("ไฟล์ใหญ่เกิน 3 MB", 6000);
+      e.submitter.disabled = true;
+      try {
+        const [fd0] = await readFiles([file]);
+        const r = await post(`/projects/${p.id}/import`, { file: fd0, save });
+        if (r.saved) {
+          toast(`เพิ่ม ${r.tasks} task แล้ว`, 5000);
+          dlg.close();
+          return route();
+        }
+        prev.innerHTML = `${r.errors.length ? `<div class="banner err"><b>แก้ไฟล์ก่อน (${r.errors.length + r.moreErrors} จุด)</b><ul style="margin:6px 0 0;padding-left:18px">${r.errors.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>` : `<div class="banner ok"><b>ไฟล์ถูกต้อง</b> · ${r.tasks} task · ${fd(r.from)} – ${fd(r.to, true)}${r.fromDates ? " (ใช้วันที่จากไฟล์)" : " (นับจากวันเริ่มโปรเจกต์)"}${r.duplicates ? `<br><b>${r.duplicates} task ชื่อซ้ำกับที่มีอยู่แล้วในโปรเจกต์</b> ถ้านำเข้าจะมีซ้ำ` : ""}</div>`}
+<div class="tablewrap" style="margin:0;padding:0"><table><thead><tr><th>Milestone</th><th class="n">Task</th><th class="n">PM ทำเอง</th><th>ตัวอย่าง</th></tr></thead><tbody>${r.milestones.map((x) => `<tr><td style="font-weight:600">${esc(x.name)} ${x.isNew ? `<span class="chip c-all">ใหม่</span>` : ""}</td><td class="n">${x.tasks}</td><td class="n">${x.own}</td><td class="hint">${x.sample.map(esc).join(" · ")}${x.tasks > 3 ? " …" : ""}</td></tr>`).join("")}</tbody></table></div>`;
+        sb.disabled = r.errors.length > 0;
+      } catch (err) {
+        toast(err.message, 7000);
+      }
+      if (e.submitter.value === "check") e.submitter.disabled = false;
+    };
+  }
+
+  /** Hand-over: marks the project delivered and, if wanted, sets up the customer's PM (preventive maintenance) schedule. */
+  async function openDeliver(d, m) {
+    const p = d.project;
+    const open = d.tasks.filter((t) => !["done", "submitted", "cancelled"].includes(t.status));
+    if (open.length) return toast(`ยังมี ${open.length} task ที่ไม่เสร็จ ปิดหรือยกเลิก task ให้ครบก่อนส่งมอบ`, 6000);
+    const lk = await lookups();
+    const users = (await pjMeta(true)).members || [];
+    const teams = m.teams.filter((t) => !m.pmTeams.includes(t.code));
+    const used = d.tasks.find((t) => t.kind === "sr" && t.team);
+    const t0 = used ? used.team : teams[0] && teams[0].code;
+    const plus3 = new Date(m.today + "T00:00:00");
+    plus3.setMonth(plus3.getMonth() + 3);
+    const siteOk = (lk.site || []).some((x) => x.toLowerCase() === (p.customer || "").toLowerCase());
+    const f = srDialog("ส่งมอบโปรเจกต์", `<label class="f" style="max-width:240px">วันที่ส่งมอบ<input type="date" name="date" required value="${m.today}" max="${m.today}"></label>
+<label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="mk" checked> สร้างตาราง PM (Preventive Maintenance) ของลูกค้าต่อเลย</label>
+<div id="dv-pm" class="stack pjlog"><div class="formgrid"><label class="f">ชื่องาน PM<input name="title" maxlength="200" value="${esc("PM " + p.name)}"></label>
+<label class="f">ลูกค้า<select name="site">${siteOk ? "" : `<option value="">เลือกลูกค้าจากรายการ</option>`}${(lk.site || []).map((x) => `<option ${x.toLowerCase() === (p.customer || "").toLowerCase() ? "selected" : ""}>${esc(x)}</option>`).join("")}</select></label></div>
+<div class="formgrid"><label class="f">ทีมที่ดูแล<select name="team">${teams.map((t) => `<option value="${t.code}" ${t.code === t0 ? "selected" : ""}>${esc(t.label)}</option>`).join("")}</select></label>
+<label class="f">ผู้รับผิดชอบ<select name="owner"></select></label>
+<label class="f">รอบ<select name="every">${[[1, "ทุกเดือน"], [3, "ทุก 3 เดือน"], [6, "ทุก 6 เดือน"], [12, "ปีละครั้ง"]].map(([k, l]) => `<option value="${k}" ${k === 3 ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+<label class="f">รอบแรก<input type="date" name="next" value="${isoDay(plus3)}" min="${m.today}"></label></div>
+<label class="f">Checklist (บรรทัดละ 1 ข้อ)<textarea name="checklist" rows="4">ตรวจสถานะระบบและ service
+ตรวจ log และ error
+ตรวจพื้นที่ disk และ backup
+สรุปผลและส่งรายงานให้ลูกค้า</textarea></label>
+<p class="hint" style="margin:0">ระบบเปิดเคส PM ให้ผู้รับผิดชอบตามรอบ และแจ้ง Manager ของทีมทาง email · แก้ไขหรือแนบแบบฟอร์ม MA ได้ที่หน้า “งาน PM”</p></div>`,
+      async (f) => {
+        const r = await post(`/projects/${p.id}/deliver`, { date: f.date.value, pm: f.mk.checked ? { title: f.title.value, site: f.site.value, team: f.team.value, owner_id: f.owner.value, every_months: f.every.value, next_date: f.next.value, checklist: f.checklist.value } : null });
+        toast(r.pmSchedule ? "ส่งมอบแล้ว และสร้างตาราง PM ของลูกค้าแล้ว" : "ส่งมอบโปรเจกต์แล้ว", 6000);
+        route();
+      }, "ส่งมอบ");
+    const owners = () => {
+      const list = users.filter((u) => u.team === f.team.value);
+      f.owner.innerHTML = list.map((u) => `<option value="${u.id}">${esc(u.display_name)}</option>`).join("") || `<option value="">ทีมนี้ยังไม่มีสมาชิก</option>`;
+    };
+    f.team.onchange = owners;
+    f.mk.onchange = () => (f.querySelector("#dv-pm").hidden = !f.mk.checked);
+    owners();
   }
 
   function openMilestone(p, ms) {

@@ -99,6 +99,7 @@ const TASK_SQL = `SELECT t.*, s.id AS sr_id, s.sr_no, s.status AS sr_status, s.t
 /** The status a task shows: own tasks keep their own; handed-over tasks read the service request. */
 function taskStatus(t) {
   if (t.kind === "own") return { status: t.status, doneAt: isoDay(t.done_at) };
+  if (t.status === "cancelled") return { status: "cancelled", doneAt: null }; // cancelled by the PM
   if (!t.sr_id) return { status: "planned", doneAt: null };
   const closed = t.sr_closed_at ? d.toISODate(new Date(t.sr_closed_at)) : null;
   switch (t.sr_status) {
@@ -132,6 +133,7 @@ async function loadProject(id) {
 const serProject = (p) => ({
   id: p.id, name: p.name, customer: p.customer || "", template: p.template || "", pm: p.pm_id ? { id: p.pm_id, name: p.pm_name } : null,
   start: isoDay(p.start_date), end: isoDay(p.end_date), status: p.status, statusLabel: STATUS[p.status], description: p.description || "", deliveredAt: isoDay(p.delivered_at),
+  report: { to: p.report_to || "", cc: p.report_cc || "", freq: p.report_freq || "off", note: p.report_note || "", last: isoDay(p.report_last) },
 });
 async function tasksOf(projectId, hol) {
   hol = hol || (await sr.holidays());
@@ -650,7 +652,7 @@ async function parseTemplate(file) {
     const start = off(x.s0);
     const end = off(x.e0);
     if (Number.isFinite(start) && Number.isFinite(end) && end < start) errors.push(`แถว ${x.r}: “เสร็จ” ก่อน “เริ่ม”`);
-    m.tasks.push({ name: x.name, team: x.team, start: start || 0, end: Math.max(end || 0, start || 0), md: x.md });
+    m.tasks.push({ name: x.name, team: x.team, start: start || 0, end: Math.max(end || 0, start || 0), md: x.md, ...(day0 && x.s0 instanceof Date && x.e0 instanceof Date ? { sIso: isoOf(x.s0), eIso: isoOf(x.e0) } : {}) });
   }
   return { milestones, tasks: rows.length, errors: errors.slice(0, 30), moreErrors: Math.max(0, errors.length - 30), fromDates: !!day0 };
 }
@@ -672,10 +674,246 @@ async function importTemplate(user, b) {
   await q(
     `INSERT INTO project_templates (name, milestones, updated_by, updated_at) VALUES ($1,$2,$3,now())
      ON CONFLICT (name) DO UPDATE SET milestones = EXCLUDED.milestones, updated_by = EXCLUDED.updated_by, updated_at = now()`,
-    [name, JSON.stringify(out.milestones), user.id]
+    [name, JSON.stringify(out.milestones.map((m) => ({ name: m.name, tasks: m.tasks.map(({ name: n, team, start, end, md }) => ({ name: n, team, start, end, md })) }))), user.id]
   );
   await audit(user, "project_template_import", name, { tasks: out.tasks, milestones: out.milestones.length, file: clean(b.file && b.file.name, 150) });
   return { saved: true, ...summary };
+}
+
+/** Adds the tasks of an Excel file to an existing project. Real dates in the file are kept; day numbers count
+ *  working days from the project's start. Milestones are matched by name, new ones are added. */
+async function importTasks(user, p, b) {
+  const out = await parseTemplate(b.file);
+  const hol = await sr.holidays();
+  const start = isoDay(p.start_date);
+  const day0 = sr.isWorkday(start, hol) ? start : sr.addWorkdays(start, 1, hol);
+  const at = (n) => (n > 0 ? sr.addWorkdays(day0, n, hol) : day0);
+  const plan = out.milestones.map((m) => ({ name: m.name, tasks: m.tasks.map((t) => ({ ...t, s: t.sIso || at(t.start), e: t.eIso || at(t.end) })) }));
+  const all0 = plan.flatMap((m) => m.tasks);
+  const existing = await all("SELECT id, name FROM project_milestones WHERE project_id = $1", [p.id]);
+  const dup = new Set((await all("SELECT lower(name) AS n FROM project_tasks WHERE project_id = $1 AND status <> 'cancelled'", [p.id])).map((r) => r.n));
+  const summary = {
+    tasks: out.tasks, errors: out.errors, moreErrors: out.moreErrors, fromDates: out.fromDates,
+    from: all0.map((t) => t.s).sort()[0], to: all0.map((t) => t.e).sort().pop(),
+    duplicates: all0.filter((t) => dup.has(t.name.toLowerCase())).length,
+    milestones: plan.map((m) => ({ name: m.name, tasks: m.tasks.length, own: m.tasks.filter((t) => !t.team).length, isNew: !existing.some((e) => e.name.toLowerCase() === m.name.toLowerCase()), sample: m.tasks.slice(0, 3).map((t) => t.name) })),
+  };
+  if (!b.save || out.errors.length) return { saved: false, ...summary };
+  await tx(async (c) => {
+    let sort = (await c.query("SELECT COALESCE(max(sort),-1)+1 AS n FROM project_milestones WHERE project_id = $1", [p.id])).rows[0].n;
+    for (const m of plan) {
+      let mid = (existing.find((e) => e.name.toLowerCase() === m.name.toLowerCase()) || {}).id;
+      if (!mid) mid = (await c.query("INSERT INTO project_milestones (project_id, name, due_date, sort) VALUES ($1,$2,$3,$4) RETURNING id", [p.id, m.name, m.tasks.map((t) => t.e).sort().pop(), sort++])).rows[0].id;
+      let k = (await c.query("SELECT COALESCE(max(sort),-1)+1 AS n FROM project_tasks WHERE milestone_id = $1", [mid])).rows[0].n;
+      for (const t of m.tasks) {
+        const r = await c.query(
+          `INSERT INTO project_tasks (project_id, milestone_id, name, kind, team, start_date, due_date, base_date, kpi_due, sr_open, md_est, sort, created_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$7,$8,$9,$10,$11) RETURNING id`,
+          [p.id, mid, t.name, t.team ? "sr" : "own", t.team, t.s, t.e, t.team ? "auto" : "now", t.md, k++, user.id]
+        );
+        await addEvent(c, r.rows[0].id, "created", null, { import: clean(b.file && b.file.name, 150) }, user.id);
+      }
+    }
+  });
+  await audit(user, "project_import", p.name, { id: p.id, tasks: out.tasks, file: clean(b.file && b.file.name, 150) });
+  return { saved: true, ...summary };
+}
+
+// ------------------------------------------------------------ hand-over: deliver + the customer's PM schedule
+async function deliver(user, p, b) {
+  const open = (await tasksOf(p.id)).filter((t) => !["done", "submitted", "cancelled"].includes(t.status));
+  if (open.length) throw bad(`ยังมี ${open.length} task ที่ไม่เสร็จ ปิดหรือยกเลิก task ให้ครบก่อนส่งมอบ`);
+  const date = validDate(b.date || todayIso(), "วันที่ส่งมอบ");
+  let pmId = null;
+  if (b.pm) pmId = await require("./pm").createFromProject(user, { ...b.pm, project_id: p.id, project_name: p.name });
+  await q("UPDATE projects SET status = 'delivered', delivered_at = $2, updated_at = now() WHERE id = $1", [p.id, date]);
+  await audit(user, "project_deliver", p.name, { id: p.id, date, pmSchedule: pmId });
+  return { pmSchedule: pmId };
+}
+
+// ------------------------------------------------------------ progress report for the customer (PDF, English like the support report)
+const emailsOf = (x) => String(x || "").split(/[,;\s]+/).map((v) => v.trim().toLowerCase()).filter((v) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v));
+const REPORT_FREQ = { off: "ไม่ส่งอัตโนมัติ", monthly: "วันทำการแรกของเดือน", biweekly: "ทุก 2 สัปดาห์" };
+async function reportData(p) {
+  const hol = await sr.holidays();
+  const tasks = (await tasksOf(p.id, hol)).filter((t) => t.status !== "cancelled");
+  const ms = await all("SELECT * FROM project_milestones WHERE project_id = $1 ORDER BY sort, due_date, id", [p.id]);
+  const t0 = todayIso();
+  const since = isoDay(p.report_last) || d.toISODate(d.addDays(d.today(), -31));
+  const fin = (t) => ["done", "submitted"].includes(t.status);
+  const done = tasks.filter(fin);
+  const STATE = { met: "Completed on schedule", late: "Completed late", missed: "Behind schedule", risk: "Needs attention", plan: "On track" };
+  return {
+    name: p.name, customer: p.customer || "", pm: p.pm_name || "", start: isoDay(p.start_date), end: isoDay(p.end_date), status: p.status, deliveredAt: isoDay(p.delivered_at),
+    total: tasks.length, done: done.length, pct: tasks.length ? Math.round((done.length / tasks.length) * 100) : 0,
+    milestones: ms.map((m) => {
+      const ts = tasks.filter((t) => t.milestoneId === m.id);
+      const [state] = milestoneState(m, tasks);
+      return { name: m.name, due: isoDay(m.due_date), total: ts.length, done: ts.filter(fin).length, state, stateLabel: STATE[state] };
+    }),
+    finished: done.filter((t) => t.doneAt && t.doneAt > since).sort((a, b) => a.doneAt.localeCompare(b.doneAt)).slice(0, 40),
+    next: tasks.filter((t) => !fin(t)).sort((a, b) => a.due.localeCompare(b.due)).slice(0, 12),
+    since, today: t0, note: p.report_note || "",
+  };
+}
+async function reportPdf(p) {
+  const PDFDocument = require("pdfkit");
+  const x = await reportData(p);
+  const C = { ink: "#18212F", muted: "#5B6675", line: "#D9DFE8", blue: "#1F5FBF", green: "#1C6B45", red: "#B3263A", amber: "#B07800", row: "#F3F5F9" };
+  const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const day = (v) => {
+    if (!v) return "-";
+    const t = d.fromISODate(v);
+    return `${t.getDate()} ${MON[t.getMonth()]} ${t.getFullYear()}`;
+  };
+  const doc = new PDFDocument({ size: "A4", margins: { top: 40, bottom: 50, left: 40, right: 40 }, bufferPages: true, info: { Title: `Project Progress Report · ${x.name}`, Author: "SINO S-TECH LIMITED" } });
+  const chunks = [];
+  doc.on("data", (b) => chunks.push(b));
+  const end = new Promise((res) => doc.on("end", res));
+  doc.registerFont("R", path.join(__dirname, "../../assets/fonts/Sarabun-Regular.ttf"));
+  doc.registerFont("B", path.join(__dirname, "../../assets/fonts/Sarabun-Bold.ttf"));
+  const seg = new Intl.Segmenter("th", { granularity: "word" });
+  const fit = (text, width) => {
+    const out = [];
+    for (const para of String(text ?? "").replace(/\r/g, "").split("\n")) {
+      let line = "";
+      for (const { segment } of seg.segment(para)) {
+        if (line && doc.widthOfString(line + segment) > width) {
+          out.push(line.trimEnd());
+          line = segment.trimStart();
+        } else line += segment;
+      }
+      out.push(line);
+    }
+    return out.join("\n");
+  };
+  const W = doc.page.width - 80;
+  const L = 40;
+  const room = (h) => {
+    if (doc.y + h > doc.page.height - 60) doc.addPage();
+  };
+  try {
+    doc.image(path.join(__dirname, "../../public3/sinostech-logo.png"), L, 36, { width: 150 });
+  } catch (e) {}
+  doc.font("B").fontSize(18).fillColor(C.ink).text("Project Progress Report", L, 40, { width: W, align: "right" });
+  doc.font("R").fontSize(11).fillColor(C.muted).text(`As of ${day(x.today)}`, L, doc.y, { width: W, align: "right" });
+  doc.moveTo(L, 86).lineTo(L + W, 86).lineWidth(2).strokeColor(C.blue).stroke();
+  doc.font("B").fontSize(15).fillColor(C.ink).text(fit(x.name, W), L, 98, { width: W });
+  doc.font("R").fontSize(10).fillColor(C.muted).text(`${x.customer ? x.customer + " · " : ""}Planned ${day(x.start)} to ${day(x.end)}${x.deliveredAt ? ` · Delivered ${day(x.deliveredAt)}` : ""}`, L, doc.y + 2, { width: W });
+
+  // Summary tiles
+  const metMs = x.milestones.filter((m) => m.state === "met" || m.state === "late").length;
+  const tiles = [["Overall progress", `${x.pct}%`], ["Work items completed", `${x.done} / ${x.total}`], ["Milestones completed", `${metMs} / ${x.milestones.length}`], [x.deliveredAt ? "Delivered" : "Planned delivery", day(x.deliveredAt || x.end)]];
+  const ty = doc.y + 12;
+  const tw = (W - 3 * 8) / 4;
+  tiles.forEach(([l, v], i) => {
+    const tx0 = L + i * (tw + 8);
+    doc.roundedRect(tx0, ty, tw, 52, 6).fillColor(C.row).fill();
+    doc.font("R").fontSize(9).fillColor(C.muted).text(l, tx0 + 10, ty + 8, { width: tw - 20 });
+    doc.font("B").fontSize(i === 3 ? 13 : 17).fillColor(C.ink).text(v, tx0 + 10, ty + (i === 3 ? 26 : 22), { width: tw - 20 });
+  });
+  doc.roundedRect(L, ty + 62, W, 8, 4).fillColor(C.line).fill();
+  if (x.pct > 0) doc.roundedRect(L, ty + 62, Math.max(8, (W * x.pct) / 100), 8, 4).fillColor(C.green).fill();
+  doc.y = ty + 84;
+
+  const heading = (t) => {
+    room(60);
+    doc.font("B").fontSize(12).fillColor(C.ink).text(t, L, doc.y + 6, { width: W });
+    doc.moveDown(0.3);
+  };
+  // Milestones
+  heading("Milestones");
+  const cols = [[0, W * 0.4, "Milestone"], [W * 0.4, W * 0.18, "Target date"], [W * 0.58, W * 0.2, "Progress"], [W * 0.78, W * 0.22, "Status"]];
+  let y = doc.y;
+  doc.rect(L, y, W, 20).fillColor(C.row).fill();
+  cols.forEach(([cx, cw, label]) => doc.font("B").fontSize(9).fillColor(C.muted).text(label, L + cx + 6, y + 5, { width: cw - 12 }));
+  y += 20;
+  for (const m of x.milestones) {
+    doc.font("R").fontSize(10);
+    const name = fit(m.name, cols[0][1] - 12);
+    const h = Math.max(22, doc.heightOfString(name, { width: cols[0][1] - 12 }) + 10);
+    if (y + h > doc.page.height - 60) {
+      doc.addPage();
+      y = 40;
+    }
+    doc.fillColor(C.ink).text(name, L + 6, y + 5, { width: cols[0][1] - 12 });
+    doc.text(day(m.due), L + cols[1][0] + 6, y + 5, { width: cols[1][1] - 12 });
+    const bw = cols[2][1] - 60;
+    doc.roundedRect(L + cols[2][0] + 6, y + 9, bw, 6, 3).fillColor(C.line).fill();
+    if (m.done) doc.roundedRect(L + cols[2][0] + 6, y + 9, Math.max(6, (bw * m.done) / Math.max(1, m.total)), 6, 3).fillColor(C.green).fill();
+    doc.fillColor(C.muted).fontSize(9).text(`${m.done}/${m.total}`, L + cols[2][0] + bw + 12, y + 6, { width: 44 });
+    doc.font("B").fontSize(9.5).fillColor({ met: C.green, late: C.amber, missed: C.red, risk: C.amber, plan: C.blue }[m.state]).text(m.stateLabel, L + cols[3][0] + 6, y + 6, { width: cols[3][1] - 12 });
+    doc.moveTo(L, y + h).lineTo(L + W, y + h).lineWidth(0.5).strokeColor(C.line).stroke();
+    y += h;
+  }
+  if (!x.milestones.length) {
+    doc.font("R").fontSize(10).fillColor(C.muted).text("No milestones defined yet.", L + 6, y + 6);
+    y += 24;
+  }
+  doc.y = y + 6;
+  const list = (title, rows, empty) => {
+    heading(title);
+    if (!rows.length) return doc.font("R").fontSize(10).fillColor(C.muted).text(empty, L, doc.y, { width: W });
+    for (const [a, b2] of rows) {
+      doc.font("R").fontSize(10);
+      const txt = fit(a, W - 130);
+      const h = doc.heightOfString(txt, { width: W - 130 }) + 4;
+      room(h);
+      const yy = doc.y;
+      doc.fillColor(C.blue).text("•", L, yy, { width: 10 });
+      doc.fillColor(C.ink).text(txt, L + 12, yy, { width: W - 130 });
+      doc.fillColor(C.muted).text(b2, L + W - 110, yy, { width: 110, align: "right" });
+      doc.y = yy + h;
+    }
+  };
+  list(`Completed since ${day(x.since)}`, x.finished.map((t) => [t.name, day(t.doneAt)]), "No work items were completed in this period.");
+  list("Coming up next", x.next.map((t) => [t.name, `Target ${day(t.due)}`]), x.total ? "All work items are complete." : "Work items have not been planned yet.");
+  if (x.note.trim()) {
+    heading("What we need from you");
+    doc.font("R").fontSize(10).fillColor(C.ink).text(fit(x.note, W - 20), L + 10, doc.y, { width: W - 20 });
+  }
+  const range = doc.bufferedPageRange();
+  for (let i = 0; i < range.count; i++) {
+    doc.switchToPage(range.start + i);
+    doc.page.margins.bottom = 0; // writing in the footer area must not start a new page
+    doc.font("R").fontSize(8.5).fillColor(C.muted).text(`SINO S-TECH LIMITED${x.pm ? ` · Project Manager: ${x.pm}` : ""} · Page ${i + 1} of ${range.count}`, L, doc.page.height - 40, { width: W, align: "center", lineBreak: false });
+  }
+  doc.end();
+  await end;
+  return { buffer: Buffer.concat(chunks), data: x };
+}
+const reportFile = (p) => `Project-Report_${String(p.name).replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "").slice(0, 60)}_${todayIso()}.pdf`;
+async function sendReport(p, { by = null } = {}) {
+  const T = emailsOf(p.report_to);
+  if (!T.length) throw bad("ใส่อีเมลผู้รับของลูกค้าก่อน");
+  const CC = [...new Set([...emailsOf(p.report_cc), ...(p.pm_email ? [p.pm_email.toLowerCase()] : [])])].filter((e) => !T.includes(e));
+  const { buffer, data: x } = await reportPdf(p);
+  const html = require("./customermail").layout(
+    "#1F5FBF",
+    `<p style="margin:0 0 14px">Dear ${esc(x.customer || "Customer")} team,</p>
+<p style="margin:0 0 14px">Please find attached the progress report for <strong>${esc(x.name)}</strong>.</p>
+${fieldTable([["Overall progress", `${x.pct}%`], ["Work items completed", `${x.done} of ${x.total}`], ["Planned delivery", x.end]])}
+${x.note.trim() ? `<p style="margin:14px 0 6px"><strong>What we need from you</strong></p><p style="margin:0;white-space:pre-wrap">${esc(x.note)}</p>` : ""}
+<p style="margin:14px 0 0">If you have any questions, simply reply to this email.</p>`,
+    { footer: `${x.pm ? esc(x.pm) + ", " : ""}Project Management, SINO S-TECH LIMITED` }
+  );
+  await graph.sendMail({ to: T, cc: CC, subject: `Project Progress Report · ${x.name}`, html, attachments: [{ name: reportFile(p), contentType: "application/pdf", buffer }] });
+  await q("UPDATE projects SET report_last = CURRENT_DATE WHERE id = $1", [p.id]);
+  await audit(by, "project_report_send", p.name, { id: p.id, to: T, auto: !by });
+  return { to: T, cc: CC };
+}
+/** Scheduled reports: monthly on the first working day, or every 14 days. */
+async function runReports(hol, t0) {
+  let sent = 0;
+  const firstWork = sr.isWorkday(t0.slice(0, 8) + "01", hol) ? t0.slice(0, 8) + "01" : sr.addWorkdays(t0.slice(0, 8) + "01", 1, hol);
+  for (const row of await all("SELECT id FROM projects WHERE status IN ('plan','active') AND report_freq <> 'off' AND COALESCE(report_to,'') <> ''")) {
+    const p = await loadProject(row.id);
+    const last = isoDay(p.report_last);
+    const due = p.report_freq === "monthly" ? t0 >= firstWork && (!last || last < firstWork) : !last || d.toISODate(d.addDays(d.fromISODate(last), 14)) <= t0;
+    if (!due) continue;
+    await sendReport(p).then(() => sent++, (e) => console.error("[projects] report:", p.name, e.message));
+  }
+  return sent;
 }
 
 // ------------------------------------------------------------ reminders (job, working days 08:40)
@@ -683,7 +921,8 @@ async function runReminders() {
   const hol = await sr.holidays();
   const t0 = todayIso();
   if (!sr.isWorkday(t0, hol)) return { skipped: "วันหยุด" };
-  const out = { opened: 0, digests: 0, assignees: 0, errors: 0 };
+  const out = { opened: 0, digests: 0, assignees: 0, errors: 0, reports: 0 };
+  out.reports = await runReports(hol, t0).catch((e) => (console.error("[projects] reports:", e.message), 0));
   // 1) "Auto" tasks open their service request AUTO_OPEN_DAYS working days before they start.
   const auto = await all(
     `SELECT t.id, t.start_date FROM project_tasks t JOIN projects p ON p.id = t.project_id
@@ -798,7 +1037,8 @@ function mount(api, { wrap }) {
     res.json({
       canCreate: await isPm(req.user), isLead: await isPmLead(req.user), pmTeams: s.teams, mdRate: (await costVisible(req.user)) ? s.mdRate : null,
       templates: (await all("SELECT id, name, milestones, updated_at FROM project_templates ORDER BY name")).map((t) => ({ id: t.id, name: t.name, milestones: t.milestones })),
-      teams: await all("SELECT code, label FROM teams ORDER BY sort"), people: await pmPeople(), docCats: DOC_CATS, fileExt: FILE_EXT, maxFileMb: MAX_FILE_MB,
+      teams: await all("SELECT code, label FROM teams ORDER BY sort"), people: await pmPeople(),
+      members: (await isPm(req.user)) ? await all("SELECT u.id, u.display_name, t.team FROM users u JOIN user_teams t ON t.user_id = u.id WHERE u.active AND u.role IN ('engineer','manager') ORDER BY u.display_name") : [], docCats: DOC_CATS, fileExt: FILE_EXT, maxFileMb: MAX_FILE_MB,
       severities: Object.entries(sr.SEV).map(([k, v]) => ({ key: k, label: v })), holidays: [...(await sr.holidays())].sort(), today: todayIso(), autoOpenDays: AUTO_OPEN_DAYS,
     });
   }));
@@ -873,6 +1113,38 @@ function mount(api, { wrap }) {
     const { p } = await projectFor(req.user, req.params.id, { edit: true });
     await saveTemplate(req.user, p, req.body || {});
     res.json({ ok: true });
+  }));
+  api.post("/projects/:id/import", wrap(async (req, res) => {
+    const { p } = await projectFor(req.user, req.params.id, { edit: true });
+    res.json({ ok: true, ...(await importTasks(req.user, p, req.body || {})) });
+  }));
+  api.post("/projects/:id/deliver", wrap(async (req, res) => {
+    const { p } = await projectFor(req.user, req.params.id, { edit: true });
+    res.json({ ok: true, ...(await deliver(req.user, p, req.body || {})) });
+  }));
+  api.get("/projects/:id/report.pdf", wrap(async (req, res) => {
+    const { p, full } = await projectFor(req.user, req.params.id);
+    if (!full) throw bad("ไม่มีสิทธิ์", 403);
+    const { buffer } = await reportPdf(p);
+    res.set("Content-Type", "application/pdf");
+    res.set("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(reportFile(p))}`);
+    res.end(buffer);
+  }));
+  api.put("/projects/:id/report", wrap(async (req, res) => {
+    const { p } = await projectFor(req.user, req.params.id, { edit: true });
+    const b = req.body || {};
+    const words = (v) => String(v || "").split(/[,;\s]+/).filter(Boolean);
+    const bad1 = [...words(b.to), ...words(b.cc)].find((x) => !emailsOf(x).length);
+    if (bad1) throw bad(`อีเมลไม่ถูกต้อง: ${bad1}`);
+    const freq = REPORT_FREQ[b.freq] ? b.freq : "off";
+    if (freq !== "off" && !emailsOf(b.to).length) throw bad("ใส่อีเมลผู้รับของลูกค้าก่อนเปิดการส่งอัตโนมัติ");
+    await q("UPDATE projects SET report_to=$2, report_cc=$3, report_freq=$4, report_note=$5, updated_at=now() WHERE id=$1", [p.id, emailsOf(b.to).join(", ") || null, emailsOf(b.cc).join(", ") || null, freq, clean(b.note, 2000) || null]);
+    await audit(req.user, "project_report_settings", p.name, { id: p.id, freq, to: emailsOf(b.to) });
+    res.json({ ok: true });
+  }));
+  api.post("/projects/:id/report/send", wrap(async (req, res) => {
+    const { p } = await projectFor(req.user, req.params.id, { edit: true });
+    res.json({ ok: true, ...(await sendReport(await loadProject(p.id), { by: req.user })) });
   }));
   api.get("/projects/:id/manday.xlsx", wrap(async (req, res) => {
     const { p, full } = await projectFor(req.user, req.params.id);
