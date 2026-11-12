@@ -465,6 +465,8 @@ function startJobs() {
   job("customer-report", "10 9 2 * *", j.reports, () => require("./custreport").sendAll());
   // Preventive maintenance rounds: open the cases that are due, every morning 07:00.
   job("pm-open", "0 7 * * *", true, () => require("./pm").runDue());
+  // Cross-team transfer requests waiting more than a day: remind the managers who must act.
+  job("transfer-reminders", "40 8 * * 1-5", true, () => require("./transfer").runReminders());
   // Customer intake: hourly "nobody has claimed this yet" reminders (checked every 5 min), chatbot webhooks, cleanup.
   const intake = require("./intake");
   job("intake-reminders", "*/5 * * * *", j.intake, () => intake.runReminders());

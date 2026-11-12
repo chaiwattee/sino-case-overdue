@@ -587,6 +587,11 @@ async function notifyClaimed(i, kase, by, owner) {
       .sendText(`✅ รับเคสแล้ว ${i.req_no} → ${kase.caseNo}${kase.csNumber ? ` (${kase.csNumber})` : ""}\n${kase.site} · ${i.severity} · User: ${owner.display_name}\nโดย ${by.display_name} · รอรับ ${mins < 60 ? mins + " นาที" : Math.floor(mins / 60) + " ชม. " + (mins % 60) + " นาที"}`)
       .catch(() => {});
   }
+  await notifyCustomerOwner(i, kase, owner, { claimedAt: i.claimed_at });
+}
+
+/** Tell the customer which engineer has their case: when it is first taken, and again when it moves to another team. */
+async function notifyCustomerOwner(i, kase, owner, { claimedAt }) {
   // Requests that came by email: reply in the customer's own thread from the shared mailbox.
   let threaded = false;
   if (i.channel === "email") threaded = await mail().onClaimed(i, kase, owner).catch((e) => (console.error("[intake] email thread reply:", e.message), false));
@@ -612,7 +617,7 @@ async function notifyClaimed(i, kase, by, owner) {
     subject: i.subject,
     severity: kase.severity,
     owner: { name: owner.display_name, phone: owner.phone || null, email: owner.email },
-    claimedAt: new Date(i.claimed_at).toISOString(),
+    claimedAt: new Date(claimedAt || Date.now()).toISOString(),
     lineUserId: i.line_user_id,
     externalRef: i.external_ref,
     contact: { name: i.contact_name, phone: i.contact_phone },
@@ -1037,5 +1042,5 @@ function mountInternal(api, { need, wrap: w }) {
 
 module.exports = {
   apiV1, publicApi, mountInternal, enqueue, createLink, submit, claim, reject, runReminders, deliver, runRetention, matchCustomer, norm, settings, nextReqNo,
-  FILE_EXT, unknownCustomerLabel, storeIntakeFile, removeStored, notifyNew, isAfterHours, businessHours, hotline, hotlineForCustomers, teamRecipients, customerName, intakeUrl, SEV_COLOR, siteList,
+  notifyCustomerOwner, FILE_EXT, unknownCustomerLabel, storeIntakeFile, removeStored, notifyNew, isAfterHours, businessHours, hotline, hotlineForCustomers, teamRecipients, customerName, intakeUrl, SEV_COLOR, siteList,
 };

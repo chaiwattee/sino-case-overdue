@@ -11,7 +11,7 @@ const { q, one, all, audit } = require("./db");
 const FONT_R = path.join(__dirname, "../../assets/fonts/Sarabun-Regular.ttf");
 const FONT_B = path.join(__dirname, "../../assets/fonts/Sarabun-Bold.ttf");
 const LOGO = path.join(__dirname, "../../public3/sinostech-logo.png");
-const EXCLUDE = ["cancel", "n/a"];
+const EXCLUDE = ["cancel", "n/a", "transferred"]; // a transferred case is counted once, as its new case
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const C = { ink: "#18212F", muted: "#5B6675", line: "#D9DFE8", blue: "#1F5FBF", green: "#1C6B45", red: "#B3263A", row: "#F3F5F9" };
 

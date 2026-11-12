@@ -152,6 +152,8 @@ const ok = crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(req.headers
 
 `message` เป็นข้อความสำเร็จรูปภาษาอังกฤษ ส่งให้ลูกค้าได้เลย หรือใช้ฟิลด์อื่นสร้าง Flex message เอง · `updateUrl` คือลิงก์ "Add details / screenshots" ของเคสนี้ ใช้ทำปุ่มให้ลูกค้าเพิ่มข้อมูลและรูปได้จนเคสปิด + 7 วัน
 
+`case.claimed` อาจมาได้มากกว่า 1 ครั้งต่อ `reqNo`: เมื่อเคสถูกโอนไปอีกทีม ระบบส่ง `case.claimed` อีกครั้งพร้อม `caseNo` ใหม่และ Engineer คนใหม่ ให้แชทบอทส่งข้อความแจ้งลูกค้าเหมือนครั้งแรก และใช้ค่าล่าสุดแทนค่าเดิม (`updateUrl` ยังเป็นลิงก์เดิม)
+
 ### intake.closed
 
 ทีมปิดคำขอโดยไม่เปิดเคส (ซ้ำหรือไม่ใช่เคส) ส่งข้อความถึงลูกค้าเฉพาะเมื่อ `notifyCustomer = true`

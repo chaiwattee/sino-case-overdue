@@ -74,6 +74,7 @@ require("./teamview").mount(api, { wrap });
 require("./custinfo").mount(api, { wrap });
 require("./custreport").mount(api, { wrap, need, perms });
 require("./pm").mount(api, { wrap, loadVisible });
+require("./transfer").mount(api, { wrap, loadVisible });
 require("./push").mount(api, { wrap });
 require("./casefiles").mount(api, { wrap, loadVisible, perms, jsonFile });
 require("./rca").mount(api, { wrap, loadVisible, perms, repo, tx: require("./db").tx, audit });
@@ -184,7 +185,8 @@ function ser3(c) {
     customerUnconfirmed: c.customerUnconfirmed || "",
     resolution: c.resolution || "", rootCause: c.rootCause || "", resolvedAt: c.resolvedAt || null, resolvedBy: c.resolvedBy || "", ownerUserId: c.owner_id, updatedAt: c.updatedAt, startAt: c.startAt,
     rcaText: c.rcaText || "", rcaCategory: c.rcaCategory || "", rcaDate: c.rcaDate || "", rcaFileName: c.rcaFileName || "", rcaBy: c.rcaBy || "", rcaAt: c.rcaAt || null,
-    rcaPending: !!(c.csNumber && !c.rcaText && c.stage !== "closed"), sitePendingId: c.sitePendingId || null, complexity: c.complexity };
+    rcaPending: !!(c.csNumber && !c.rcaText && c.stage !== "closed"), sitePendingId: c.sitePendingId || null, complexity: c.complexity,
+    transferredFrom: c.transferredFrom || null, transferredTo: c.transferredTo || null };
 }
 
 api.get("/cases", wrap(async (req, res) => {
@@ -340,6 +342,11 @@ api.get("/changes", wrap(async (req, res) => {
 // ------------------------------------------------------------ single case
 async function loadVisible(req) {
   const c = await repo.getCase(Number(req.params.id));
+  if (c && !repo.canSee(req.user, c) && req.method === "GET" && (await require("./transfer").awaitsMe(req.user, c.id))) {
+    // A manager of the team a transfer is waiting on may read the case to decide, before it is theirs (read only).
+    req.viaTransfer = true;
+    return c;
+  }
   if (!c || !repo.canSee(req.user, c)) throw bad("ไม่พบเคสนี้ หรือไม่มีสิทธิ์ดู", 404);
   return c;
 }
@@ -364,8 +371,10 @@ api.get("/case/:id", wrap(async (req, res) => {
     activities: acts,
     alerts,
     changes,
-    can: {
-      edit: await perms.can(u, "case_edit", c),
+    transfer: await require("./transfer").forCaseView(u, c),
+    can: req.viaTransfer ? { edit: false, close: false, reassign: false, editStart: false, delete: false } : {
+      // A case closed by a transfer is kept as history only; work continues on the new case.
+      edit: !repo.isTransferred(c) && (await perms.can(u, "case_edit", c)),
       close: await perms.can(u, "case_close", c),
       reassign: await perms.can(u, "case_reassign", c),
       editStart: await perms.can(u, "case_edit_start", c),
@@ -403,6 +412,7 @@ api.put("/case/:id", wrap(async (req, res) => {
   const u = req.user;
   const b = req.body || {};
   if (!(await perms.can(u, "case_edit", c))) throw bad("ไม่มีสิทธิ์แก้ไขเคสนี้", 403);
+  if (repo.isTransferred(c)) throw bad("เคสนี้โอนไปทีมอื่นแล้ว แก้ไขที่เคสใหม่");
   if (b.status && config.closedStatuses.includes(String(b.status).toLowerCase()) !== config.closedStatuses.includes(c.status.toLowerCase())) {
     if (!(await perms.can(u, "case_close", c))) throw bad("ไม่มีสิทธิ์ปิดหรือเปิดเคสนี้ใหม่", 403);
   }

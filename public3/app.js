@@ -575,7 +575,7 @@ ${showOwner ? `<td><a href="#/owner/${encodeURIComponent(c.ownerId)}">${esc(c.ow
       .join("")}</tbody></table></div>`;
   }
 
-  const FIELD = { extension: "ขยายเวลา (Due)", severity: "Severity", start_date: "Start date", target_date: "Target date", status: "Status", owner: "User", deleted: "ลบเคส", resolution: "Resolution" };
+  const FIELD = { extension: "ขยายเวลา (Due)", severity: "Severity", start_date: "Start date", target_date: "Target date", status: "Status", owner: "User", deleted: "ลบเคส", resolution: "Resolution", team: "ทีม" };
   const DIR = { later: "เลื่อนออกไป", earlier: "เลื่อนเข้ามา", set: "ใส่ค่าใหม่", cleared: "ลบค่าออก" };
   function changeRows(changes, { empty = "ยังไม่มีประวัติการแก้ไข" } = {}) {
     if (!changes.length) return `<div class="empty">${empty}</div>`;
@@ -606,7 +606,7 @@ ${showOwner ? `<td><a href="#/owner/${encodeURIComponent(c.ownerId)}">${esc(c.ow
   // ------------------------------------------------------------ overview
   async function viewOverview(params) {
     setNav("overview");
-    const [data, ikHtml, extHtml, lk, srAll, cp] = await Promise.all([api("/overview?" + qs({ source: params.source })), intakeSection(), extPendingSection(), lookups(), srList("team"), api("/customers/pending").catch(() => ({ list: [] }))]);
+    const [data, ikHtml, extHtml, lk, srAll, cp] = await Promise.all([api("/overview?" + qs({ source: params.source })), intakeSection(), Promise.all([extPendingSection(), transferPendingSection()]).then((a) => a.join("")), lookups(), srList("team"), api("/customers/pending").catch(() => ({ list: [] }))]);
     const cpHtml = cp.list.length
       ? `<section class="card" style="border-color:var(--r1)"><div class="title"><h2>ลูกค้าใหม่รออนุมัติ (${cp.list.length})</h2><span>เคสปิดไม่ได้จนกว่าจะตรวจชื่อ</span></div>
 <div class="stack" style="gap:8px">${cp.list.map((x) => `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><span><strong>${esc(x.value)}</strong> <span class="muted">· เพิ่มโดย ${esc(x.created_by || "-")} ${fdt(x.created_at)}${x.similar.length ? ` · ใกล้เคียง: ${esc(x.similar.map((v) => v.value).join(", "))}` : ""}</span></span>${x.cases[0] ? `<a class="btn" href="#/case/${x.cases[0].id}" style="min-height:32px">${x.canDecide ? "ตรวจชื่อ" : "ดูเคส"} · ${esc(x.cases[0].caseNo || "#" + x.cases[0].id)}</a>` : ""}</div>`).join("")}</div></section>`
@@ -704,6 +704,7 @@ ${lvl("audit_view") !== "none" ? `<section class="card"><div class="title"><h2>�
     bindRowLinks();
     bindIntakeActions($app, () => route());
     bindExtPending($app);
+    bindTransferPending($app);
   }
 
   // ------------------------------------------------------------ case lists
@@ -826,7 +827,7 @@ ${caseTable(cases, { missingRes: showRes, empty: "ไม่พบเคสตา
 
   async function viewMine(params) {
     setNav("mine");
-    const [{ cases }, lk, ikHtml, extHtml, srAll] = await Promise.all([api("/cases?mine=1"), lookups(), intakeSection(), extPendingSection(), srList("assigned")]);
+    const [{ cases }, lk, ikHtml, extHtml, srAll] = await Promise.all([api("/cases?mine=1"), lookups(), intakeSection(), Promise.all([extPendingSection(), transferPendingSection()]).then((a) => a.join("")), srList("assigned")]);
     const srMine = srAll.filter(srOpen).sort(srByTarget);
     const srLate = srMine.filter((r) => r.status === "overdue" || r.daysLeft === 0 || r.daysLeft === 1);
     const tab = params.tab || "open";
@@ -895,6 +896,7 @@ ${srWorkTable(srMine)}</section>
     bindRowLinks();
     bindIntakeActions($app, () => route());
     bindExtPending($app);
+    bindTransferPending($app);
     const q = document.getElementById("q");
     q.onkeydown = (e) => {
       if (e.key === "Enter") location.hash = "#/mine?" + qs({ tab, q: q.value });
@@ -1019,7 +1021,7 @@ ${allowNew ? `<span class="hint">${newHint}</span>` : ""}</div>`;
     const statusOpts = lk.status
       .filter((s) => isNew || permsC.close || !["success", "resolved", "cancel", "n/a"].includes(s.toLowerCase()) || s === c.status)
       .map((s) => `<option ${s === c.status ? "selected" : ""}>${esc(s)}</option>`)
-      .join("");
+      .join("") + (c.status && !lk.status.includes(c.status) ? `<option selected>${esc(c.status)}</option>` : ""); // e.g. Transferred, set only by a transfer
     const productOpts = [`<option value="">-</option>`, ...lk.product.map((p) => `<option ${p === c.product ? "selected" : ""}>${esc(p)}</option>`)].join("");
     const ownerField = permsC.reassign
       ? `<label class="f">User<select name="owner_id">${usersRes.users
@@ -1051,8 +1053,9 @@ ${!isNew && c.site && !c.customerUnconfirmed && lvl("export") === "all" ? `<a cl
 ${!isNew && permsC.delete ? `<button class="btn danger" type="button" id="btn-del">ลบเคส</button>` : ""}
 ${!isNew && !closed && permsC.close ? `<button class="btn" type="button" id="btn-close" style="color:var(--normal-fg)">ปิดเคส</button>` : ""}
 ${!ro ? `<button class="btn primary" type="submit" form="cf">${isNew ? "เปิดเคส" : "บันทึก"}</button>` : ""}</div></div>
-${ro ? `<div class="banner warn">คุณดูเคสนี้ได้อย่างเดียว ไม่มีสิทธิ์แก้ไข</div>` : ""}
+${ro && !c.transferredTo ? `<div class="banner warn">คุณดูเคสนี้ได้อย่างเดียว ไม่มีสิทธิ์แก้ไข</div>` : ""}
 ${!isNew && c.sitePendingId ? `<div class="banner warn unconf" id="site-pending"><div><strong>ลูกค้าใหม่รอ Manager อนุมัติ</strong> · ${esc(c.site)}<br><span style="font-size:13px">ทำงานต่อได้ตามปกติ แต่ปิดเคสได้หลัง Manager ของทีมอนุมัติชื่อ แก้ชื่อ หรือรวมกับลูกค้าที่มีอยู่</span></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" type="button" id="btn-site-remind">เตือน Manager อีกครั้ง</button><button class="btn primary" type="button" id="btn-site-decide" hidden>ตรวจชื่อลูกค้า</button></div></div>` : ""}
+${!isNew ? transferBanner(c, data.transfer) : ""}
 ${!isNew && c.customerUnconfirmed ? `<div class="banner warn unconf"><div><strong>ลูกค้ายังไม่ยืนยัน</strong> · ${esc(c.customerUnconfirmed)}${data.intake ? `<br><span style="font-size:14px">ผู้แจ้ง ${esc(data.intake.contact_name || "-")}${data.intake.contact_phone ? ` · <a href="tel:${esc(data.intake.contact_phone.replace(/[^+0-9]/g, ""))}">${esc(data.intake.contact_phone)}</a>` : ""}${data.intake.contact_email ? ` · ${esc(data.intake.contact_email)}` : ""} · ${esc(data.intake.req_no)}</span>` : ""}<br><span style="font-size:13px">โทรถามลูกค้าว่าเป็นบริษัทไหน แล้วกด “ยืนยันลูกค้า” เคสนี้จะเข้ารายงานและ KPI ของลูกค้ารายนั้น</span></div>${permsC.edit ? `<button class="btn primary" type="button" id="btn-confirm-cust">ยืนยันลูกค้า</button>` : ""}</div>` : ""}
 <div class="cols">
 <form id="cf" class="main" novalidate>
@@ -1063,7 +1066,7 @@ ${comboBox("site", c.site, lk.site, { label: "Site / ลูกค้า", allowN
 <label class="f"><span class="req">Severity</span><select name="severity" required>${isNew ? `<option value="">เลือก Severity</option>` : ""}${(lk.severity || []).map((x) => `<option ${x === c.severity ? "selected" : ""}>${esc(x)}</option>`).join("")}</select></label>
 <label class="f">Product<select name="product">${productOpts}</select></label>
 <label class="f"><span class="req">Status</span><select name="status">${statusOpts}</select><span class="hint" id="st-hint">${esc(statusHelp(c.status))}</span></label>
-<label class="f"><span class="req">ทีม</span><select name="team" ${!isNew && !permsC.reassign ? "disabled" : ""}>${teamOpts}</select></label>
+<label class="f"><span class="req">ทีม</span><select name="team" ${!isNew && !(permsC.reassign && ME.user.role === "admin") ? "disabled" : ""}>${teamOpts}</select>${!isNew && !closed ? `<span class="hint">ย้ายไปทีมอื่นใช้ “ขอโอนข้ามทีม” ให้ Manager ทั้ง 2 ทีมยืนยัน</span>` : ""}</label>
 ${ownerField}
 <label class="f" style="grid-column:1/-1"><span class="req">Task / Case</span><input type="text" name="task" value="${esc(c.task || "")}" maxlength="300" required></label>
 ${isNew ? `<label class="f" style="grid-column:1/-1">รายละเอียดตอนเปิดเคส<textarea name="detail" rows="3" placeholder="ลูกค้าแจ้งอะไร อาการเป็นอย่างไร"></textarea></label>` : ""}
@@ -1080,6 +1083,7 @@ ${data && data.changes.length ? `<section class="card"><h2>ประวัติ
 </form>
 <aside class="side">
 ${slaCard}
+${isNew ? "" : transferCard(c, data.transfer, closed)}
 ${closed ? "" : `<section class="card sim-card" id="sim-card" hidden></section>`}
 ${data ? checklistCard(data.checklist, c, permsC) : ""}
 ${data && data.csat ? csatCard(data.csat) : ""}
@@ -1113,6 +1117,7 @@ ${actsHtml(data.activities)}</section>`}
 
     if (!isNew) {
       bindExtCard(c, extData.extensions);
+      bindTransferCard(c, data.transfer);
       bindChecklist(c);
       bindTeamFiles(c);
     }
@@ -2523,6 +2528,128 @@ ${live.map((e) => `<tr><td><a class="mono" href="#/case/${e.case_id}">${esc(e.ca
 <td>${chip(EXT_ST[e.status][0], EXT_ST[e.status][1])}<div class="muted" style="font-size:12px">${esc(e.approver_name || "-")}${e.decision_note ? ` · “${esc(e.decision_note)}”` : ""}</div></td></tr>`).join("")}</tbody></table></div></section>`;
   }
   const extTag = (c) => (c.pendingExtId ? ` <span class="chip c-r1">รออนุมัติขยาย</span>` : c.extCount ? ` <span class="chip c-normal">ขยาย ${c.extCount} ครั้ง</span>` : "");
+
+  // ------------------------------------------------------------ cross-team transfer (โอนเคสข้ามทีม)
+  const TR_ST = { source: ["r1", "รอ Manager ทีมเดิม"], target: ["r1", "รอทีมใหม่รับเคส"], accepted: ["ok", "โอนสำเร็จ"], rejected: ["fail", "ไม่อนุมัติ"], cancelled: ["closed", "ยกเลิก"] };
+  function transferBanner(c, t) {
+    if (!t) return "";
+    if (t.to) return `<div class="banner info tr-banner"><strong>เคสนี้โอนไปทีมอื่นแล้ว: ${esc(t.to.teamLabel)}</strong> · ทำงานต่อที่เคสใหม่ <a class="mono" href="#/case/${t.to.id}">${esc(t.to.caseNo)}</a><br><span style="font-size:13px">เคสนี้ปิดด้วยสถานะ Transferred เก็บไว้เป็นประวัติ SLA ของทีมเดิมนับตาม Due เดิม</span></div>`;
+    const p = t.pending;
+    const top = p ? `<div class="banner warn tr-banner"><strong>มีคำขอโอนเคสไปทีม ${esc(p.toLabel)}</strong> · ${TR_ST[p.status][1]}${p.can.act ? ` · <a href="#tr-card" data-trjump>รอคุณ${p.status === "source" ? "อนุมัติ" : "รับเคส"}</a>` : ""}</div>` : "";
+    if (t.from) return top + `<div class="banner info tr-banner"><strong>รับโอนจากทีม ${esc(t.from.teamLabel)}</strong> · เคสเดิม <a class="mono" href="#/case/${t.from.id}">${esc(t.from.caseNo)}</a> (ดูประวัติงานเดิมได้ที่เคสเดิม) · SLA ของเคสนี้นับจากวันที่รับโอน</div>`;
+    return top;
+  }
+  function transferSteps(p) {
+    const st = (done, cur, label, sub) => `<li class="${done ? "done" : cur ? "cur" : ""}"><b>${label}</b>${sub ? `<span>${sub}</span>` : ""}</li>`;
+    return `<ol class="tr-steps">
+${st(true, false, "ขอโอน", `${esc(p.requestedBy || "-")} · ${fdt(p.requestedAt)}`)}
+${st(p.status !== "source", p.status === "source", `Manager ${esc(p.fromLabel)} อนุมัติ`, p.sourceBy ? `${esc(p.sourceBy)} · ${fdt(p.sourceAt)}` : "รออนุมัติ")}
+${st(p.status === "accepted", p.status === "target", `Manager ${esc(p.toLabel)} รับเคส`, p.status === "target" ? "รอรับเคส" : p.targetBy ? `${esc(p.targetBy)} · ${fdt(p.targetAt)}` : "")}</ol>`;
+  }
+  function transferCard(c, t, closed) {
+    if (!t) return "";
+    const p = t.pending;
+    if (!p && !t.history.length && (closed || !t.canRequest)) return "";
+    const hist = t.history.filter((h) => h.caseId === c.id);
+    return `<section class="card" id="tr-card"><div class="title"><h2>โอนข้ามทีม</h2><span>Manager ทั้ง 2 ทีมยืนยัน</span></div>
+${p ? `<div class="banner warn" style="display:flex;flex-direction:column;gap:10px">
+<div><strong>ขอโอนไปทีม ${esc(p.toLabel)}</strong> · ${chip(TR_ST[p.status][0], TR_ST[p.status][1])}</div>
+<div style="font-size:14px">เหตุผล: ${esc(p.reason)}</div>
+${transferSteps(p)}
+<div class="hint" style="margin:0">ระหว่างรอ เคสยังอยู่กับทีม ${esc(p.fromLabel)} และ SLA ยังนับต่อ</div>
+${p.can.act ? `<div class="stack" style="gap:8px">
+${p.status === "target" ? `<label class="f">User ในทีม ${esc(p.toLabel)} ที่จะรับเคส<select id="tr-owner"><option value="">เลือก User</option>${(p.owners || []).map((u) => `<option value="${u.id}">${esc(u.display_name)} · ${ROLE[u.role] || u.role}</option>`).join("")}</select></label>` : ""}
+<label class="f">ความเห็น ${p.status === "target" ? "(ถึง User คนใหม่)" : ""} · บังคับเมื่อไม่อนุมัติ<input id="tr-note" maxlength="1000"></label>
+<div class="actions" style="justify-content:flex-start"><button class="btn primary" type="button" data-tract="${p.status === "source" ? "approve" : "accept"}" data-id="${p.id}">${p.status === "source" ? "อนุมัติให้โอนออก" : "รับเคสเข้าทีม"}</button><button class="btn" type="button" data-tract="reject" data-id="${p.id}">ไม่อนุมัติ</button></div></div>` : ""}
+${p.can.cancel ? `<div><button class="btn" type="button" data-tract="cancel" data-id="${p.id}" style="min-height:34px">ยกเลิกคำขอ</button></div>` : ""}</div>` : ""}
+${!p && !closed && t.canRequest ? `<button class="btn" type="button" id="tr-req">ขอโอนข้ามทีม</button><div class="hint">เมื่อทีมใหม่รับ ระบบปิดเคสนี้ด้วยการโอน และเปิดเคสใหม่ให้ทีมใหม่ SLA เริ่มนับใหม่</div>` : ""}
+${hist.length ? `<ul class="ext-hist">${hist.map((h) => `<li>${chip(TR_ST[h.status][0], TR_ST[h.status][1])} <strong>→ ${esc(h.toLabel)}</strong> · ${fdt(h.requestedAt)} · โดย ${esc(h.requestedBy || "-")}
+<div>เหตุผล: ${esc(h.reason)}</div>
+${h.status === "accepted" ? `<div class="muted">รับโดย ${esc(h.targetBy || "-")} · เคสใหม่ <a class="mono" href="#/case/${h.newCaseId}">${esc(h.newCaseNo || "")}</a> · User ${esc(h.newOwner || "-")}</div>` : h.decidedBy ? `<div class="muted">${esc(h.decidedBy)}${h.decisionNote ? ` · “${esc(h.decisionNote)}”` : ""}</div>` : ""}</li>`).join("")}</ul>` : ""}</section>`;
+  }
+  async function actTransfer(b, root, after) {
+    const id = b.dataset.id;
+    const act = b.dataset.tract;
+    const noteEl = root.querySelector(`[data-trnote="${id}"]`) || document.getElementById("tr-note");
+    const ownerEl = root.querySelector(`[data-trowner="${id}"]`) || document.getElementById("tr-owner");
+    const note = noteEl ? noteEl.value : "";
+    if (act === "reject" && note.trim().length < 3) return toast("ใส่เหตุผลที่ไม่อนุมัติในช่องความเห็น");
+    if (act === "accept" && !(ownerEl && ownerEl.value)) return toast("เลือก User ที่จะรับเคส");
+    if (act === "cancel" && !confirm("ยกเลิกคำขอโอนนี้?")) return;
+    b.disabled = true;
+    try {
+      const r = await post(`/transfers/${id}/${act}`, { note, ownerId: ownerEl ? Number(ownerEl.value) : undefined });
+      if (act === "accept") {
+        toast(`รับเคสแล้ว เคสใหม่ ${r.newCaseNo} ระบบแจ้งทุกฝ่ายทาง email`, 6000);
+        location.hash = `#/case/${r.newCaseId}`;
+        return;
+      }
+      toast(act === "approve" ? "อนุมัติแล้ว ระบบแจ้ง Manager ทีมใหม่" : act === "reject" ? "ไม่อนุมัติ ระบบแจ้งผู้ขอแล้ว" : "ยกเลิกคำขอแล้ว", 5000);
+      after && after();
+    } catch (e) {
+      b.disabled = false;
+      toast(e.message, 6000);
+    }
+  }
+  function bindTransferCard(c, t) {
+    const card = document.getElementById("tr-card");
+    if (!card) return;
+    const req = document.getElementById("tr-req");
+    if (req) req.onclick = () => openTransferRequest(c);
+    const jump = document.querySelector("[data-trjump]");
+    if (jump) jump.onclick = (e) => {
+      e.preventDefault();
+      card.scrollIntoView({ behavior: "smooth", block: "center" });
+    };
+    card.querySelectorAll("[data-tract]").forEach((b) => (b.onclick = () => actTransfer(b, card, () => viewCase(c.id))));
+  }
+  function openTransferRequest(c) {
+    const dlg = document.getElementById("dlg");
+    const iAmManager = ME.user.role === "admin" || (ME.user.role === "manager" && (ME.user.teams || []).includes(c.team));
+    dlg.innerHTML = `<form class="card" method="dialog" id="trf"><h2>ขอโอนเคส ${esc(caseRef(c))} ข้ามทีม</h2>
+<div class="stat2" style="grid-template-columns:repeat(3,1fr)"><div><div class="k">ทีมปัจจุบัน</div><div class="v" style="font-size:18px">${esc(c.sourceLabel)}</div></div>
+<div><div class="k">Due ทีมเดิม</div><div class="v" style="font-size:18px">${fd(c.dueDate)}</div></div>
+<div><div class="k">สถานะ</div><div class="v" style="font-size:18px">${c.stage === "overdue" ? `เกิน Due ${c.daysOverdue} วัน` : `เหลือ ${c.daysLeft} วัน`}</div></div></div>
+<label class="f">โอนไปทีม<select name="to" required><option value="">เลือกทีม</option>${ME.teams.filter((t) => t.key !== c.team).map((t) => `<option value="${esc(t.key)}">${esc(t.label)}</option>`).join("")}</select></label>
+<label class="f">เหตุผล และสิ่งที่ทีมใหม่ต้องรู้<textarea name="reason" rows="4" required minlength="10" placeholder="เช่น ปัญหาอยู่ที่ระบบ WFM ไม่ใช่ CXone ตรวจ log แล้วพบ ... ลูกค้าติดต่อคุณ ... ที่เบอร์ ..."></textarea></label>
+<ol class="tr-steps" style="margin:0">${iAmManager ? `<li class="done"><b>คุณเป็น Manager ของทีมนี้</b><span>ถือว่าอนุมัติฝั่งทีมเดิมแล้ว</span></li>` : `<li class="cur"><b>Manager ทีม ${esc(c.sourceLabel)} อนุมัติ</b></li>`}<li><b>Manager ทีมใหม่รับเคส และเลือก User</b></li><li><b>ปิดเคสนี้ด้วยการโอน · เปิดเคสใหม่ให้ทีมใหม่</b><span>SLA ทีมใหม่เริ่มนับจากวันที่รับ</span></li></ol>
+<p class="hint" style="margin:0">ระหว่างรอ เคสยังอยู่กับทีมเดิม SLA ยังนับต่อ ถ้าเคสเกิน Due ไปแล้ว ทีมเดิมยังนับเป็นไม่ทัน SLA</p>
+<div class="right"><button class="btn" value="cancel" formnovalidate>ยกเลิก</button><button class="btn primary" value="ok">ส่งคำขอ</button></div></form>`;
+    const f = dlg.querySelector("#trf");
+    f.onsubmit = async (e) => {
+      if (e.submitter && e.submitter.value === "cancel") return;
+      e.preventDefault();
+      if (!f.to.value) return toast("เลือกทีมที่จะโอนไป");
+      if (f.reason.value.trim().length < 10) return toast("ใส่เหตุผลอย่างน้อย 10 ตัวอักษร");
+      try {
+        const r = await post(`/case/${c.id}/transfer`, { toTeam: f.to.value, reason: f.reason.value });
+        dlg.close();
+        toast(r.status === "target" ? "ส่งคำขอแล้ว ระบบแจ้ง Manager ทีมใหม่" : "ส่งคำขอแล้ว ระบบแจ้ง Manager ของทีมนี้ให้อนุมัติ", 6000);
+        viewCase(c.id);
+      } catch (err) {
+        toast(err.message, 6000);
+      }
+    };
+    dlg.showModal();
+  }
+  /** Box on the overview / my cases: transfer requests waiting for me, and mine still waiting. */
+  async function transferPendingSection() {
+    let d;
+    try {
+      d = await api("/transfers/pending");
+    } catch (e) {
+      return "";
+    }
+    const row = (p, forMe) => `<div class="ext-item"><div><a class="mono" href="#/case/${p.caseId}">${esc(p.caseNo)}</a> · <strong>${esc(p.site || "-")}</strong> · ${esc(p.task || "")} <span class="chip c-r1">${esc(p.fromLabel)} → ${esc(p.toLabel)}</span></div>
+<div class="muted" style="font-size:13px">ขอโดย ${esc(p.requestedBy || "-")} · ${fdt(p.requestedAt)} · User ${esc(p.ownerName || "-")} · ${TR_ST[p.status][1]}</div>
+<div class="ext-reason">${esc(p.reason)}</div>
+${forMe ? `<div class="formgrid" style="align-items:end">${p.status === "target" ? `<div class="actions" style="justify-content:flex-start"><a class="btn primary" href="#/case/${p.caseId}">เปิดเคสเพื่อรับและเลือก User</a></div>` : `<label class="f">ความเห็น (บังคับเมื่อไม่อนุมัติ)<input data-trnote="${p.id}"></label><div class="actions" style="justify-content:flex-start"><button class="btn primary" type="button" data-tract="approve" data-id="${p.id}">อนุมัติให้โอนออก</button><button class="btn" type="button" data-tract="reject" data-id="${p.id}">ไม่อนุมัติ</button></div>`}</div>` : ""}</div>`;
+    return `${d.forMe.length ? `<section class="card ext-wrap tr-wrap"><div class="title"><h2>คำขอโอนเคสข้ามทีม รอคุณ (${d.forMe.length})</h2></div>${d.forMe.map((p) => row(p, true)).join("")}</section>` : ""}
+${d.mine.length ? `<section class="card"><div class="title"><h2>คำขอโอนเคสของคุณ รอดำเนินการ (${d.mine.length})</h2></div>${d.mine.map((p) => row(p, false)).join("")}</section>` : ""}`;
+  }
+  function bindTransferPending(root) {
+    root.querySelectorAll(".tr-wrap [data-tract]").forEach((b) => (b.onclick = () => actTransfer(b, root, () => route())));
+  }
 
   // ------------------------------------------------------------ customer intake (requests from LINE OA / links)
   const IK_STATUS = { pending: "รอรับเคส", claiming: "กำลังรับ", claimed: "รับแล้ว", rejected: "ปฏิเสธ", duplicate: "ซ้ำ" };

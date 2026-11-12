@@ -31,7 +31,7 @@ async function similar(user, { q, site, product, exclude, limit = 5 }) {
   const out = [];
   for (const c of cases) {
     if (exclude && c.id === Number(exclude)) continue;
-    if (["cancel", "n/a"].includes(String(c.status).toLowerCase())) continue;
+    if (["cancel", "n/a", "transferred"].includes(String(c.status).toLowerCase())) continue;
     const tw = words(c.task);
     const rw = words(`${c.resolution} ${c.rcaText}`);
     let hit = 0;
@@ -74,7 +74,8 @@ const ymOf = (dt) => d.toISODate(dt).slice(0, 7);
 async function customer(user, site) {
   const kpi = require("./kpi");
   const csat = require("./csat");
-  const cases = await repo.loadCases(user, { where: "lower(c.site) = lower($1)", params: [site] });
+  // A case closed by a cross-team transfer continues as its new case: count the customer's work once.
+  const cases = (await repo.loadCases(user, { where: "lower(c.site) = lower($1)", params: [site] })).filter((c) => !repo.isTransferred(c));
   const today = d.today();
   const months = [];
   for (let n = 5; n >= 0; n--) {

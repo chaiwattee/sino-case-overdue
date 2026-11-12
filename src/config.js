@@ -75,10 +75,10 @@ const config = {
   slaDays: Number(env.SLA_DAYS || 7),
   alert1Day: Number(env.ALERT1_DAY || 3),
   alert2Day: Number(env.ALERT2_DAY || 6),
-  closedStatuses: (env.CLOSED_STATUSES || "Success,Cancel,N/A,Resolved")
-    .split(",")
+  // "Transferred" is set only by an accepted cross-team transfer (src/v3/transfer.js); it is always a closed status.
+  closedStatuses: [...new Set([...(env.CLOSED_STATUSES || "Success,Cancel,N/A,Resolved").split(","), "Transferred"]
     .map((s) => s.trim().toLowerCase())
-    .filter(Boolean),
+    .filter(Boolean))],
 
   // Schedules (cron syntax, server local time = Asia/Bangkok)
   alertCron: env.ALERT_CRON || "0 8 * * *",

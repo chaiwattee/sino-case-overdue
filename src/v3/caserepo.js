@@ -24,6 +24,11 @@ const CASE_SELECT = `
   LEFT JOIN users ur ON ur.id = c.resolved_by
   LEFT JOIN users urc ON urc.id = c.rca_by`;
 
+// Closed by an accepted cross-team transfer (transfer.js). Never chosen by hand; the case becomes read-only.
+const TRANSFERRED = "Transferred";
+const isTransferredStatus = (s) => String(s || "").trim().toLowerCase() === "transferred";
+const isTransferred = (c) => isTransferredStatus(c && c.status);
+
 const ROOT_CAUSES = ["ค่าระบบ / Configuration", "Bug ของ Product", "ฝั่งลูกค้า / Network", "ผู้ใช้ใช้งานไม่ถูกต้อง", "คำขอ / ไม่ใช่ปัญหา", "อื่นๆ"];
 const RESOLUTION_MIN = 20;
 // Default meaning of each Status (admin can change the text in Settings).
@@ -102,6 +107,8 @@ function toCase(r) {
     rcaFileMime: r.rca_file_mime || "",
     rcaBy: r.rca_by_name || "",
     rcaAt: r.rca_at || null,
+    transferredFrom: r.transferred_from || null,
+    transferredTo: r.transferred_to || null,
   };
   const c = withStage(base);
   c.closedAt = c.endDate;
@@ -217,6 +224,7 @@ async function createCase(user, body, { ownerId, startDate } = {}) {
     const site = body.customer_unconfirmed ? { value: clean(body.site, 120), created: false } : await ensureLookup(c, "site", body.site, user);
     if (body.product) await ensureLookup(c, "product", body.product, user);
     const status = clean(body.status, 40) || "In Progress";
+    if (isTransferredStatus(status)) throw Object.assign(new Error("สถานะ Transferred ใช้ได้เฉพาะการโอนข้ามทีม"), { status: 400 });
     const closed = config.closedStatuses.includes(status.toLowerCase());
     const resolution = closed && !body.legacy_key ? checkResolution(body.resolution) : null;
     const rca = closed && !body.legacy_key && rcaMod().needsRca(body.cs_number, status) ? rcaMod().checkRca(body.rca) : null;
@@ -288,6 +296,8 @@ async function updateCaseTx(user, kase, body, { allowReassign }) {
 
     if (body.status !== undefined && clean(body.status, 40) && clean(body.status, 40) !== kase.status) {
       const status = clean(body.status, 40);
+      if (isTransferred(kase) || isTransferredStatus(status))
+        throw Object.assign(new Error(isTransferred(kase) ? "เคสนี้โอนไปทีมอื่นแล้ว แก้ไขที่เคสใหม่" : "สถานะ Transferred ใช้ได้เฉพาะการโอนข้ามทีม"), { status: 400 });
       const wasClosed = isClosed(kase);
       const nowClosed = config.closedStatuses.includes(status.toLowerCase());
       let resolution = null;
@@ -361,7 +371,13 @@ async function updateCaseTx(user, kase, body, { allowReassign }) {
       await addActivity(c, kase.id, user, { kind: "โอนเคส", detail: `User: ${kase.owner || "-"} → ${nu.display_name}`, system: true });
       await logChange(c, kase, user, "owner", kase.owner, nu.display_name);
     }
-    if (allowReassign && body.team && body.team !== kase.team) set("team", body.team);
+    // Moving a case to another team goes through a transfer request (both managers confirm, see transfer.js).
+    // Only an admin can still correct the team directly, e.g. a case opened under the wrong team by mistake.
+    if (allowReassign && body.team && body.team !== kase.team) {
+      if (user?.role !== "admin") throw Object.assign(new Error("ย้ายเคสไปทีมอื่นต้องส่งคำขอโอนข้ามทีม ให้ Manager ทั้ง 2 ทีมยืนยัน"), { status: 400 });
+      set("team", body.team);
+      await logChange(c, kase, user, "team", kase.team, body.team);
+    }
 
     if (sets.length) {
       sets.push("updated_at = now()");
@@ -396,6 +412,7 @@ async function deleteCase(user, kase, reason) {
 }
 
 module.exports = {
+  TRANSFERRED, isTransferred, isTransferredStatus,
   loadCases, getCase, canSee, activities, addActivity, createCase, updateCase, editStartDate, deleteCase,
   ensureLookup, logChange, toCase, CASE_SELECT, SEVERITIES, severityOf, customerSeverityOf, ROOT_CAUSES, RESOLUTION_MIN, STATUS_HELP,
 };

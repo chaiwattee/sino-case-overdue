@@ -111,7 +111,7 @@ async function compute(ym) {
   // Cases the owner worked on in the month: open at any point during it.
   const cases = await all(
     `SELECT c.id, c.case_no, c.owner_id, c.site, c.product, c.severity, c.task, c.start_date, c.due_date, c.end_date, c.start_at, c.created_at,
-            c.closed_at, c.ext_count, c.legacy_key, c.resolution, c.team, c.cs_number, c.complexity, u.display_name AS owner_name, u.email AS owner_email, u.active,
+            c.closed_at, c.ext_count, c.legacy_key, c.resolution, c.team, c.cs_number, c.complexity, c.status, u.display_name AS owner_name, u.email AS owner_email, u.active,
             u.dedicated_customer
        FROM cases c JOIN users u ON u.id = c.owner_id
       WHERE c.start_date <= $2 AND (c.end_date IS NULL OR c.end_date >= $1)`,
@@ -239,7 +239,9 @@ async function compute(ym) {
       // "Remote / Onsite" technical work keeps its own +0.3; an onsite meeting is not counted twice.
       const onsiteWork = h.some((a) => /onsite/i.test(a.kind || "") && !MEETING_KINDS.includes(a.kind));
       const auto = 1 + (c.cs_number ? 0.5 : 0) + (onsiteWork ? 0.3 : 0) + meetingBonus(h) + deployBonus(h) + (c.end_date && d.daysBetween(d.fromISODate(c.start_date), d.fromISODate(c.end_date)) > 7 ? 0.2 : 0);
-      return (SEV_W[c.severity] || 1) * auto * (c.complexity ? Number(c.complexity) : 1);
+      // Moved to another team before it was finished: half the points (the new team's owner earns the rest on the new case).
+      const moved = String(c.status || "").toLowerCase() === "transferred" ? 0.5 : 1;
+      return (SEV_W[c.severity] || 1) * auto * (c.complexity ? Number(c.complexity) : 1) * moved;
     };
     m.points = r1(closed.reduce((a, c) => a + casePoints(c), 0));
     m.weighted = m.points; // kept for older screens

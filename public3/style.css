@@ -854,3 +854,13 @@ tr.off td { opacity: .55; }
 .kpf-w input { width: 72px; text-align: right; }
 .kpf-sum { text-align: right; font-weight: 700; color: #2E9E6A; font-size: 14px; } .kpf-sum.bad { color: var(--over-fg); }
 @media (max-width: 1000px) { .kpf-grid { grid-template-columns: 1fr; } }
+
+/* Cross-team transfer */
+.banner.info { background: var(--surface-2); color: var(--ink); border-left: 4px solid var(--accent); line-height: 1.6; }
+.banner.info a { font-weight: 700; }
+.tr-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.tr-steps li { position: relative; padding-left: 26px; display: flex; flex-direction: column; color: var(--muted); }
+.tr-steps li b { color: var(--ink); font-weight: 600; }
+.tr-steps li::before { content: ""; position: absolute; left: 4px; top: 4px; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--line); background: var(--surface); }
+.tr-steps li.done::before { background: var(--normal); border-color: var(--normal); }
+.tr-steps li.cur::before { background: var(--r1); border-color: var(--r1); }
