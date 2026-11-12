@@ -122,7 +122,7 @@ const SR_FROM = `service_requests s JOIN teams t ON t.code = s.team JOIN users r
   LEFT JOIN users cb ON cb.id = s.closed_by LEFT JOIN users eb ON eb.id = s.ext_by
   LEFT JOIN project_tasks pt ON pt.id = s.project_task_id LEFT JOIN projects pj ON pj.id = pt.project_id`;
 
-function ser(s, hol, viewer) {
+function ser(s, hol, viewer, noKpi) {
   const t = todayIso();
   const target = isoDay(s.target_date);
   const overdue = s.status === "in_progress" && target && target < t;
@@ -147,6 +147,7 @@ function ser(s, hol, viewer) {
     createdAt: s.created_at, updatedAt: s.updated_at,
     mine: viewer ? s.requester_id === viewer.id : undefined,
     project: s.project_id ? { id: s.project_id, name: s.project_name, taskId: s.project_task_id } : null,
+    noRating: noKpi ? noKpi.has(s.team) : false, // a team without KPI is not rated: the requester only confirms
   };
 }
 async function load(id) {
@@ -562,15 +563,17 @@ async function confirmDone(user, s, b) {
   if (s.requester_id !== user.id) throw bad("ยืนยันรับงานได้เฉพาะผู้ขอ", 403);
   if (s.status !== "done") throw bad("ยืนยันรับงานได้เฉพาะคำขอที่เสร็จแล้ว");
   if (s.confirmed_at) throw bad("ยืนยันรับงานไปแล้ว");
-  const rating = Number(b.rating);
-  if (!Number.isInteger(rating) || rating < 1 || rating > 5) throw bad("เลือกคะแนน 1–5");
+  // Teams without KPI (e.g. DEV) are not scored: the requester confirms the work without a rating.
+  const noRating = (await require("./kpiprofiles").noKpiTeams()).has(s.team);
+  const rating = noRating ? null : Number(b.rating);
+  if (!noRating && (!Number.isInteger(rating) || rating < 1 || rating > 5)) throw bad("เลือกคะแนน 1–5");
   const note = clean(b.note, 1000);
-  if (rating <= 2 && note.length < 5) throw bad("ให้คะแนน 1–2 ช่วยบอกเหตุผลสั้นๆ ให้ทีมปรับปรุง");
+  if (!noRating && rating <= 2 && note.length < 5) throw bad("ให้คะแนน 1–2 ช่วยบอกเหตุผลสั้นๆ ให้ทีมปรับปรุง");
   await tx(async (c) => {
     await c.query("UPDATE service_requests SET confirmed_at = now(), rating = $2, rating_note = $3, updated_at = now() WHERE id = $1", [s.id, rating, note || null]);
     await addEvent(c, s.id, "confirmed", note || null, { rating }, user.id);
   });
-  await audit(user, "sr_confirm", s.sr_no, { rating });
+  await audit(user, "sr_confirm", s.sr_no, noRating ? { noRating: true } : { rating });
 }
 async function reopen(user, s, b) {
   if (s.requester_id !== user.id) throw bad("ขอเปิดใหม่ได้เฉพาะผู้ขอ", 403);
@@ -660,10 +663,11 @@ function mount(api, { wrap }) {
   const reply = async (req, res, s) => {
     const hol = await holidays();
     const fresh = await load(s.id);
+    const noKpi = await require("./kpiprofiles").noKpiTeams();
     const { events: ev, files } = await events(s.id);
     const manage = await canManage(req.user, fresh);
     res.json({
-      sr: ser(fresh, hol, req.user), events: ev, files,
+      sr: ser(fresh, hol, req.user, noKpi), events: ev, files,
       can: {
         manage,
         edit: fresh.requester_id === req.user.id && ["pending", "info"].includes(fresh.status),

@@ -109,7 +109,7 @@ function taskStatus(t) {
     default: return { status: "planned", doneAt: null, srGone: true }; // rejected / cancelled: the PM may hand it over again
   }
 }
-function serTask(t, hol) {
+function serTask(t, hol, noKpi) {
   const st = taskStatus(t);
   const t0 = todayIso();
   const due = isoDay(t.due_date);
@@ -125,6 +125,7 @@ function serTask(t, hol) {
     sr: t.sr_id ? { id: t.sr_id, no: t.sr_no, status: t.sr_status, rating: t.sr_rating, ext: t.sr_ext_target ? { target: isoDay(t.sr_ext_target), reason: t.sr_ext_reason, by: t.sr_ext_by } : null } : null,
     assignee: t.assignee_id ? { id: t.assignee_id, name: t.assignee_name } : null,
     mdEst: num(t.md_est), mdAct: num(t.md_act), sort: t.sort,
+    noMd: !!(noKpi && t.kind === "sr" && noKpi.has(t.team)), // a team without KPI is not asked for man-days
   };
 }
 async function loadProject(id) {
@@ -137,7 +138,8 @@ const serProject = (p) => ({
 });
 async function tasksOf(projectId, hol) {
   hol = hol || (await sr.holidays());
-  return (await all(`${TASK_SQL} WHERE t.project_id = $1 ORDER BY m.sort NULLS LAST, m.due_date, t.sort, t.start_date, t.id`, [projectId])).map((t) => serTask(t, hol));
+  const noKpi = await require("./kpiprofiles").noKpiTeams();
+  return (await all(`${TASK_SQL} WHERE t.project_id = $1 ORDER BY m.sort NULLS LAST, m.due_date, t.sort, t.start_date, t.id`, [projectId])).map((t) => serTask(t, hol, noKpi));
 }
 function summary(tasks) {
   const live = tasks.filter((t) => t.status !== "cancelled");
@@ -473,7 +475,8 @@ async function canLog(user, t, p) {
 }
 async function addLog(user, t, p, b) {
   const text = clean(b.text, 3000);
-  const md = Math.max(0, Math.min(30, num(b.md)));
+  const noMd = t.kind === "sr" && (await require("./kpiprofiles").noKpiTeams()).has(t.team);
+  const md = noMd ? 0 : Math.max(0, Math.min(30, num(b.md)));
   const files = Array.isArray(b.files) ? b.files : [];
   if (!text && !md && !files.length) throw bad("พิมพ์สิ่งที่ทำ ใส่ man-day หรือแนบไฟล์");
   if (md && Math.round(md * 2) !== md * 2) throw bad("man-day ใส่ทีละครึ่งวัน เช่น 0.5, 1, 1.5");
@@ -492,7 +495,7 @@ async function taskDetail(user, t, p, full) {
   );
   const files = await all("SELECT id, event_id, file_name, size, mime, created_at FROM project_files WHERE task_id = $1 ORDER BY id", [t.id]);
   const edit = await canEdit(user, p);
-  const task = serTask(row, hol);
+  const task = serTask(row, hol, await require("./kpiprofiles").noKpiTeams());
   return {
     task, events: events.map((e) => ({ ...e, md: num(e.md) })), files,
     can: {

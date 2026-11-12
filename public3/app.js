@@ -3944,7 +3944,7 @@ ${fileBox(m)}
       : ["ext_asked", "ext_approved", "ext_rejected"].includes(e.kind) ? `${dlong(dd.from)} → ${dlong(dd.to)}`
       : e.kind === "reassigned" ? `${esc(dd.from || "-")} → ${esc(dd.to)}`
       : e.kind === "reopened" ? `Target ${dlong(dd.target)}`
-      : e.kind === "confirmed" ? `ให้คะแนน ${"★".repeat(dd.rating || 0)}${"☆".repeat(5 - (dd.rating || 0))} ${dd.rating}/5`
+      : e.kind === "confirmed" ? (dd.rating ? `ให้คะแนน ${"★".repeat(dd.rating)}${"☆".repeat(5 - dd.rating)} ${dd.rating}/5` : "")
       : e.kind === "closed" ? esc({ delivered: "ส่งงานแล้ว", not_possible: "ทำไม่ได้", duplicate: "ซ้ำกับคำขออื่น" }[dd.outcome] || "") : "";
     const fs = files.filter((f) => f.event_id === e.id);
     return `<li class="ev-${esc(e.kind)}"><div><b>${SR_EV[e.kind] || esc(e.kind)}</b> โดย ${esc(e.by_name || "ระบบ")}${extra ? ` · ${extra}` : ""}</div>
@@ -4042,8 +4042,8 @@ ${approvePanel}
 ${c.update ? `<form id="upf" class="stack" style="border-top:1px solid var(--line);padding-top:14px"><label class="f">${r.mine ? "เพิ่มข้อมูลถึงผู้รับผิดชอบ" : "บันทึก / ตอบผู้ขอ"}<textarea name="text" rows="2" maxlength="3000" placeholder="${r.mine ? "เช่น แนบ template เพิ่ม" : "เช่น กำลังดึงข้อมูล คาดว่าส่งได้พรุ่งนี้"}"></textarea></label>${fileBox(m)}<div class="right"><button class="btn primary" type="submit">ส่ง</button></div></form>` : ""}
 </section></div>
 <aside class="side"><section class="card"><h2>ข้อมูลคำขอ</h2><table class="kvt">${info.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join("")}</table>
-${c.confirm ? `<p class="hint">ได้รับงานแล้ว กด “ยืนยันรับงาน” และให้คะแนน 1–5${c.reopen ? ` · ถ้างานยังไม่ตรงที่ขอ กด “ขอเปิดใหม่” ได้ถึง ${dlong(r.canReopenUntil)}` : ""}</p>` : r.canReopenUntil && c.reopen ? `<p class="hint">ถ้างานยังไม่ตรงที่ขอ กด “ขอเปิดใหม่” ได้ถึง ${dlong(r.canReopenUntil)}</p>` : ""}
-${r.confirmedAt ? `<p class="hint">ผู้ขอยืนยันรับงานแล้ว · ${"★".repeat(r.rating || 0)}${"☆".repeat(5 - (r.rating || 0))} ${r.rating}/5 · ${fdt(r.confirmedAt)}</p>` : ""}</section></aside></div>`;
+${c.confirm ? `<p class="hint">ได้รับงานแล้ว กด “ยืนยันรับงาน”${r.noRating ? "" : " และให้คะแนน 1–5"}${c.reopen ? ` · ถ้างานยังไม่ตรงที่ขอ กด “ขอเปิดใหม่” ได้ถึง ${dlong(r.canReopenUntil)}` : ""}</p>` : r.canReopenUntil && c.reopen ? `<p class="hint">ถ้างานยังไม่ตรงที่ขอ กด “ขอเปิดใหม่” ได้ถึง ${dlong(r.canReopenUntil)}</p>` : ""}
+${r.confirmedAt ? `<p class="hint">ผู้ขอยืนยันรับงานแล้ว${r.rating ? ` · ${"★".repeat(r.rating)}${"☆".repeat(5 - r.rating)} ${r.rating}/5` : ""} · ${fdt(r.confirmedAt)}</p>` : ""}</section></aside></div>`;
 
     const $ = (x) => document.getElementById(x);
     const up = $("upf");
@@ -4113,10 +4113,10 @@ ${r.confirmedAt ? `<p class="hint">ผู้ขอยืนยันรับง
         srDialog(
           "ยืนยันรับงาน",
           `<p class="muted" style="margin:0">งานจาก ${esc(r.assignee ? r.assignee.name : "ทีม")} ตรงกับที่ขอแค่ไหน</p>
-<div class="sr-rate" role="radiogroup" aria-label="คะแนน">${[1, 2, 3, 4, 5].map((n) => `<label><input type="radio" name="rating" value="${n}" required ${n === 5 ? "" : ""}><span>${n}</span><small>${["", "ไม่ตรงเลย", "ต้องแก้หลายจุด", "พอใช้", "ดี", "ดีมาก"][n]}</small></label>`).join("")}</div>
-<label class="f">ความเห็น (ไม่บังคับ · ให้ 1–2 ต้องใส่)<textarea name="note" rows="2" maxlength="1000"></textarea></label>
+${r.noRating ? `<p class="hint" style="margin:0">ทีม ${esc(r.teamLabel)} ไม่คิด KPI จึงไม่มีการให้คะแนน ยืนยันว่าได้รับงานแล้วเท่านั้น</p>` : `<div class="sr-rate" role="radiogroup" aria-label="คะแนน">${[1, 2, 3, 4, 5].map((n) => `<label><input type="radio" name="rating" value="${n}" required><span>${n}</span><small>${["", "ไม่ตรงเลย", "ต้องแก้หลายจุด", "พอใช้", "ดี", "ดีมาก"][n]}</small></label>`).join("")}</div>`}
+<label class="f">${r.noRating ? "ความเห็น (ไม่บังคับ)" : "ความเห็น (ไม่บังคับ · ให้ 1–2 ต้องใส่)"}<textarea name="note" rows="2" maxlength="1000"></textarea></label>
 <p class="hint" style="margin:0">ยืนยันแล้วจะขอเปิดใหม่ไม่ได้</p>`,
-          (f) => act("confirm", { rating: Number(f.rating.value), note: f.note.value }, "ยืนยันรับงานแล้ว ขอบคุณสำหรับคะแนน"),
+          (f) => act("confirm", { rating: r.noRating ? null : Number(f.rating.value), note: f.note.value }, r.noRating ? "ยืนยันรับงานแล้ว" : "ยืนยันรับงานแล้ว ขอบคุณสำหรับคะแนน"),
           "ยืนยันรับงาน"
         );
     if ($("b-reopen")) $("b-reopen").onclick = () => srDialog("ขอเปิดคำขอใหม่", `<p class="muted" style="margin:0">คำขอกลับไปที่ ${esc(r.assignee ? r.assignee.name : "ผู้รับผิดชอบเดิม")}</p><label class="f">งานยังไม่ตรงที่ขออย่างไร<textarea name="reason" rows="3" required minlength="10" maxlength="1000"></textarea></label>`, (f) => act("reopen", { reason: f.reason.value }, "เปิดคำขอใหม่แล้ว ระบบแจ้งผู้รับผิดชอบ"), "ขอเปิดใหม่");
@@ -5704,7 +5704,7 @@ ${pjBar(x.done, x.total)}<div class="pjms-top"><span class="hint">${x.done}/${x.
     const groups = [...ms.map((x) => [x, d.tasks.filter((t) => t.milestoneId === x.id)]), [null, d.tasks.filter((t) => !t.milestoneId)]].filter(([, ts]) => ts.length);
     const rows = groups.map(([x, ts]) => `<tr class="pjmsrow"><td colspan="${full ? 5 : 4}"><strong>◆ ${x ? esc(x.name) : "ไม่อยู่ใน milestone"}</strong>${x ? ` <span class="hint">· ต้อง meet ${fd(x.due)}</span>` : ""}</td></tr>
 ${ts.map((t) => `<tr class="click ${t.status === "cancelled" ? "pj-off" : ""}" data-task="${t.id}" tabindex="0"><td><span style="font-weight:600;color:var(--accent)">${esc(t.name)}</span><div class="hint">${t.kind === "own" ? "PM ทำเอง" : t.sr ? `<a class="mono" href="#/sr/${t.sr.id}">${esc(t.sr.no)}</a>` : t.srOpen === "auto" ? "เปิด SR อัตโนมัติก่อนเริ่ม 7 วันทำการ" : "ยังไม่ได้เปิด SR"}</div></td>
-<td>${ptWho(t)}</td><td>${ptDue(t)}</td><td>${ptChip(t)}</td>${full ? `<td class="n">${ME.user.role === "viewer" ? "" : `${t.mdAct} / ${t.mdEst}`}</td>` : ""}</tr>`).join("")}`).join("");
+<td>${ptWho(t)}</td><td>${ptDue(t)}</td><td>${ptChip(t)}</td>${full ? `<td class="n">${ME.user.role === "viewer" ? "" : `${t.noMd ? "-" : t.mdAct} / ${t.mdEst}`}</td>` : ""}</tr>`).join("")}`).join("");
     return `${cards}<section class="card"><div class="title"><h2>Task</h2><span>กดที่ task เพื่อดูรายละเอียด${full ? " · สถานะ task ที่มอบงานดึงจาก SR อัตโนมัติ" : ""}</span></div>
 <div class="tablewrap"><table><thead><tr><th>Task</th><th>ผู้รับผิดชอบ</th><th>กำหนดเสร็จ</th><th>สถานะ</th>${full ? `<th class="n">${ME.user.role === "viewer" ? "" : "Man-day ใช้ / ประมาณ"}</th>` : ""}</tr></thead><tbody>
 ${rows || `<tr><td colspan="5"><div class="empty">${d.can.edit ? (ms.length ? "ยังไม่มี task กด “+ เพิ่ม task”" : "เริ่มจากเพิ่ม milestone (เช่น ติดตั้งระบบ, UAT) แล้วเพิ่ม task") : "ไม่มี task"}</div></td></tr>`}</tbody></table></div></section>`;
@@ -6017,14 +6017,14 @@ ${t.srGone ? `<div class="banner warn">คำขอบริการเดิ�
 ${t.sr ? `<tr><th>คำขอบริการ</th><td><a class="mono" href="#/sr/${t.sr.id}">${esc(t.sr.no)}</a> <span class="hint">ส่งงาน ขอเลื่อน ยืนยันรับงาน ทำในหน้าคำขอ</span></td></tr>` : ""}
 <tr><th>เริ่ม – กำหนดเสร็จ</th><td>${fd(t.start)} – <b>${fd(t.due, true)}</b>${t.base !== t.due ? `<div class="hint">แผนเดิม ${fd(t.base)} · KPI นับตาม ${fd(t.kpiDue)}</div>` : ""}</td></tr>
 ${t.doneAt ? `<tr><th>เสร็จเมื่อ</th><td>${fd(t.doneAt, true)} ${t.onTime ? `<span class="chip c-ok">ทันกำหนด</span>` : `<span class="chip c-overdue">ช้ากว่ากำหนด</span>`}</td></tr>` : ""}
-${ME.user.role !== "viewer" ? `<tr><th>Man-day</th><td>ใช้จริง ${t.mdAct} · ประมาณการ ${t.mdEst}</td></tr>` : ""}
+${ME.user.role !== "viewer" ? `<tr><th>Man-day</th><td>${t.noMd ? `ประมาณการ ${t.mdEst} · ทีมนี้ไม่คิด KPI จึงไม่ต้องกรอก man-day ที่ใช้` : `ใช้จริง ${t.mdAct} · ประมาณการ ${t.mdEst}`}</td></tr>` : ""}
 ${t.detail ? `<tr><th>รายละเอียด</th><td><div class="srtext">${esc(t.detail)}</div></td></tr>` : ""}</table>
 <div class="actions">${stBtns.map(([s, l, k]) => `<button class="btn ${k}" type="button" data-st="${s}">${l}</button>`).join("")}
 ${c.openSr ? `<button class="btn primary" type="button" id="pt-open">มอบงาน (เปิด SR ตอนนี้)</button>` : ""}${c.reopenSr ? `<button class="btn primary" type="button" id="pt-open">มอบงานอีกครั้ง</button>` : ""}
 ${c.due ? `<button class="btn" type="button" id="pt-due">เลื่อนกำหนด</button>` : ""}${c.edit && t.status !== "cancelled" ? `<button class="btn" type="button" id="pt-edit">แก้ไข</button>` : ""}
 ${c.cancel ? `<button class="btn danger" type="button" id="pt-cancel">ยกเลิก task</button>` : ""}</div>
 ${c.log ? `<form id="pt-log" class="stack pjlog"><label class="f">บันทึกกิจกรรม<textarea name="text" rows="2" maxlength="3000" placeholder="ทำอะไรไปแล้ว ติดอะไรอยู่"></textarea></label>
-<div class="formgrid" style="align-items:end"><label class="f">Man-day ที่ใช้ (ทีละ 0.5)<input type="number" name="md" min="0" max="30" step="0.5" value="0"></label>${fileBox({ fileExt: m.fileExt, maxFileMb: m.maxFileMb })}</div>
+<div class="formgrid" style="align-items:end">${t.noMd ? `<input type="hidden" name="md" value="0">` : `<label class="f">Man-day ที่ใช้ (ทีละ 0.5)<input type="number" name="md" min="0" max="30" step="0.5" value="0"></label>`}${fileBox({ fileExt: m.fileExt, maxFileMb: m.maxFileMb })}</div>
 <div class="right"><button class="btn primary" type="submit">บันทึก</button></div></form>` : ""}
 <h3 style="margin:8px 0 0;font-size:15px">ประวัติ</h3><ul class="srtl">${r.events.slice().reverse().map(evLine).join("") || `<li class="muted">ยังไม่มีกิจกรรม</li>`}</ul>
 ${r.reminders.length ? `<h3 style="margin:8px 0 0;font-size:15px">การแจ้งเตือนของ task นี้</h3><ul class="pjrem">${r.reminders.map((x) => `<li class="${x.past ? "past" : ""}">${x.past ? "✓" : "○"} <b>${fd(x.date)}</b> · ${esc(x.label)} → ${esc(x.to)}</li>`).join("")}</ul><p class="hint" style="margin:0">ส่งทาง email ทุกเช้าวันทำการ (สรุปรวมต่อโปรเจกต์ให้ PM) และ Teams ถ้าเปิดไว้</p>` : ""}`, { wide: true });

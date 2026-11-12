@@ -288,4 +288,10 @@ function mount(api, { wrap, need }) {
   }));
 }
 
-module.exports = { PROFILES, configFor, teamProfile, personProfile, partDefs, teamsOfUsers, serviceOwners, responseScores, mount };
+/** Teams on the "none" profile this month: no scores at all, so their work is not rated and no man-days are asked. */
+async function noKpiTeams() {
+  const t = d.today();
+  const cfg = await configFor(`${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}`);
+  return new Set((await all("SELECT code FROM teams")).map((r) => r.code).filter((c) => teamProfile(cfg, c) === "none"));
+}
+module.exports = { noKpiTeams, PROFILES, configFor, teamProfile, personProfile, partDefs, teamsOfUsers, serviceOwners, responseScores, mount };
