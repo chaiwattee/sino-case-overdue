@@ -27,7 +27,7 @@
   const STAGE = { normal: "ปกติ", r1: "แจ้งรอบ 1", r2: "แจ้งรอบ 2", overdue: "เกิน Due", no_start: "ไม่มี Start date", closed: "ปิดแล้ว" };
   const ALERT = { r1: "แจ้งรอบ 1", r2: "แจ้งรอบ 2", overdue: "เกิน Due" };
   const ROLE = { admin: "Admin", manager: "Manager", observer: "Observer", engineer: "User", viewer: "Viewer", requester: "ผู้ขอบริการ" };
-  const ROLE_HINT = { admin: "ทำได้ทุกอย่าง รวมถึงจัดการผู้ใช้และตั้งค่าระบบ", manager: "ดูและแก้เคสของทีม อนุมัติขยายเวลา ส่ง Report ปรับคะแนน KPI เห็นและมอบงานได้เฉพาะคนในทีมตัวเอง", observer: "ดูได้ทุกทีมทุกหน้า (ภาพรวม เคส ราย User KPI Report ประวัติแก้ไข) แก้ไขอะไรไม่ได้", engineer: "เปิด แก้ และปิดเคสของตัวเอง เห็น KPI ของตัวเอง", viewer: "ดูภาพรวมและเคสของทีมตัวเองอย่างเดียว", requester: "พนักงานทีมอื่น ส่งคำขอบริการและดูได้เฉพาะคำขอของตัวเอง ไม่เห็นเคสลูกค้า (ระบบสร้างให้อัตโนมัติเมื่อ login ด้วยบัญชี Microsoft ของบริษัท)" };
+  const ROLE_HINT = { admin: "ทำได้ทุกอย่าง รวมถึงจัดการผู้ใช้และตั้งค่าระบบ", manager: "ดูและแก้เคสของทีม อนุมัติขยายเวลา ส่ง Report ปรับคะแนน KPI เห็นและมอบงานได้เฉพาะคนในทีมตัวเอง", observer: "ดูได้ทุกทีมทุกหน้า (ภาพรวม เคส ราย User KPI Report ประวัติแก้ไข) แก้ไขอะไรไม่ได้", engineer: "เปิด แก้ และปิดเคสของตัวเอง เห็น KPI ของตัวเอง", viewer: "ดูภาพรวม เคส ราย ทีม ราย User และราย ลูกค้า ของทุกทีม อย่างเดียว แก้ไขอะไรไม่ได้", requester: "พนักงานทีมอื่น ส่งคำขอบริการและดูได้เฉพาะคำขอของตัวเอง ไม่เห็นเคสลูกค้า (ระบบสร้างให้อัตโนมัติเมื่อ login ด้วยบัญชี Microsoft ของบริษัท)" };
   document.addEventListener("change", (e) => {
     const t = e.target;
     if (t && t.name === "role" && t.tagName === "SELECT") {
@@ -361,7 +361,7 @@ ${edit || !csOf(c) ? "" : `<div class="rca-sec" id="rca-sec"></div>`}
       ["intake", "#/intake", "เคสจากลูกค้า", true],
       ["owner", "#/owner", "ราย User", true],
       ["customer", "#/customer", "ราย ลูกค้า", true],
-      ["team", "#/team", "ราย ทีม", ["admin", "manager", "observer"].includes(ME.user.role)],
+      ["team", "#/team", "ราย ทีม", ["admin", "manager", "observer", "viewer"].includes(ME.user.role)],
       ["pm", "#/pm", "งาน PM", ME.user.role !== "viewer"],
       ["skills", "#/skills", "Skill Map", ["admin", "manager", "observer"].includes(ME.user.role)],
       ["kpi", "#/kpi", "KPI (ทดลองใช้)", ME.user.role !== "viewer" && ME.user.role !== "requester" && (ME.kpiProfile !== "response" || ["admin", "manager", "observer"].includes(ME.user.role))],
@@ -390,7 +390,7 @@ ${edit || !csOf(c) ? "" : `<div class="rca-sec" id="rca-sec"></div>`}
     paintMeAvatar();
     document.getElementById("me-name").innerHTML = `${esc(u.display_name.split(" ")[0])} <span class="muted">· ${ROLE[u.role]}</span>`;
     document.getElementById("me-head").innerHTML = `<strong>${esc(u.display_name)}</strong>${esc(u.email)}<br>${ROLE[u.role]} · ${
-      u.role === "admin" || u.role === "observer" ? "ทุกทีม" : esc(u.teams.map((t) => teamLabel(t)).join(", ") || "ยังไม่มีทีม")
+      ["admin", "observer", "viewer"].includes(u.role) ? "ทุกทีม" : esc(u.teams.map((t) => teamLabel(t)).join(", ") || "ยังไม่มีทีม")
     }`;
     document.getElementById("menu-pw").hidden = u.auth_type !== "local";
     const mp = document.getElementById("menu-profile");
@@ -1744,7 +1744,7 @@ ${sel.id !== ME.user.id ? `<button class="btn danger" type="button" id="u-del">�
 ${list.map((u) => `<tr class="click" data-href="#/users?id=${u.id}" style="${sel && sel.id === u.id ? "background:color-mix(in srgb, var(--accent) 8%, transparent)" : u.active ? "" : "opacity:.6"}">
 <td><a href="#/users?id=${u.id}" style="font-weight:600">${esc(u.display_name)}</a><div class="hint">${esc(u.email)}${u.auth_type === "local" ? " · รหัสผ่าน" : ""}</div></td>
 <td>${chip(ROLE_CHIP[u.role], ROLE[u.role])}</td>
-<td style="font-size:13px">${u.role === "admin" || u.role === "observer" ? "ทุกทีม" : esc(u.teams.map(teamLabel).join(", ") || "-")}</td>
+<td style="font-size:13px">${["admin", "observer", "viewer"].includes(u.role) ? "ทุกทีม" : esc(u.teams.map(teamLabel).join(", ") || "-")}</td>
 <td>${u.active ? chip("ok", "ใช้งานอยู่") : chip("closed", "ปิดใช้งาน")}${u.must_change_password ? `<div class="hint">รอตั้งรหัสใหม่</div>` : ""}</td>
 <td class="n">${u.open_cases}</td>
 <td style="font-size:13px" class="muted">${u.last_login_at ? fdt(u.last_login_at) : "ยังไม่เคย"}</td></tr>`).join("")}</tbody></table></div>

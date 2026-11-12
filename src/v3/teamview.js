@@ -9,7 +9,7 @@ const { stageCounts } = require("../routes");
 
 const OPEN_SR = ["pending", "info", "in_progress"];
 const bad = (msg, status = 400) => Object.assign(new Error(msg), { status });
-const canSee = (u) => ["admin", "manager", "observer"].includes(u.role);
+const canSee = (u) => ["admin", "manager", "observer", "viewer"].includes(u.role);
 
 function monthRange(ym) {
   const t = d.today();

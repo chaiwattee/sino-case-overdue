@@ -22,7 +22,8 @@ const ROLES = ["admin", "manager", "observer", "engineer", "viewer"];
 // Observer: sees all teams and all pages (KPI, reports, history) but can never change data.
 const OBSERVER_LOCKED = ["case_create", "case_edit", "case_close", "case_reassign", "case_edit_start", "case_delete", "reports_manage", "users_manage", "settings_manage", "hotline_edit"];
 /** Roles that see every team without being a member. */
-const seesAllTeams = (user) => !!user && (user.role === "admin" || user.role === "observer");
+// Viewer: read-only, every team (no export / KPI / editing by default).
+const seesAllTeams = (user) => !!user && (user.role === "admin" || user.role === "observer" || user.role === "viewer");
 
 const DEFAULTS = {
   admin: Object.fromEntries(PERMS.map((p) => [p.key, "all"])),
