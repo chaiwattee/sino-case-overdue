@@ -524,6 +524,8 @@ ${button(`${config3.baseUrl}/#/kpi?month=${ym}`, "เปิดหน้า KPI")
 
 // ------------------------------------------------------------ routes
 function mount(api, { wrap, need }) {
+  // Viewers (and requesters) never see KPI: scores, team averages, rankings or response stats.
+  api.use("/kpi", (req, res, next) => (req.user && ["viewer", "requester"].includes(req.user.role) && !(req.user.role === "requester" && req.path === "/response") ? res.status(403).json({ ok: false, error: "บัญชีนี้ไม่เห็น KPI" }) : next()));
   const canAll = (u) => ["admin", "manager", "observer"].includes(u.role);
   const canAdjust = (u) => ["admin", "manager"].includes(u.role);
   api.get("/kpi", wrap(async (req, res) => {

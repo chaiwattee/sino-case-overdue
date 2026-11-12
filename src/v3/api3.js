@@ -97,7 +97,7 @@ api.get("/me", wrap(async (req, res) => {
   const scope = perms.teamScope(req.user);
   const allTeams = await teamsList();
   res.json({
-    leaderboard: { visible: lb.canSee(req.user, lbs), visibility: lbs.visibility },
+    leaderboard: { visible: req.user.role !== "viewer" && lb.canSee(req.user, lbs), visibility: lbs.visibility },
     kpiProfile: KP.personProfile(kcfg, req.user.teams || []),
     responseTeams: ["admin", "manager", "observer"].includes(req.user.role) && allTeams.some((t) => KP.teamProfile(kcfg, t.key) === "response" && (!scope || scope.includes(t.key))),
     user: req.user,
