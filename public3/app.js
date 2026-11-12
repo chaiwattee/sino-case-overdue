@@ -364,7 +364,7 @@ ${edit || !csOf(c) ? "" : `<div class="rca-sec" id="rca-sec"></div>`}
       ["team", "#/team", "ราย ทีม", ["admin", "manager", "observer", "viewer"].includes(ME.user.role)],
       ["pm", "#/pm", "งาน PM", ME.user.role !== "viewer"],
       ["skills", "#/skills", "Skill Map", ["admin", "manager", "observer"].includes(ME.user.role)],
-      ["kpi", "#/kpi", "KPI (ทดลองใช้)", ME.user.role !== "viewer" && ME.user.role !== "requester" && (ME.kpiProfile !== "response" || ["admin", "manager", "observer"].includes(ME.user.role))],
+      ["kpi", "#/kpi", "KPI (ทดลองใช้)", ME.user.role !== "viewer" && ME.user.role !== "requester" && (!["response", "none"].includes(ME.kpiProfile) || ["admin", "manager", "observer"].includes(ME.user.role))],
       ["response", "#/response", "การตอบกลับ", ME.kpiProfile === "response" || !!ME.responseTeams],
       ["rank", "#/rank", "อันดับ KPI", !!(ME.leaderboard && ME.leaderboard.visible)],
       ["reports", "#/reports", "Report &amp; Export", lvl("export") !== "none" || lvl("reports_manage") !== "none"],
@@ -3335,6 +3335,14 @@ ${owners.map((o) => {
     const r = await api("/kpi?" + qs({ month, team: params.team }));
     // A team without KPI (Sales): its own response page.
     if (r.teamProfile === "response" || (!r.canAll && r.myProfile === "response")) return location.replace("#/response?" + qs({ month, team: r.canAll ? r.teamCode : "" }));
+    // A team set to "no KPI" (e.g. DEV): nothing is scored.
+    if (r.teamProfile === "none" || (!r.canAll && r.myProfile === "none")) {
+      $app.innerHTML = `<div class="head"><div><h1>KPI</h1></div>${r.canAll && r.teams.length > 1 ? `<div class="actions"><select id="kp-team" aria-label="ทีม" style="width:auto">${r.teams.map((t) => `<option value="${esc(t.code)}" ${t.code === r.teamCode ? "selected" : ""}>${esc(t.label)}</option>`).join("")}${r.allTeams ? `<option value="all">ทุกทีม</option>` : ""}</select></div>` : ""}</div>
+<section class="card"><div class="empty">ทีมนี้ไม่คิด KPI · ไม่มีคะแนน ไม่อยู่ในอันดับ และไม่วัดผลรายคน<br>ทีมยังส่งและรับคำขอบริการ พร้อมการแจ้งเตือนตามปกติ</div></section>`;
+      const ts = document.getElementById("kp-team");
+      if (ts) ts.onchange = () => (location.hash = "#/kpi?" + qs({ month, team: ts.value }));
+      return;
+    }
     const owners = r.owners;
     const teamName = r.teamCode ? (r.teams.find((t) => t.code === r.teamCode) || {}).label || r.teamCode : "ทุกทีม";
     const sel = owners.find((o) => String(o.id) === String(params.owner)) || owners.find((o) => o.id === ME.user.id) || owners[0];
@@ -4507,6 +4515,7 @@ ${r.teams.map((t) => `<tr><td>${esc(t.label)}</td>${keys.map((k) => `<td class="
 <div class="kpf-grid" style="margin-top:14px">${keys
       .map((k) => {
         const p = r.profiles[k];
+        if (!p.parts.length) return `<div class="kpf" data-p="${k}"><h3>${esc(p.label)}</h3><div class="hint">${esc(p.hint)}</div></div>`;
         return `<div class="kpf" data-p="${k}"><h3>${esc(p.label)}</h3><div class="hint">${esc(p.hint)}</div>
 <div class="kpf-w">${p.parts.map(([pk, l, w]) => `<label><span>${esc(l)}</span><input type="number" min="0" max="100" step="1" data-w="${k}.${pk}" value="${w}" aria-label="${esc(p.label)} ${esc(l)}"></label>`).join("")}</div>
 <div class="kpf-sum" data-sum="${k}"></div></div>`;
@@ -4520,6 +4529,7 @@ ${r.versions.length ? `<p class="hint" style="margin:8px 0 0">ประวัต
       keys.forEach((k) => {
         const n = [...host.querySelectorAll(`[data-w^="${k}."]`)].reduce((a, i) => a + (Number(i.value) || 0), 0);
         const el = host.querySelector(`[data-sum="${k}"]`);
+        if (!el) return;
         el.textContent = `รวม ${n} / 100 ${n === 100 ? "✓" : "· ต้องเท่ากับ 100"}`;
         el.classList.toggle("bad", n !== 100);
       });

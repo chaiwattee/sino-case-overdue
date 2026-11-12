@@ -2431,5 +2431,9 @@
 "เลือกไฟล์ใหม่เพื่อแทนที่": "choose a new file to replace it",
 "เอาแบบฟอร์มออก": "Remove the form",
 "PDF, Word หรือ Excel ไม่เกิน 10 MB · ทุกรอบ ผู้รับผิดชอบดาวน์โหลดไปกรอก แล้วอัปโหลดกลับก่อนปิดเคส": "PDF, Word or Excel up to 10 MB · each round, the owner downloads it, fills it in and uploads it before closing the case",
-"แบบฟอร์ม MA ใหญ่เกิน 10 MB": "The MA form is larger than 10 MB"
+"แบบฟอร์ม MA ใหญ่เกิน 10 MB": "The MA form is larger than 10 MB",
+"ไม่คิด KPI": "No KPI",
+"ไม่มีคะแนน ไม่อยู่ในอันดับ ไม่วัดรายคน · ส่งและรับคำขอบริการพร้อมแจ้งเตือนตามปกติ": "No scores, no ranking, nothing measured per person · service requests and their notifications work as usual",
+"ทีมนี้ไม่คิด KPI · ไม่มีคะแนน ไม่อยู่ในอันดับ และไม่วัดผลรายคน": "This team has no KPI: no scores, no ranking, nothing measured per person",
+"ทีมยังส่งและรับคำขอบริการ พร้อมการแจ้งเตือนตามปกติ": "The team still sends and receives service requests, with notifications as usual"
 }

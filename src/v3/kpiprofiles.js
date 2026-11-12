@@ -2,6 +2,8 @@
 //   support  — customer-case work (the original KPI): SLA, response, work points, diversity, backlog, notes
 //   service  — internal service teams (Project Manager, Pre-sale, AI, Sales support): service requests done + done on time
 //   response — no KPI (Sales): only a response score as the requester of service requests
+//   none     — no KPI at all (e.g. DEV): nobody in the team is scored, ranked or measured; they still send and
+//              receive service requests with the usual email / Teams notifications
 // Admins change which team uses which profile and the weights; each change applies from a chosen month,
 // so months already scored keep the settings they were scored with.
 const d = require("../dates");
@@ -37,8 +39,13 @@ const PROFILES = {
       ["waiting", "ไม่มีคำขอค้างรอตัวเอง", 15],
     ],
   },
+  none: {
+    label: "ไม่คิด KPI",
+    hint: "ไม่มีคะแนน ไม่อยู่ในอันดับ ไม่วัดรายคน · ส่งและรับคำขอบริการพร้อมแจ้งเตือนตามปกติ",
+    parts: [],
+  },
 };
-const DEFAULT_TEAMS = { PROJMGR: "service", PRE_SALE: "service", AI: "service", SALES_SUPPORT: "service", SALES: "response" };
+const DEFAULT_TEAMS = { PROJMGR: "service", PRE_SALE: "service", AI: "service", SALES_SUPPORT: "service", SALES: "response", DEV: "none" };
 const defaultWeights = () => Object.fromEntries(Object.entries(PROFILES).map(([k, p]) => [k, Object.fromEntries(p.parts.map(([pk, , w]) => [pk, w]))]));
 const bad = (msg, status = 400) => Object.assign(new Error(msg), { status });
 
@@ -54,11 +61,12 @@ async function configFor(ym) {
   return { from: v ? v.from : null, teams: { ...DEFAULT_TEAMS, ...((v && v.teams) || {}) }, weights: w };
 }
 const teamProfile = (cfg, team) => cfg.teams[team] || "support";
-/** A person in several teams: any customer-case team → support; else any service team → service; else response. */
+/** A person in several teams: any customer-case team → support; else service; else response; only no-KPI teams → none. */
 function personProfile(cfg, teams) {
   const ps = (teams || []).map((t) => teamProfile(cfg, t));
   if (!ps.length || ps.includes("support")) return "support";
-  return ps.includes("service") ? "service" : "response";
+  if (ps.includes("service")) return "service";
+  return ps.includes("response") ? "response" : "none";
 }
 const partDefs = (cfg, profile) => PROFILES[profile].parts.map(([k, l]) => [k, l, cfg.weights[profile][k]]);
 
@@ -247,7 +255,7 @@ function validate(b, teams) {
       weights[p][k] = v;
       sum += v;
     }
-    if (sum !== 100) throw bad(`${def.label}: น้ำหนักรวมต้องเท่ากับ 100 (ตอนนี้ ${sum})`);
+    if (def.parts.length && sum !== 100) throw bad(`${def.label}: น้ำหนักรวมต้องเท่ากับ 100 (ตอนนี้ ${sum})`);
   }
   return { from, teams: tm, weights };
 }
