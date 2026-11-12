@@ -87,7 +87,7 @@ async function pmPeople() {
 }
 
 // ------------------------------------------------------------ reading
-const TASK_SQL = `SELECT t.*, s.id AS sr_id, s.sr_no, s.status AS sr_status, s.target_date AS sr_target, s.assignee_id, a.display_name AS assignee_name, a.email AS assignee_email,
+const TASK_SQL = `SELECT t.*, s.id AS sr_id, s.sr_no, s.status AS sr_status, s.target_date AS sr_target, s.assignee_id, COALESCE(a.display_name, s.assignee_ext_name) AS assignee_name, COALESCE(a.email, s.assignee_ext_email) AS assignee_email,
     s.closed_at AS sr_closed_at, s.confirmed_at AS sr_confirmed_at, s.rating AS sr_rating, s.outcome AS sr_outcome, s.ext_target AS sr_ext_target, s.ext_reason AS sr_ext_reason,
     eb.display_name AS sr_ext_by, tm.label AS team_label, m.name AS milestone_name,
     (SELECT COALESCE(sum(e.md),0) FROM project_task_events e WHERE e.task_id = t.id) AS md_act
@@ -123,7 +123,7 @@ function serTask(t, hol, noKpi) {
     overdue, overdueDays: overdue ? sr.workdaysBetween(due, t0, hol) : 0, daysLeft: open && !overdue ? sr.workdaysBetween(t0, due, hol) : null,
     onTime: st.doneAt ? st.doneAt <= isoDay(t.kpi_due) : null,
     sr: t.sr_id ? { id: t.sr_id, no: t.sr_no, status: t.sr_status, rating: t.sr_rating, ext: t.sr_ext_target ? { target: isoDay(t.sr_ext_target), reason: t.sr_ext_reason, by: t.sr_ext_by } : null } : null,
-    assignee: t.assignee_id ? { id: t.assignee_id, name: t.assignee_name } : null,
+    assignee: t.assignee_id || t.assignee_name ? { id: t.assignee_id, name: t.assignee_name } : null,
     mdEst: num(t.md_est), mdAct: num(t.md_act), sort: t.sort,
     noMd: !!(noKpi && t.kind === "sr" && noKpi.has(t.team)), // a team without KPI is not asked for man-days
   };

@@ -92,6 +92,31 @@ async function assignees(team) {
     [team]
   );
 }
+const contacts = (team) => all("SELECT id, name, email FROM team_contacts WHERE team = $1 AND active ORDER BY lower(name)", [team]);
+/** Who the manager picked: a member of the team (assigneeId = user id), a saved name ("c:<id>"), or a new name
+ *  typed in (assigneeId "new" + assigneeName [+ assigneeEmail]), which is saved for next time. */
+async function pickAssignee(user, team, b) {
+  const raw = String(b.assigneeId || "");
+  if (raw === "new" || raw.startsWith("c:")) {
+    let c = raw === "new" ? null : await one("SELECT id, name, email FROM team_contacts WHERE id = $1 AND team = $2 AND active", [Number(raw.slice(2)), team]);
+    if (raw === "new") {
+      const name = clean(b.assigneeName, 120);
+      if (name.length < 2) throw bad("ใส่ชื่อผู้รับผิดชอบ");
+      const email = clean(b.assigneeEmail, 200).toLowerCase();
+      if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw bad("อีเมลของผู้รับผิดชอบไม่ถูกต้อง");
+      c = await one(
+        `INSERT INTO team_contacts (team, name, email, created_by) VALUES ($1,$2,$3,$4)
+         ON CONFLICT (team, lower(name)) DO UPDATE SET email = COALESCE(EXCLUDED.email, team_contacts.email), active = true RETURNING id, name, email`,
+        [team, name, email || null, user.id]
+      );
+    }
+    if (!c) throw bad("เลือกผู้รับผิดชอบ");
+    return { id: null, name: c.name, email: c.email || null };
+  }
+  const a = await one("SELECT u.id, u.display_name FROM users u JOIN user_teams t ON t.user_id = u.id WHERE u.id = $1 AND u.active AND u.role IN ('engineer','manager') AND t.team = $2", [Number(raw), team]);
+  if (!a) throw bad("เลือกผู้รับผิดชอบจากสมาชิกทีมนี้ หรือใส่ชื่อผู้รับผิดชอบ");
+  return { id: a.id, name: a.display_name, email: null, user: true };
+}
 async function userTeams(userId) {
   return (await all("SELECT team FROM user_teams WHERE user_id = $1", [userId])).map((r) => r.team);
 }
@@ -114,7 +139,7 @@ const profileMissing = (u) => ["phone", "department", "job_title"].filter((k) =>
 // ------------------------------------------------------------ reading
 const SR_COLS = `s.*, t.label AS team_label,
   r.display_name AS requester_name, r.email AS requester_email, r.phone AS requester_phone, r.department AS requester_department, r.job_title AS requester_title,
-  a.display_name AS assignee_name, a.email AS assignee_email, a.phone AS assignee_phone,
+  COALESCE(a.display_name, s.assignee_ext_name) AS assignee_name, COALESCE(a.email, s.assignee_ext_email) AS assignee_email, a.phone AS assignee_phone,
   ap.display_name AS approved_by_name, cb.display_name AS closed_by_name, eb.display_name AS ext_by_name,
   pj.id AS project_id, pj.name AS project_name`;
 const SR_FROM = `service_requests s JOIN teams t ON t.code = s.team JOIN users r ON r.id = s.requester_id
@@ -135,7 +160,8 @@ function ser(s, hol, viewer, noKpi) {
     status: overdue ? "overdue" : s.status, statusLabel: overdue ? "เลย Target" : STATUS[s.status], rawStatus: s.status,
     daysLeft, overdueDays: overdue ? workdaysBetween(target, t, hol) : 0,
     requester: { id: s.requester_id, name: s.requester_name, email: s.requester_email, phone: s.requester_phone || "", department: s.requester_department || "", title: s.requester_title || "" },
-    assignee: s.assignee_id ? { id: s.assignee_id, name: s.assignee_name, email: s.assignee_email, phone: s.assignee_phone || "" } : null,
+    // "external" = named by the manager, no account: the manager updates and closes the request for them.
+    assignee: s.assignee_id || s.assignee_ext_name ? { id: s.assignee_id, name: s.assignee_name, email: s.assignee_email || "", phone: s.assignee_phone || "", external: !s.assignee_id } : null,
     approvedBy: s.approved_by_name || "", approvedAt: s.approved_at, managerNote: s.manager_note || "", category: s.category || "",
     requestKind: s.request_kind || "general", meetingMode: s.meeting_mode || "", meetingModeLabel: MEETING_MODE[s.meeting_mode] || "", meetingReason: s.meeting_reason || "",
     outcome: s.outcome, outcomeLabel: s.outcome ? OUTCOME[s.outcome] : "", resolution: s.resolution || "",
@@ -459,17 +485,17 @@ async function approve(user, s, b) {
   if (!project && !isWorkday(target, hol) && !(target === todayIso() && s.severity === "urgent_high")) throw bad("Target date ตรงกับวันหยุด เลือกวันทำการ");
   const reason = project ? "" : clean(b.targetReason, 500);
   if (target !== isoDay(s.requested_date) && reason.length < 5) throw bad("ปรับ Target ต่างจากที่ผู้ขอต้องการ ใส่เหตุผลให้ผู้ขอทราบ");
-  const a = await one("SELECT u.id FROM users u JOIN user_teams t ON t.user_id = u.id WHERE u.id = $1 AND u.active AND u.role IN ('engineer','manager') AND t.team = $2", [Number(b.assigneeId), s.team]);
-  if (!a) throw bad("เลือกผู้รับผิดชอบจากสมาชิกทีมนี้");
+  const a = await pickAssignee(user, s.team, b);
   const category = clean(b.category, 80) || null;
   // Only the first manager wins; a second click sees the new status.
   const r = await q(
-    `UPDATE service_requests SET status='in_progress', target_date=$2, target_reason=$3, assignee_id=$4, approved_by=$5, approved_at=now(), manager_note=$6, category=$7, updated_at=now()
+    `UPDATE service_requests SET status='in_progress', target_date=$2, target_reason=$3, assignee_id=$4, approved_by=$5, approved_at=now(), manager_note=$6, category=$7,
+            assignee_ext_name=$8, assignee_ext_email=$9, updated_at=now()
       WHERE id=$1 AND status IN ('pending','info')`,
-    [s.id, target, reason || null, a.id, user.id, clean(b.note, 1000) || null, category]
+    [s.id, target, reason || null, a.id, user.id, clean(b.note, 1000) || null, category, a.user ? null : a.name, a.user ? null : a.email]
   );
   if (!r.rowCount) throw bad("มี Manager คนอื่นดำเนินการคำขอนี้แล้ว รีเฟรชหน้า", 409);
-  await q("INSERT INTO sr_events (sr_id, kind, text, data, by_user) VALUES ($1,'approved',$2,$3,$4)", [s.id, clean(b.note, 1000) || null, JSON.stringify({ target, requested: isoDay(s.requested_date), reason, assigneeId: a.id, category }), user.id]);
+  await q("INSERT INTO sr_events (sr_id, kind, text, data, by_user) VALUES ($1,'approved',$2,$3,$4)", [s.id, clean(b.note, 1000) || null, JSON.stringify({ target, requested: isoDay(s.requested_date), reason, assigneeId: a.id, assignee: a.name, category }), user.id]);
   const n = await load(s.id);
   await audit(user, "sr_approve", n.sr_no, { target, assignee: n.assignee_name });
   notifyApproved(n, user).catch((e) => console.error("[sr] notify approved:", e.message));
@@ -501,12 +527,11 @@ async function reject(user, s, b) {
 async function reassign(user, s, b) {
   if (!(await canManage(user, s))) throw bad("เฉพาะ Manager ของทีมนี้", 403);
   if (s.status !== "in_progress") throw bad("เปลี่ยนผู้รับผิดชอบได้เฉพาะคำขอที่กำลังดำเนินการ");
-  const a = await one("SELECT u.id, u.display_name FROM users u JOIN user_teams t ON t.user_id = u.id WHERE u.id = $1 AND u.active AND u.role IN ('engineer','manager') AND t.team = $2", [Number(b.assigneeId), s.team]);
-  if (!a) throw bad("เลือกผู้รับผิดชอบจากสมาชิกทีมนี้");
-  if (a.id === s.assignee_id) return;
+  const a = await pickAssignee(user, s.team, b);
+  if (a.user ? a.id === s.assignee_id : !s.assignee_id && a.name === s.assignee_ext_name) return;
   await tx(async (c) => {
-    await c.query("UPDATE service_requests SET assignee_id=$2, updated_at=now() WHERE id=$1", [s.id, a.id]);
-    await addEvent(c, s.id, "reassigned", clean(b.note, 500) || null, { from: s.assignee_name, to: a.display_name }, user.id);
+    await c.query("UPDATE service_requests SET assignee_id=$2, assignee_ext_name=$3, assignee_ext_email=$4, updated_at=now() WHERE id=$1", [s.id, a.id, a.user ? null : a.name, a.user ? null : a.email]);
+    await addEvent(c, s.id, "reassigned", clean(b.note, 500) || null, { from: s.assignee_name, to: a.name }, user.id);
   });
   const n = await load(s.id);
   await send([n.assignee_email], [s.assignee_email, n.requester_email], { no: n.sr_no, text: `ผู้รับผิดชอบใหม่: ${n.assignee_name} · ${n.title}` }, "#1F5FBF", body(n, `${esc(user.display_name)} มอบหมายคำขอนี้ให้ ${esc(n.assignee_name)} (เดิม ${esc(s.assignee_name)})`, [["Target date", thaiDay(n.target_date)]]));
@@ -682,6 +707,7 @@ function mount(api, { wrap }) {
         confirm: fresh.requester_id === req.user.id && fresh.status === "done" && !fresh.confirmed_at,
       },
       assignees: manage ? await assignees(fresh.team) : [],
+      contacts: manage ? await contacts(fresh.team) : [],
     });
   };
 

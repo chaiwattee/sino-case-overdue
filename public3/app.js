@@ -3989,12 +3989,26 @@ ${e.text ? `<div class="srtext">${esc(e.text)}</div>` : ""}${fs.length ? `<div>$
       done();
     };
     const asg = data.assignees || [];
+    const cts = data.contacts || [];
+    // People without an account (named by the manager) and a line to type a new name.
+    const extOpt = (selName) => `<optgroup label="ไม่มีบัญชีในระบบ (Manager อัปเดตงานแทน)">${cts.map((x) => `<option value="c:${x.id}" ${selName && x.name === selName ? "selected" : ""}>${esc(x.name)}${x.email ? ` · ${esc(x.email)}` : " · ไม่มีอีเมล"}</option>`).join("")}<option value="new">+ พิมพ์ชื่อผู้รับผิดชอบใหม่…</option></optgroup>`;
+    const newBox = `<div class="formgrid asg-new" hidden><label class="f">ชื่อผู้รับผิดชอบ<input name="assigneeName" maxlength="120" placeholder="ชื่อ นามสกุล"></label><label class="f">อีเมล (ไม่บังคับ · ใส่ไว้เพื่อให้ได้รับแจ้งเตือน)<input name="assigneeEmail" type="email" maxlength="200"></label></div>`;
+    const bindNew = (f, sel) => {
+      const box = f.querySelector(".asg-new");
+      const sync = () => {
+        box.hidden = sel.value !== "new";
+        f.assigneeName.required = sel.value === "new";
+      };
+      sel.onchange = sync;
+      sync();
+    };
     const asgOpt = (sel) => asg.map((a) => `<option value="${a.id}" ${a.id === sel ? "selected" : ""}>${esc(a.display_name)} · งานภายในค้าง ${a.open_sr} · เคสเปิด ${a.open_cases}${a.phone ? "" : " · ยังไม่มีเบอร์"}</option>`).join("");
     const approvePanel = c.approve
       ? `<section class="card srapprove"><h2>ตรวจและอนุมัติ</h2>
 <form id="apf"><div class="formgrid" style="grid-template-columns:1fr 1.3fr">
 ${r.project ? `<div class="f"><span>Target date</span><b style="min-height:44px;display:flex;align-items:center">${dlong(r.requestedDate)}</b><span class="hint">กำหนดเสร็จของ task ในโปรเจกต์ ถ้าทำไม่ทัน ให้ผู้รับผิดชอบกด “ขอเลื่อน Target” หลังอนุมัติ (PM อนุมัติ)</span><input type="hidden" name="targetDate" value="${r.requestedDate}"></div>` : `<label class="f">Target date<input type="date" name="targetDate" value="${r.requestedDate}" min="${new Date().toISOString().slice(0, 10)}" required><span class="hint">ผู้ขอต้องการ ${dlong(r.requestedDate)}</span></label>`}
-<label class="f">ผู้รับผิดชอบ<select name="assigneeId" required><option value="">เลือกสมาชิกทีม ${esc(r.teamLabel)}</option>${asgOpt(null)}</select></label></div>
+<label class="f">ผู้รับผิดชอบ<select name="assigneeId" required><option value="">เลือกผู้รับผิดชอบของทีม ${esc(r.teamLabel)}</option>${asg.length ? `<optgroup label="สมาชิกทีมที่มีบัญชี">${asgOpt(null)}</optgroup>` : ""}${extOpt()}</select></label></div>
+${newBox}
 <label class="f" id="ap-why" hidden>เหตุผลที่ปรับวันที่ (ผู้ขอจะเห็น)<input name="targetReason" maxlength="500" placeholder="เช่น ขอส่งก่อน 1 วัน ให้ฝ่ายขายตรวจทันประชุม"></label>
 <label class="f">ประเภทงาน (ใช้ใน KPI ด้านทักษะ)<select name="category"><option value="">ให้ระบบจัดจากหัวข้อ</option>${m.categories.map((x) => `<option>${esc(x)}</option>`).join("")}</select></label>
 <label class="f">หมายเหตุถึงผู้ขอและผู้รับผิดชอบ (ไม่บังคับ)<input name="note" maxlength="1000"></label>
@@ -4009,7 +4023,7 @@ ${r.project ? `<div class="f"><span>Target date</span><b style="min-height:44px;
       ["ผู้ขอ", `${esc(r.requester.name)}${r.requester.department ? ` · ${esc(r.requester.department)}` : ""}${r.requester.title ? ` · ${esc(r.requester.title)}` : ""}<br><span class="hint">${esc(r.requester.email)}${r.requester.phone ? ` · <a href="tel:${esc(r.requester.phone.replace(/[^+0-9]/g, ""))}">${esc(r.requester.phone)}</a>` : ""}</span>`],
       ["ต้องการภายใน", dlong(r.requestedDate)],
       ...(r.targetDate ? [["Target date", `<b>${dlong(r.targetDate)}</b>${r.targetReason ? `<br><span class="hint">${esc(r.targetReason)}</span>` : ""}`]] : []),
-      ...(r.assignee ? [["ผู้รับผิดชอบ", `${esc(r.assignee.name)}${r.assignee.phone ? ` · <a href="tel:${esc(r.assignee.phone.replace(/[^+0-9]/g, ""))}">${esc(r.assignee.phone)}</a>` : ""}`]] : []),
+      ...(r.assignee ? [["ผู้รับผิดชอบ", `${esc(r.assignee.name)}${r.assignee.external ? `<br><span class="hint">ไม่มีบัญชีในระบบ · Manager ทีม ${esc(r.teamLabel)} อัปเดตและปิดงานแทน${r.assignee.email ? ` · แจ้งเตือนไปที่ ${esc(r.assignee.email)}` : ""}</span>` : ""}${r.assignee.phone ? ` · <a href="tel:${esc(r.assignee.phone.replace(/[^+0-9]/g, ""))}">${esc(r.assignee.phone)}</a>` : ""}`]] : []),
       ...(r.approvedBy ? [["อนุมัติโดย", `${esc(r.approvedBy)} · ${fdt(r.approvedAt)}`]] : []),
       ...(r.category ? [["ประเภทงาน", esc(r.category)]] : []),
       ...(r.customer ? [["ลูกค้า", esc(r.customer)]] : []),
@@ -4061,11 +4075,12 @@ ${r.confirmedAt ? `<p class="hint">ผู้ขอยืนยันรับง
       };
     }
     const ap = $("apf");
+    if (ap) bindNew(ap, ap.assigneeId);
     if (ap && r.project) {
       ap.onsubmit = async (e) => {
         e.preventDefault();
         try {
-          await act("approve", { targetDate: r.requestedDate, assigneeId: ap.assigneeId.value, category: ap.category.value, note: ap.note.value }, "อนุมัติแล้ว ระบบส่ง email ถึงผู้รับผิดชอบและ PM");
+          await act("approve", { targetDate: r.requestedDate, assigneeId: ap.assigneeId.value, assigneeName: ap.assigneeName.value, assigneeEmail: ap.assigneeEmail.value, category: ap.category.value, note: ap.note.value }, "อนุมัติแล้ว ระบบส่ง email ถึงผู้รับผิดชอบและ PM");
         } catch (err) {
           toast(err.message, 6000);
         }
@@ -4082,7 +4097,7 @@ ${r.confirmedAt ? `<p class="hint">ผู้ขอยืนยันรับง
       ap.onsubmit = async (e) => {
         e.preventDefault();
         try {
-          await act("approve", { targetDate: ap.targetDate.value, assigneeId: ap.assigneeId.value, targetReason: ap.targetReason.value, category: ap.category.value, note: ap.note.value }, "อนุมัติแล้ว ระบบส่ง email ถึงผู้รับผิดชอบและผู้ขอ");
+          await act("approve", { targetDate: ap.targetDate.value, assigneeId: ap.assigneeId.value, assigneeName: ap.assigneeName.value, assigneeEmail: ap.assigneeEmail.value, targetReason: ap.targetReason.value, category: ap.category.value, note: ap.note.value }, "อนุมัติแล้ว ระบบส่ง email ถึงผู้รับผิดชอบและผู้ขอ");
         } catch (err) {
           toast(err.message, 6000);
         }
@@ -4106,7 +4121,10 @@ ${r.confirmedAt ? `<p class="hint">ผู้ขอยืนยันรับง
         srDialog("ขอเลื่อน Target", `<p class="muted" style="margin:0">Target ตอนนี้ ${dlong(r.targetDate)} · Manager ต้องอนุมัติ และระบบแจ้งผู้ขอเมื่อวันที่เปลี่ยน</p><label class="f">วันที่ใหม่<input type="date" name="d" required min="${r.targetDate}"></label><label class="f">เหตุผล<textarea name="reason" rows="3" required minlength="10" maxlength="1000"></textarea></label>`,
           (f) => act("extend", { targetDate: f.d.value, reason: f.reason.value }, "ส่งคำขอเลื่อนถึง Manager แล้ว"), "ขอเลื่อน");
     if ($("b-re"))
-      $("b-re").onclick = () => srDialog("เปลี่ยนผู้รับผิดชอบ", `<label class="f">ผู้รับผิดชอบใหม่<select name="a" required>${asgOpt(r.assignee && r.assignee.id)}</select></label><label class="f">หมายเหตุ (ไม่บังคับ)<input name="note" maxlength="500"></label>`, (f) => act("reassign", { assigneeId: f.a.value, note: f.note.value }, "เปลี่ยนผู้รับผิดชอบแล้ว"), "บันทึก");
+      $("b-re").onclick = () => {
+        const f = srDialog("เปลี่ยนผู้รับผิดชอบ", `<label class="f">ผู้รับผิดชอบใหม่<select name="a" required>${asg.length ? `<optgroup label="สมาชิกทีมที่มีบัญชี">${asgOpt(r.assignee && r.assignee.id)}</optgroup>` : ""}${extOpt(r.assignee && r.assignee.external ? r.assignee.name : "")}</select></label>${newBox}<label class="f">หมายเหตุ (ไม่บังคับ)<input name="note" maxlength="500"></label>`, (f) => act("reassign", { assigneeId: f.a.value, assigneeName: f.assigneeName.value, assigneeEmail: f.assigneeEmail.value, note: f.note.value }, "เปลี่ยนผู้รับผิดชอบแล้ว"), "บันทึก");
+        bindNew(f, f.a);
+      };
     if ($("b-cancel")) $("b-cancel").onclick = () => srDialog("ยกเลิกคำขอ", `<label class="f">เหตุผล (ไม่บังคับ)<input name="reason" maxlength="500"></label>`, (f) => act("cancel", { reason: f.reason.value }, "ยกเลิกคำขอแล้ว"), "ยกเลิกคำขอ");
     if ($("b-confirm"))
       $("b-confirm").onclick = () =>
