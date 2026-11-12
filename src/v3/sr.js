@@ -115,10 +115,12 @@ const profileMissing = (u) => ["phone", "department", "job_title"].filter((k) =>
 const SR_COLS = `s.*, t.label AS team_label,
   r.display_name AS requester_name, r.email AS requester_email, r.phone AS requester_phone, r.department AS requester_department, r.job_title AS requester_title,
   a.display_name AS assignee_name, a.email AS assignee_email, a.phone AS assignee_phone,
-  ap.display_name AS approved_by_name, cb.display_name AS closed_by_name, eb.display_name AS ext_by_name`;
+  ap.display_name AS approved_by_name, cb.display_name AS closed_by_name, eb.display_name AS ext_by_name,
+  pj.id AS project_id, pj.name AS project_name`;
 const SR_FROM = `service_requests s JOIN teams t ON t.code = s.team JOIN users r ON r.id = s.requester_id
   LEFT JOIN users a ON a.id = s.assignee_id LEFT JOIN users ap ON ap.id = s.approved_by
-  LEFT JOIN users cb ON cb.id = s.closed_by LEFT JOIN users eb ON eb.id = s.ext_by`;
+  LEFT JOIN users cb ON cb.id = s.closed_by LEFT JOIN users eb ON eb.id = s.ext_by
+  LEFT JOIN project_tasks pt ON pt.id = s.project_task_id LEFT JOIN projects pj ON pj.id = pt.project_id`;
 
 function ser(s, hol, viewer) {
   const t = todayIso();
@@ -144,6 +146,7 @@ function ser(s, hol, viewer) {
     onTime: s.status === "done" && target && closedIso ? closedIso <= target : null,
     createdAt: s.created_at, updatedAt: s.updated_at,
     mine: viewer ? s.requester_id === viewer.id : undefined,
+    project: s.project_id ? { id: s.project_id, name: s.project_name, taskId: s.project_task_id } : null,
   };
 }
 async function load(id) {
@@ -276,10 +279,27 @@ async function notifyReopened(s, by, reason) {
   await send([s.assignee_email], emails(mgrs), { no: s.sr_no, text: `[เปิดใหม่] ${s.title}` }, "#C07A00", body(s, `${esc(by.display_name)} ขอเปิดคำขอใหม่`, [["เหตุผล", reason], ["Target date", thaiDay(s.target_date)]]));
   await tg(`↩️ ผู้ขอเปิดคำขอบริการใหม่ ${s.sr_no} ${s.title}\nผู้รับผิดชอบ ${s.assignee_name} · เหตุผล: ${reason}`);
 }
+/** Who decides a request to move the target: the PM for a project task, else the team's managers — never the person
+ *  who asked (another manager of the team, or the admins when the asker is the team's only manager). */
+async function extDeciders(s, askerId) {
+  if (s.project_task_id) return all("SELECT id, email, display_name FROM users WHERE id = $1 AND active", [s.requester_id]);
+  const mgrs = (await teamManagers(s.team)).filter((m) => m.id !== askerId);
+  if (mgrs.length) return mgrs;
+  return all("SELECT id, email, display_name FROM users WHERE active AND role = 'admin' AND id <> $1 ORDER BY display_name", [askerId || 0]);
+}
+async function canDecideExt(user, s) {
+  if (!user || !s.ext_target) return false;
+  if (s.project_task_id) return user.id === s.requester_id || user.role === "admin" || (user.role === "manager" && (await require("./projects").isPm(user)));
+  if (user.role === "admin") return true;
+  if (s.ext_by === user.id) return false;
+  if (await canManage(user, s)) return true;
+  // The asker is the team's only manager: the admins decide (handled above).
+  return false;
+}
 async function notifyExtAsked(s, by) {
-  const mgrs = await teamManagers(s.team);
-  await send(emails(mgrs), [], { no: s.sr_no, text: `[ขอเลื่อน Target] ${thai(s.target_date)} → ${thai(s.ext_target)} · ${s.title}` }, "#C07A00",
-    body(s, `${esc(by.display_name)} ขอเลื่อน Target`, [["Target เดิม", thaiDay(s.target_date)], ["ขอเป็น", thaiDay(s.ext_target)], ["เหตุผล", s.ext_reason]], { button: "อนุมัติ / ไม่อนุมัติ" }));
+  const to = await extDeciders(s, by.id);
+  await send(emails(to), [], { no: s.sr_no, text: `[ขอเลื่อน Target] ${thai(s.target_date)} → ${thai(s.ext_target)} · ${s.title}` }, "#C07A00",
+    body(s, `${esc(by.display_name)} ขอเลื่อน Target${s.project_id ? ` ของงานในโปรเจกต์ <strong>${esc(s.project_name)}</strong> (PM เป็นผู้อนุมัติ)` : ""}`, [["Target เดิม", thaiDay(s.target_date)], ["ขอเป็น", thaiDay(s.ext_target)], ["เหตุผล", s.ext_reason]], { button: "อนุมัติ / ไม่อนุมัติ" }));
 }
 async function notifyExtDecided(s, by, ok, note, oldTarget) {
   await send([s.assignee_email, ...(ok ? [s.requester_email] : [])], [], { no: s.sr_no, text: ok ? `[Target เปลี่ยน] ${thai(oldTarget)} → ${thai(s.target_date)} · ${s.title}` : `ไม่อนุมัติการเลื่อน Target · ${s.title}` }, ok ? "#1C6B45" : "#5B6675",
@@ -366,8 +386,27 @@ async function create(user, b) {
   notifySubmitted(s).catch((e) => console.error("[sr] notify submitted:", e.message));
   return s;
 }
+/** A service request opened by a project task (src/v3/projects.js): the PM is the requester, the task's due date is
+ *  the date wanted and becomes the target when the team approves. No profile or date checks: the PM planned it. */
+async function createFromProject({ requester, team, title, detail, severity, customer, due, taskId }) {
+  const id = await tx(async (c) => {
+    const r = await c.query(
+      `INSERT INTO service_requests (team, title, detail, severity, customer, requested_date, requester_id, request_kind, project_task_id) VALUES ($1,$2,$3,$4,$5,$6,$7,'general',$8) RETURNING id`,
+      [team, clean(title, 200), clean(detail, 5000), SEV[severity] ? severity : "normal", clean(customer, 120) || null, due, requester.id, taskId]
+    );
+    await addEvent(c, r.rows[0].id, "submitted", null, { requestedDate: due, severity, project: true }, requester.id);
+    return r.rows[0].id;
+  });
+  const s = await load(id);
+  await audit(requester, "sr_create", s.sr_no, { team, severity, projectTask: taskId });
+  notifySubmitted(s).catch((e) => console.error("[sr] notify submitted:", e.message));
+  return s;
+}
 async function edit(user, s, b) {
   if (s.requester_id !== user.id) throw bad("แก้ได้เฉพาะผู้ขอ", 403);
+  // From a project task: the task's name, detail and due date are kept (they change on the project page); the PM can
+  // still answer "ขอข้อมูลเพิ่ม" with a note and files and send it back.
+  if (s.project_task_id) b = { note: b.note, files: b.files };
   if (!["pending", "info"].includes(s.status)) throw bad("แก้คำขอได้เฉพาะตอนรออนุมัติหรือถูกขอข้อมูลเพิ่ม เพิ่มข้อมูลด้วยช่อง \"เพิ่มข้อมูล\" แทน");
   const hol = await holidays();
   const title = clean(b.title ?? s.title, 200);
@@ -412,10 +451,12 @@ async function approve(user, s, b) {
   if (!(await canManage(user, s))) throw bad("อนุมัติได้เฉพาะ Manager ของทีมนี้", 403);
   if (!["pending", "info"].includes(s.status)) throw bad(`คำขอนี้${STATUS[s.status]}แล้ว`);
   const hol = await holidays();
-  const target = validDate(b.targetDate || isoDay(s.requested_date), "Target date");
-  if (target < todayIso()) throw bad("Target date ต้องไม่ใช่วันที่ผ่านมาแล้ว");
-  if (!isWorkday(target, hol) && !(target === todayIso() && s.severity === "urgent_high")) throw bad("Target date ตรงกับวันหยุด เลือกวันทำการ");
-  const reason = clean(b.targetReason, 500);
+  // A project task keeps the due date the PM planned; moving it later goes through "ขอเลื่อน Target" to the PM.
+  const project = !!s.project_task_id;
+  const target = project ? isoDay(s.requested_date) : validDate(b.targetDate || isoDay(s.requested_date), "Target date");
+  if (!project && target < todayIso()) throw bad("Target date ต้องไม่ใช่วันที่ผ่านมาแล้ว");
+  if (!project && !isWorkday(target, hol) && !(target === todayIso() && s.severity === "urgent_high")) throw bad("Target date ตรงกับวันหยุด เลือกวันทำการ");
+  const reason = project ? "" : clean(b.targetReason, 500);
   if (target !== isoDay(s.requested_date) && reason.length < 5) throw bad("ปรับ Target ต่างจากที่ผู้ขอต้องการ ใส่เหตุผลให้ผู้ขอทราบ");
   const a = await one("SELECT u.id FROM users u JOIN user_teams t ON t.user_id = u.id WHERE u.id = $1 AND u.active AND u.role IN ('engineer','manager') AND t.team = $2", [Number(b.assigneeId), s.team]);
   if (!a) throw bad("เลือกผู้รับผิดชอบจากสมาชิกทีมนี้");
@@ -486,8 +527,8 @@ async function askExtension(user, s, b) {
   notifyExtAsked(await load(s.id), user).catch(() => {});
 }
 async function decideExtension(user, s, b) {
-  if (!(await canManage(user, s))) throw bad("เฉพาะ Manager ของทีมนี้", 403);
   if (!s.ext_target) throw bad("ไม่มีคำขอเลื่อน Target");
+  if (!(await canDecideExt(user, s))) throw bad(s.project_task_id ? "งานจากโปรเจกต์ PM ของโปรเจกต์เป็นผู้อนุมัติการเลื่อน" : s.ext_by === user.id ? "อนุมัติคำขอเลื่อนของตัวเองไม่ได้ ให้ Manager คนอื่นในทีม (หรือ Admin) อนุมัติ" : "เฉพาะ Manager ของทีมนี้", 403);
   const ok = !!b.approve;
   const note = clean(b.note, 500);
   const old = isoDay(s.target_date);
@@ -498,6 +539,7 @@ async function decideExtension(user, s, b) {
     );
     await addEvent(c, s.id, ok ? "ext_approved" : "ext_rejected", note || null, { from: old, to: isoDay(s.ext_target) }, user.id);
   });
+  if (ok) await require("./projects").onSrTargetMoved(s, old, isoDay(s.ext_target), s.ext_at, user.id).catch((e) => console.error("[sr] project due:", e.message));
   notifyExtDecided(await load(s.id), user, ok, note, old).catch(() => {});
 }
 async function close(user, s, b) {
@@ -630,7 +672,7 @@ function mount(api, { wrap }) {
         approve: manage && ["pending", "info"].includes(fresh.status),
         close: fresh.status === "in_progress" && (fresh.assignee_id === req.user.id || manage),
         extend: fresh.status === "in_progress" && !fresh.ext_target && (fresh.assignee_id === req.user.id || manage),
-        decideExt: manage && !!fresh.ext_target,
+        decideExt: await canDecideExt(req.user, fresh),
         reassign: manage && fresh.status === "in_progress",
         reopen: fresh.requester_id === req.user.id && fresh.status === "done" && !fresh.confirmed_at && ser(fresh, hol).canReopenUntil >= todayIso(),
         confirm: fresh.requester_id === req.user.id && fresh.status === "done" && !fresh.confirmed_at,
@@ -731,4 +773,4 @@ function mount(api, { wrap }) {
 /** Requests a requester-only account may make (everything else is refused). */
 const REQUESTER_PATHS = [/^\/me$/, /^\/departments$/, /^\/profile(\/avatar|\/lang)?$/, /^\/push(\/subscribe|\/unsubscribe|\/test)?$/, /^\/avatar\/\d+$/, /^\/sr(\/|$)/, /^\/sr-files\//, /^\/kpi\/response$/];
 
-module.exports = { mount, runReminders, kpiByAssignee, REQUESTER_PATHS, SEV, STATUS, OUTCOME, isWorkday, addWorkdays, workdaysBetween, holidays, profileMissing };
+module.exports = { mount, runReminders, kpiByAssignee, createFromProject, REQUESTER_PATHS, SEV, STATUS, OUTCOME, isWorkday, addWorkdays, workdaysBetween, holidays, profileMissing };

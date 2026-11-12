@@ -25,6 +25,7 @@ const jsonRca = express.json({ limit: "15mb" }); // RCA file from NICE (base64, 
 api.use((req, res, next) =>
   (req.path === "/users/import" || req.path === "/skills/import" ? jsonFile
     : /^\/sr(\/|$)/.test(req.path) && req.method !== "GET" ? jsonSr
+    : /^\/(projects\/\d+\/files|project-tasks\/\d+\/log)$/.test(req.path) ? jsonSr // project documents (base64, up to 10 files of 20 MB)
     : /^\/case\/\d+\/rca$/.test(req.path) ? jsonRca
     : /^\/case\/\d+\/files$/.test(req.path) ? jsonRca // photos / files up to 10 MB (base64)
     : /^\/pm\/\d+\/ma-form$/.test(req.path) ? jsonRca // PM: MA form template up to 10 MB (base64)
@@ -76,6 +77,7 @@ require("./custinfo").mount(api, { wrap });
 require("./custreport").mount(api, { wrap, need, perms });
 require("./pm").mount(api, { wrap, loadVisible });
 require("./transfer").mount(api, { wrap, loadVisible });
+require("./projects").mount(api, { wrap });
 require("./push").mount(api, { wrap });
 require("./casefiles").mount(api, { wrap, loadVisible, perms, jsonFile });
 require("./rca").mount(api, { wrap, loadVisible, perms, repo, tx: require("./db").tx, audit });
@@ -101,6 +103,8 @@ api.get("/me", wrap(async (req, res) => {
     kpiProfile: KP.personProfile(kcfg, req.user.teams || []),
     responseTeams: ["admin", "manager", "observer"].includes(req.user.role) && allTeams.some((t) => KP.teamProfile(kcfg, t.key) === "response" && (!scope || scope.includes(t.key))),
     user: req.user,
+    projects: await require("./projects").hasProjects(req.user),
+    isPm: await require("./projects").isPm(req.user),
     perms: await perms.forUser(req.user),
     teams: await teamsList(),
     config: {

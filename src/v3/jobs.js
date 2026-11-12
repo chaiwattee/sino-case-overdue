@@ -467,6 +467,8 @@ function startJobs() {
   job("pm-open", "0 7 * * *", true, () => require("./pm").runDue());
   // Cross-team transfer requests waiting more than a day: remind the managers who must act.
   job("transfer-reminders", "40 8 * * 1-5", true, () => require("./transfer").runReminders());
+  // Projects: open "auto" service requests before a task starts; one digest per PM of tasks due in 3 / 1 working days or late.
+  job("project-reminders", "42 8 * * 1-5", true, () => require("./projects").runReminders());
   // Customer intake: hourly "nobody has claimed this yet" reminders (checked every 5 min), chatbot webhooks, cleanup.
   const intake = require("./intake");
   job("intake-reminders", "*/5 * * * *", j.intake, () => intake.runReminders());

@@ -421,6 +421,7 @@ function summarize(o, all) {
     const cats = top(o.types);
     return [
       `${o.name} ทำคำขอบริการเสร็จ ${m.srDone} งาน (ทันกำหนด ${m.srOnTime} · เสร็จหลังเลื่อน ${m.srAfterExt} · ช้า ${m.srLate}) ยังค้างอยู่ ${m.srOpen} งาน` + (cats.length ? ` เน้นงาน ${cats.join(" และ ")}` : ""),
+      m.projDone ? `รวม task โปรเจกต์ที่ดูแลเสร็จ ${m.projDone} งาน (ทันกำหนด ${m.projOnTime}${m.projMoved ? ` · เคยเลื่อนกำหนด ${m.projMoved}` : ""})` : "",
       good.length ? `จุดเด่น: ${good.join(" · ")}` : "",
       work.length ? `ควรพัฒนา: ${work.join(" · ")}` : "",
     ].filter(Boolean).join("\n");

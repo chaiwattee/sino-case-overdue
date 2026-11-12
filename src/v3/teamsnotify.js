@@ -15,8 +15,9 @@ const EVENTS = {
   csat: "ลูกค้าให้คะแนนพึงพอใจ 1–2",
   due: "เคสใกล้ Due (วันนี้ / พรุ่งนี้) แท็กชื่อผู้รับผิดชอบ ทุกเช้า 08:30",
   transfer: "คำขอโอนเคสข้ามทีม รออนุมัติ / รับเคส",
+  project: "โปรเจกต์: task ใกล้ครบกำหนด / เลยกำหนด (สรุปทุกเช้า)",
 };
-const DEFAULT_EVENTS = ["intake", "overdue", "due", "sr", "csat", "transfer"];
+const DEFAULT_EVENTS = ["intake", "overdue", "due", "sr", "csat", "transfer", "project"];
 const HOST_OK = /(^|\.)(logic\.azure\.com|powerplatform\.com|powerautomate\.com)$/i;
 
 function validUrl(u) {

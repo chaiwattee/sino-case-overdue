@@ -373,6 +373,7 @@ ${edit || !csOf(c) ? "" : `<div class="rca-sec" id="rca-sec"></div>`}
       ["settings", "#/settings", "ตั้งค่า", lvl("settings_manage") !== "none"],
     ];
     tabs.splice(3, 0, ["sr", "#/sr", "คำขอบริการ", ME.user.role !== "viewer"]);
+    tabs.splice(4, 0, ["projects", "#/projects", "โปรเจกต์", !!ME.projects]);
     const shown = tabs.filter((t) => t[3] && (ME.user.role !== "requester" || t[0] === "sr" || t[0] === "response"));
     const link = ([k, h, l]) => `<a href="${h}" data-nav="${k}">${l}</a>`;
     // Pages are grouped into a few dropdowns; a group with one page is a plain link.
@@ -425,7 +426,7 @@ ${edit || !csOf(c) ? "" : `<div class="rca-sec" id="rca-sec"></div>`}
   const teamLabel = (code) => (ME.teams.find((t) => t.key === code) || {}).label || code;
   // Top menu groups: [key, label, page keys]. Pages a user can't open are left out.
   const NAV_GROUPS = [
-    ["work", "งานของฉัน", ["mine", "intake", "sr", "pm"]],
+    ["work", "งานของฉัน", ["mine", "intake", "sr", "projects", "pm"]],
     ["view", "ภาพรวม", ["overview", "team", "owner", "customer"]],
     ["team", "ทีมและผลงาน", ["kpi", "response", "rank", "skills"]],
     ["report", "Report", ["reports"]],
@@ -827,7 +828,7 @@ ${caseTable(cases, { missingRes: showRes, empty: "ไม่พบเคสตา
 
   async function viewMine(params) {
     setNav("mine");
-    const [{ cases }, lk, ikHtml, extHtml, srAll] = await Promise.all([api("/cases?mine=1"), lookups(), intakeSection(), Promise.all([extPendingSection(), transferPendingSection()]).then((a) => a.join("")), srList("assigned")]);
+    const [{ cases }, lk, ikHtml, extHtml, srAll, pjHtml] = await Promise.all([api("/cases?mine=1"), lookups(), intakeSection(), Promise.all([extPendingSection(), transferPendingSection()]).then((a) => a.join("")), srList("assigned"), pjMyTasksSection().catch(() => "")]);
     const srMine = srAll.filter(srOpen).sort(srByTarget);
     const srLate = srMine.filter((r) => r.status === "overdue" || r.daysLeft === 0 || r.daysLeft === 1);
     const tab = params.tab || "open";
@@ -859,6 +860,7 @@ ${caseTable(cases, { missingRes: showRes, empty: "ไม่พบเคสตา
 ${can("case_create") ? `<a class="btn primary" href="#/case/new">เปิดเคสใหม่</a>` : ""}</div></div>
 ${extHtml}
 ${ikHtml}
+${pjHtml}
 ${soon.length ? `<div class="banner warn" role="status">${soon.map((c) => `<a href="#/case/${c.id}">${esc(caseRef(c))}</a> ${esc(c.site || "")} ${c.stage === "overdue" ? `เกิน Due มาแล้ว ${c.daysOverdue} วัน` : c.daysLeft === 0 ? "ครบกำหนดวันนี้" : `เหลือ ${c.daysLeft} วัน`}`).join(" · ")}</div>` : ""}
 <div class="kpis">
 <div class="kpi k-all"><div class="l">ยังเปิดอยู่</div><div class="v">${open.length}</div></div>
@@ -3989,7 +3991,7 @@ ${e.text ? `<div class="srtext">${esc(e.text)}</div>` : ""}${fs.length ? `<div>$
     const approvePanel = c.approve
       ? `<section class="card srapprove"><h2>ตรวจและอนุมัติ</h2>
 <form id="apf"><div class="formgrid" style="grid-template-columns:1fr 1.3fr">
-<label class="f">Target date<input type="date" name="targetDate" value="${r.requestedDate}" min="${new Date().toISOString().slice(0, 10)}" required><span class="hint">ผู้ขอต้องการ ${dlong(r.requestedDate)}</span></label>
+${r.project ? `<div class="f"><span>Target date</span><b style="min-height:44px;display:flex;align-items:center">${dlong(r.requestedDate)}</b><span class="hint">กำหนดเสร็จของ task ในโปรเจกต์ ถ้าทำไม่ทัน ให้ผู้รับผิดชอบกด “ขอเลื่อน Target” หลังอนุมัติ (PM อนุมัติ)</span><input type="hidden" name="targetDate" value="${r.requestedDate}"></div>` : `<label class="f">Target date<input type="date" name="targetDate" value="${r.requestedDate}" min="${new Date().toISOString().slice(0, 10)}" required><span class="hint">ผู้ขอต้องการ ${dlong(r.requestedDate)}</span></label>`}
 <label class="f">ผู้รับผิดชอบ<select name="assigneeId" required><option value="">เลือกสมาชิกทีม ${esc(r.teamLabel)}</option>${asgOpt(null)}</select></label></div>
 <label class="f" id="ap-why" hidden>เหตุผลที่ปรับวันที่ (ผู้ขอจะเห็น)<input name="targetReason" maxlength="500" placeholder="เช่น ขอส่งก่อน 1 วัน ให้ฝ่ายขายตรวจทันประชุม"></label>
 <label class="f">ประเภทงาน (ใช้ใน KPI ด้านทักษะ)<select name="category"><option value="">ให้ระบบจัดจากหัวข้อ</option>${m.categories.map((x) => `<option>${esc(x)}</option>`).join("")}</select></label>
@@ -3997,7 +3999,7 @@ ${e.text ? `<div class="srtext">${esc(e.text)}</div>` : ""}${fs.length ? `<div>$
 <div class="actions"><button class="btn ok" type="submit">อนุมัติและมอบหมาย</button><button class="btn" type="button" id="ap-info">ขอข้อมูลเพิ่ม</button><button class="btn danger" type="button" id="ap-rej">ไม่อนุมัติ</button></div></form></section>`
       : "";
     const extBanner = r.ext
-      ? `<div class="banner warn srext"><div><b>${esc(r.ext.by)} ขอเลื่อน Target</b> ${dlong(r.targetDate)} → <b>${dlong(r.ext.target)}</b><br>${esc(r.ext.reason)}</div>${c.decideExt ? `<div class="actions" style="margin:0"><button class="btn ok" type="button" id="ext-ok">อนุมัติเลื่อน</button><button class="btn" type="button" id="ext-no">ไม่อนุมัติ</button></div>` : `<span class="hint">รอ Manager</span>`}</div>`
+      ? `<div class="banner warn srext"><div><b>${esc(r.ext.by)} ขอเลื่อน Target</b> ${dlong(r.targetDate)} → <b>${dlong(r.ext.target)}</b><br>${esc(r.ext.reason)}</div>${c.decideExt ? `<div class="actions" style="margin:0"><button class="btn ok" type="button" id="ext-ok">อนุมัติเลื่อน</button><button class="btn" type="button" id="ext-no">ไม่อนุมัติ</button></div>` : `<span class="hint">${r.project ? "รอ PM ของโปรเจกต์" : "รอ Manager คนอื่นในทีม"}</span>`}</div>`
       : "";
     const info = [
       ["ทีม", esc(r.teamLabel)],
@@ -4026,6 +4028,7 @@ ${e.text ? `<div class="srtext">${esc(e.text)}</div>` : ""}${fs.length ? `<div>$
     $app.innerHTML = `<div class="pagehead"><div><a href="#/sr" class="muted">← คำขอบริการ</a>
 <h1 style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><span class="mono" style="font-size:.8em">${esc(r.srNo)}</span> ${esc(r.title)} ${srChip(r)}</h1></div>
 <div class="actions" style="margin:0">${buttons}</div></div>
+${r.project ? `<div class="banner">งานจากโปรเจกต์ <a href="#/projects/${r.project.id}?task=${r.project.taskId}"><b>${esc(r.project.name)}</b></a> · PM เป็นผู้ขอ ผู้ยืนยันรับงาน และผู้อนุมัติการเลื่อน Target</div>` : ""}
 ${infoEv ? `<div class="banner warn"><b>${esc(infoEv.by_name)} ขอข้อมูลเพิ่ม:</b> ${esc(infoEv.text)}${c.edit ? "<br>กด “แก้ไขและส่งใหม่” เพื่อส่งกลับให้ Manager" : ""}</div>` : ""}
 ${r.status === "overdue" ? `<div class="banner err">เลย Target มาแล้ว ${r.overdueDays} วันทำการ</div>` : ""}
 ${extBanner}
@@ -4056,7 +4059,18 @@ ${r.confirmedAt ? `<p class="hint">ผู้ขอยืนยันรับง
       };
     }
     const ap = $("apf");
-    if (ap) {
+    if (ap && r.project) {
+      ap.onsubmit = async (e) => {
+        e.preventDefault();
+        try {
+          await act("approve", { targetDate: r.requestedDate, assigneeId: ap.assigneeId.value, category: ap.category.value, note: ap.note.value }, "อนุมัติแล้ว ระบบส่ง email ถึงผู้รับผิดชอบและ PM");
+        } catch (err) {
+          toast(err.message, 6000);
+        }
+      };
+      $("ap-info").onclick = () => srDialog("ขอข้อมูลเพิ่มจาก PM", `<label class="f">ต้องการข้อมูลอะไรเพิ่ม<textarea name="note" rows="3" required minlength="5" maxlength="1000"></textarea></label>`, (f) => act("info", { note: f.note.value }, "ส่งคำขอข้อมูลเพิ่มถึง PM แล้ว"), "ส่งถึง PM");
+      $("ap-rej").onclick = () => srDialog("ไม่อนุมัติคำขอ", `<label class="f">เหตุผล (PM จะเห็น)<textarea name="reason" rows="3" required minlength="5" maxlength="1000"></textarea></label>`, (f) => act("reject", { reason: f.reason.value }, "ไม่อนุมัติแล้ว ระบบแจ้ง PM"), "ไม่อนุมัติ");
+    } else if (ap) {
       const why = () => ($("ap-why").hidden = ap.targetDate.value === r.requestedDate);
       ap.targetDate.onchange = () => {
         const day = new Date(ap.targetDate.value + "T00:00:00").getDay();
@@ -4104,7 +4118,16 @@ ${r.confirmedAt ? `<p class="hint">ผู้ขอยืนยันรับง
           "ยืนยันรับงาน"
         );
     if ($("b-reopen")) $("b-reopen").onclick = () => srDialog("ขอเปิดคำขอใหม่", `<p class="muted" style="margin:0">คำขอกลับไปที่ ${esc(r.assignee ? r.assignee.name : "ผู้รับผิดชอบเดิม")}</p><label class="f">งานยังไม่ตรงที่ขออย่างไร<textarea name="reason" rows="3" required minlength="10" maxlength="1000"></textarea></label>`, (f) => act("reopen", { reason: f.reason.value }, "เปิดคำขอใหม่แล้ว ระบบแจ้งผู้รับผิดชอบ"), "ขอเปิดใหม่");
-    if ($("b-edit"))
+    if ($("b-edit") && r.project)
+      $("b-edit").onclick = () => {
+        const f = srDialog("ตอบและส่งกลับให้ Manager", `<p class="muted" style="margin:0">ชื่องาน รายละเอียด และกำหนดเสร็จ แก้ที่หน้าโปรเจกต์</p><label class="f">ข้อมูลที่เพิ่ม<textarea name="note" rows="3" maxlength="1000" required></textarea></label>${fileBox(m)}`, async (f) => {
+          await post(`/sr/${r.id}`, { note: f.note.value, files: await fp.get() }, "PUT");
+          toast("ส่งกลับให้ Manager แล้ว", 4500);
+          done();
+        }, "ส่ง");
+        const fp = filePicker(f, m);
+      };
+    else if ($("b-edit"))
       $("b-edit").onclick = () => {
         const f = srDialog(r.status === "info" ? "แก้ไขและส่งใหม่" : "แก้ไขคำขอ", `<label class="f">หัวข้อ<input name="title" value="${esc(r.title)}" required minlength="5" maxlength="200"></label>
 <label class="f">รายละเอียด<textarea name="detail" rows="5" required minlength="20" maxlength="5000">${esc(r.detail)}</textarea></label>
@@ -5444,6 +5467,427 @@ ${changed.length ? `<div class="tablewrap" style="max-height:50vh"><table style=
   }
 
   // ------------------------------------------------------------ router
+  // ------------------------------------------------------------ projects & tasks (Project Manager team)
+  let PJ_META = null;
+  async function pjMeta(force) {
+    if (!PJ_META || force) PJ_META = await api("/projects/meta");
+    return PJ_META;
+  }
+  const PJ_ST = { plan: "c-closed", active: "c-all", delivered: "c-ok", cancelled: "c-closed" };
+  const PT_ST = { planned: "c-closed", todo: "c-closed", pending: "c-r1", doing: "c-all", submitted: "c-r2", done: "c-ok", cancelled: "c-closed" };
+  const MS_ST = { met: "c-ok", late: "c-overdue", missed: "c-overdue", risk: "c-r2", plan: "c-all" };
+  const pjChip = (p) => `<span class="chip ${PJ_ST[p.status]}">${esc(p.statusLabel)}</span>`;
+  function ptChip(t) {
+    if (t.sr && t.sr.ext) return `<span class="chip c-r1">ขอเลื่อนเป็น ${fd(t.sr.ext.target)}</span>`;
+    if (t.overdue) return `<span class="chip c-overdue">เลยกำหนด ${t.overdueDays} วันทำการ</span>`;
+    return `<span class="chip ${PT_ST[t.status]}">${esc(t.statusLabel)}${t.status === "done" && t.sr && t.sr.rating ? ` · ${t.sr.rating}/5` : ""}</span>`;
+  }
+  const ptDue = (t) => `${fd(t.due)}${t.base !== t.due ? `<div class="hint">แผนเดิม ${fd(t.base)}</div>` : ""}${t.daysLeft != null && t.daysLeft <= 3 ? `<div class="hint t-r1">อีก ${t.daysLeft} วันทำการ</div>` : ""}${t.doneAt ? `<div class="hint">${t.onTime ? "เสร็จทันกำหนด" : "เสร็จช้ากว่ากำหนด"} · ${fd(t.doneAt)}</div>` : ""}`;
+  const ptWho = (t) => (t.kind === "own" ? `PM ทำเอง` : `${esc(t.teamLabel)}<div class="hint">${t.assignee ? esc(t.assignee.name) : t.sr ? "รอ Manager มอบคน" : "ยังไม่ได้เปิด SR"}</div>`);
+  const pjBar = (done, total) => `<div class="pjbar" role="img" aria-label="เสร็จ ${done} จาก ${total}"><div style="width:${total ? Math.round((done / total) * 100) : 0}%"></div></div>`;
+  /** Working days, the same rule the server uses (Mon–Fri minus the holiday list). */
+  function pjAddWorkdays(iso, n, hol) {
+    const t = new Date(iso + "T00:00:00");
+    const ok = (x) => x.getDay() !== 0 && x.getDay() !== 6 && !hol.includes(isoDay(x));
+    if (!ok(t)) do t.setDate(t.getDate() + 1); while (!ok(t));
+    let left = n;
+    while (left > 0) {
+      t.setDate(t.getDate() + 1);
+      if (ok(t)) left--;
+    }
+    return isoDay(t);
+  }
+  function pjDialog(title, html, { wide = false } = {}) {
+    const dlg = document.getElementById("pjdlg") || document.body.appendChild(Object.assign(document.createElement("dialog"), { id: "pjdlg" }));
+    dlg.className = wide ? "wide" : "";
+    dlg.innerHTML = `<div class="card"><div class="title"><h2>${title}</h2><button class="btn" type="button" data-close>ปิด</button></div><div class="pjdlg-body">${html}</div></div>`;
+    dlg.querySelector("[data-close]").onclick = () => dlg.close();
+    if (!dlg.open) dlg.showModal();
+    return dlg;
+  }
+
+  async function viewProjects(params) {
+    setNav("projects");
+    const [m, { items }] = await Promise.all([pjMeta(true), api("/projects")]);
+    const groups = [
+      ["", "ทั้งหมด", () => true],
+      ...(ME.isPm ? [["mine", "ของฉัน", (p) => p.mine]] : []),
+      ["active", "กำลังดำเนินการ", (p) => p.status === "active"],
+      ["plan", "วางแผน", (p) => p.status === "plan"],
+      ["delivered", "ส่งมอบแล้ว", (p) => p.status === "delivered"],
+      ["cancelled", "ยกเลิก", (p) => p.status === "cancelled"],
+    ];
+    const g = groups.find((x) => x[0] === (params.f || "")) || groups[0];
+    const rows = items.filter(g[2]);
+    $app.innerHTML = `<div class="pagehead"><div><h1>โปรเจกต์</h1><p class="muted" style="margin:0">${m.canCreate ? "รวม task ที่ PM ทำเอง และ task ที่มอบให้ทีมอื่นผ่านคำขอบริการ (SR) ไว้ที่เดียว" : "โปรเจกต์ที่มี task มอบมาที่ทีมหรือที่คุณ"}</p></div>
+${m.canCreate ? `<button class="btn primary" type="button" id="pj-new">+ โปรเจกต์ใหม่</button>` : ""}</div>
+<div class="fpills">${groups.map(([k, l, f]) => {
+      const n = items.filter(f).length;
+      return k && !n && k !== (params.f || "") ? "" : `<a class="fpill ${k === (params.f || "") ? "on" : ""}" href="#/projects?${qs({ f: k })}">${l} <b>${n}</b></a>`;
+    }).join("")}</div>
+<section class="card" style="padding:0;margin-top:12px"><div class="tablewrap" style="margin:0;padding:0"><table><thead><tr><th>โปรเจกต์</th><th>PM</th><th>ช่วงเวลา</th><th>ความคืบหน้า</th><th>Task เลยกำหนด</th><th>สถานะ</th></tr></thead><tbody>
+${rows.map((p) => `<tr class="click" data-href="#/projects/${p.id}"><td><a href="#/projects/${p.id}" style="font-weight:600">${esc(p.name)}</a><div class="hint">${esc(p.customer || "-")}${p.template ? ` · ${esc(p.template)}` : ""}${p.full ? "" : " · เห็นเฉพาะ task ของคุณ"}</div></td>
+<td>${p.pm ? esc(p.pm.name) : "-"}</td><td>${fd(p.start)} – ${fd(p.end, true)}</td>
+<td style="min-width:150px">${pjBar(p.summary.done, p.summary.total)}<div class="hint">เสร็จ ${p.summary.done} จาก ${p.summary.total} task</div></td>
+<td>${p.summary.overdue ? `<span class="chip c-overdue">${p.summary.overdue} task</span>` : `<span class="muted">-</span>`}</td><td>${pjChip(p)}</td></tr>`).join("") || `<tr><td colspan="6"><div class="empty">${items.length ? "ไม่มีโปรเจกต์ในกลุ่มนี้" : m.canCreate ? "ยังไม่มีโปรเจกต์ กด “+ โปรเจกต์ใหม่” เพื่อเริ่ม (เลือก template เพื่อสร้าง milestone และ task ให้อัตโนมัติ)" : "ยังไม่มีโปรเจกต์ที่มี task มอบมาที่คุณ"}</div></td></tr>`}
+</tbody></table></div></section>`;
+    bindRowLinks();
+    const nb = document.getElementById("pj-new");
+    if (nb) nb.onclick = () => openProjectForm(m);
+  }
+
+  async function openProjectForm(m, p) {
+    const lk = await lookups().catch(() => ({ site: [] }));
+    const today = m.today;
+    const f = srDialog(p ? "แก้ไขโปรเจกต์" : "โปรเจกต์ใหม่", `<label class="f">ชื่อโปรเจกต์<input name="name" required minlength="3" maxlength="200" value="${esc(p ? p.name : "")}"></label>
+<div class="formgrid"><label class="f">ลูกค้า<input name="customer" list="pj-cust" maxlength="200" value="${esc(p ? p.customer : "")}"><datalist id="pj-cust">${(lk.site || []).map((s) => `<option value="${esc(s)}">`).join("")}</datalist></label>
+${m.isLead ? `<label class="f">PM<select name="pmId">${m.people.map((u) => `<option value="${u.id}" ${(p ? p.pm && p.pm.id === u.id : u.id === ME.user.id) ? "selected" : ""}>${esc(u.display_name)}</option>`).join("")}</select></label>` : ""}</div>
+<div class="formgrid"><label class="f">วันเริ่ม<input type="date" name="start" required value="${p ? p.start : today}"></label><label class="f">วันส่งมอบ<input type="date" name="end" required value="${p ? p.end : ""}"></label>
+${p ? `<label class="f">สถานะ<select name="status">${[["plan", "วางแผน"], ["active", "กำลังดำเนินการ"], ["delivered", "ส่งมอบแล้ว"], ["cancelled", "ยกเลิก"]].map(([k, l]) => `<option value="${k}" ${k === p.status ? "selected" : ""}>${l}</option>`).join("")}</select></label>` : `<label class="f">Template<select name="templateId"><option value="">ไม่ใช้ template (เริ่มจากโปรเจกต์ว่าง)</option>${m.templates.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join("")}</select></label>`}</div>
+${p ? "" : `<div class="banner" id="pj-tpl" hidden></div>`}
+<label class="f">รายละเอียด (ไม่บังคับ)<textarea name="description" rows="2" maxlength="3000">${esc(p ? p.description : "")}</textarea></label>`,
+      async (f) => {
+        const body = { name: f.name.value, customer: f.customer.value, start: f.start.value, end: f.end.value, description: f.description.value, pmId: f.pmId ? f.pmId.value : undefined };
+        if (p) {
+          await post(`/projects/${p.id}`, { ...body, status: f.status.value }, "PUT");
+          toast("บันทึกแล้ว");
+          route();
+        } else {
+          const r = await post("/projects", { ...body, templateId: f.templateId.value });
+          toast("สร้างโปรเจกต์แล้ว" + (f.templateId.value ? " · task ของทีมอื่นยังไม่เปิด SR จนกว่าจะกด “มอบงาน” หรือถึง 7 วันทำการก่อนวันเริ่ม" : ""), 6000);
+          location.hash = `#/projects/${r.id}`;
+        }
+      }, p ? "บันทึก" : "สร้างโปรเจกต์");
+    const prev = () => {
+      const box = f.querySelector("#pj-tpl");
+      if (!box) return;
+      const t = m.templates.find((x) => String(x.id) === f.templateId.value);
+      box.hidden = !t;
+      if (!t || !f.start.value) return;
+      const at = (n) => pjAddWorkdays(f.start.value, Number(n) || 0, m.holidays);
+      const nTask = t.milestones.reduce((a, x) => a + (x.tasks || []).length, 0);
+      const last = Math.max(0, ...t.milestones.flatMap((x) => (x.tasks || []).map((y) => Number(y.end) || 0)));
+      box.innerHTML = `<b>“${esc(t.name)}” สร้าง ${t.milestones.length} milestone และ ${nTask} task</b> · วันที่นับเป็นวันทำการจากวันเริ่ม แก้ได้หลังสร้าง · งานสุดท้ายเสร็จ ${fd(at(last))}
+<ul style="margin:6px 0 0;padding-left:18px">${t.milestones.map((x) => `<li>◆ ${esc(x.name)}: ${(x.tasks || []).map((y) => `${esc(y.name)} <span class="hint">(${y.team ? esc(teamLabel(y.team)) : "PM"} · ${fd(at(y.end))})</span>`).join(", ")}</li>`).join("")}</ul>`;
+      if (!f.end.value || f.end.value < at(last)) f.end.value = at(last);
+    };
+    if (f.templateId) f.templateId.onchange = prev;
+    f.start.onchange = prev;
+  }
+
+  async function viewProject(id, params) {
+    setNav("projects");
+    const [m, d] = await Promise.all([pjMeta(), api("/projects/" + encodeURIComponent(id))]);
+    const p = d.project;
+    const s = d.summary;
+    const tab = ["tasks", "timeline", "docs", "md"].includes(params.tab) ? params.tab : "tasks";
+    const tabs = [["tasks", "Task"], ["timeline", "Timeline"], ["docs", "เอกสาร"], ...(d.full && ME.user.role !== "viewer" ? [["md", "Man-day"]] : [])];
+    const pct = s.total ? Math.round((s.done / s.total) * 100) : 0;
+    const left = Math.round((new Date(p.end + "T00:00:00") - new Date(m.today + "T00:00:00")) / 86400000);
+    const body = tab === "timeline" ? pjTimeline(d, m) : tab === "docs" ? pjDocs(d, m) : tab === "md" ? pjManday(d) : pjTasks(d);
+    $app.innerHTML = `<div class="pagehead"><div><a href="#/projects" class="muted">← โปรเจกต์</a>
+<h1 style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">${esc(p.name)} ${pjChip(p)}</h1>
+<p class="muted" style="margin:0">${esc(p.customer || "ไม่ระบุลูกค้า")} · PM ${p.pm ? esc(p.pm.name) : "-"} · ${fd(p.start)} – ${fd(p.end, true)}${p.template ? ` · Template “${esc(p.template)}”` : ""}</p></div>
+${d.can.edit ? `<div class="actions" style="margin:0"><button class="btn" type="button" id="pj-edit">แก้ไขโปรเจกต์</button>${d.can.template ? `<button class="btn" type="button" id="pj-tpl">บันทึกเป็น template</button>` : ""}<button class="btn" type="button" id="pj-ms">+ Milestone</button><button class="btn primary" type="button" id="pj-task">+ เพิ่ม task</button></div>` : ""}</div>
+${p.description ? `<p class="muted" style="margin:0">${esc(p.description)}</p>` : ""}
+${d.full ? `<div class="kpis">
+<div class="kpi k-all"><span class="l">ความคืบหน้า</span><span class="v">${pct}%</span><span class="s">เสร็จ ${s.done} จาก ${s.total} task</span></div>
+<div class="kpi ${s.overdue ? "k-overdue" : "k-normal"}"><span class="l">เลยกำหนด</span><span class="v">${s.overdue}</span><span class="s">task ที่ยังไม่เสร็จและเลยวันกำหนด</span></div>
+<div class="kpi k-normal"><span class="l">ทันกำหนด</span><span class="v">${s.onTime}/${s.done}</span><span class="s">task ที่เสร็จแล้ว (ใช้คิด KPI ของ PM)</span></div>
+${ME.user.role !== "viewer" ? `<div class="kpi k-closed"><span class="l">Man-day</span><span class="v">${s.mdAct}<span style="font-size:16px;color:var(--muted)"> / ${s.mdEst}</span></span><span class="s">ใช้จริง / ประมาณการ</span></div>` : ""}
+<div class="kpi k-closed"><span class="l">${p.status === "delivered" ? "ส่งมอบแล้ว" : "ถึงวันส่งมอบ"}</span><span class="v">${p.status === "delivered" ? fd(p.deliveredAt) : left >= 0 ? left : `เลย ${-left}`}</span><span class="s">${p.status === "delivered" ? "" : `วัน · ส่งมอบ ${fd(p.end, true)}`}</span></div></div>`
+      : `<div class="banner">คุณเห็นเฉพาะ task ที่มอบมาที่ทีมหรือที่คุณ · อัปเดตงานที่หน้าคำขอบริการ (SR) หรือบันทึกกิจกรรมและ man-day ใน task</div>`}
+<div class="fpills">${tabs.map(([k, l]) => `<a class="fpill ${k === tab ? "on" : ""}" href="#/projects/${p.id}?tab=${k}">${l}</a>`).join("")}</div>
+${body}`;
+    const $ = (x) => document.getElementById(x);
+    $app.querySelectorAll("[data-task]").forEach((el) => {
+      el.onclick = (e) => {
+        if (!e.target.closest("a")) openTask(Number(el.dataset.task), d, m);
+      };
+      el.onkeydown = (e) => e.key === "Enter" && openTask(Number(el.dataset.task), d, m);
+    });
+    if ($("pj-edit")) $("pj-edit").onclick = () => openProjectForm(m, p);
+    if ($("pj-ms")) $("pj-ms").onclick = () => openMilestone(p);
+    if ($("pj-task")) $("pj-task").onclick = () => openTaskForm(d, m);
+    if ($("pj-tpl")) $("pj-tpl").onclick = () => srDialog("บันทึกเป็น template", `<p class="muted" style="margin:0">เก็บ milestone, task, ทีมที่ทำ, ระยะเวลา (นับวันทำการจากวันเริ่ม) และ man-day ประมาณการ ไว้ใช้กับโปรเจกต์ถัดไป</p><label class="f">ชื่อ template<input name="n" required minlength="3" maxlength="120" value="${esc(p.template || "")}"></label>`, async (f) => {
+      await post(`/projects/${p.id}/template`, { name: f.n.value });
+      PJ_META = null;
+      toast("บันทึก template แล้ว");
+    }, "บันทึก");
+    $app.querySelectorAll("[data-ms]").forEach((b) => (b.onclick = () => openMilestone(p, d.milestones.find((x) => x.id === Number(b.dataset.ms)))));
+    bindPjDocs(d, m);
+    if (params.task) openTask(Number(params.task), d, m);
+  }
+
+  function pjTasks(d) {
+    const ms = d.milestones;
+    const full = d.full;
+    const cards = full && ms.length ? `<div class="pjms">${ms.map((x) => `<div class="pjmsbox"><div class="pjms-top"><strong>◆ ${esc(x.name)}</strong>${d.can.edit ? `<button class="linkbtn" type="button" data-ms="${x.id}" aria-label="แก้ milestone ${esc(x.name)}">แก้</button>` : ""}</div>
+${pjBar(x.done, x.total)}<div class="pjms-top"><span class="hint">${x.done}/${x.total} task · ต้อง meet ${fd(x.due)}</span><span class="chip ${MS_ST[x.state]}">${esc(x.stateLabel)}</span></div></div>`).join("")}</div>` : "";
+    const groups = [...ms.map((x) => [x, d.tasks.filter((t) => t.milestoneId === x.id)]), [null, d.tasks.filter((t) => !t.milestoneId)]].filter(([, ts]) => ts.length);
+    const rows = groups.map(([x, ts]) => `<tr class="pjmsrow"><td colspan="${full ? 5 : 4}"><strong>◆ ${x ? esc(x.name) : "ไม่อยู่ใน milestone"}</strong>${x ? ` <span class="hint">· ต้อง meet ${fd(x.due)}</span>` : ""}</td></tr>
+${ts.map((t) => `<tr class="click ${t.status === "cancelled" ? "pj-off" : ""}" data-task="${t.id}" tabindex="0"><td><span style="font-weight:600;color:var(--accent)">${esc(t.name)}</span><div class="hint">${t.kind === "own" ? "PM ทำเอง" : t.sr ? `<a class="mono" href="#/sr/${t.sr.id}">${esc(t.sr.no)}</a>` : t.srOpen === "auto" ? "เปิด SR อัตโนมัติก่อนเริ่ม 7 วันทำการ" : "ยังไม่ได้เปิด SR"}</div></td>
+<td>${ptWho(t)}</td><td>${ptDue(t)}</td><td>${ptChip(t)}</td>${full ? `<td class="n">${ME.user.role === "viewer" ? "" : `${t.mdAct} / ${t.mdEst}`}</td>` : ""}</tr>`).join("")}`).join("");
+    return `${cards}<section class="card"><div class="title"><h2>Task</h2><span>กดที่ task เพื่อดูรายละเอียด${full ? " · สถานะ task ที่มอบงานดึงจาก SR อัตโนมัติ" : ""}</span></div>
+<div class="tablewrap"><table><thead><tr><th>Task</th><th>ผู้รับผิดชอบ</th><th>กำหนดเสร็จ</th><th>สถานะ</th>${full ? `<th class="n">${ME.user.role === "viewer" ? "" : "Man-day ใช้ / ประมาณ"}</th>` : ""}</tr></thead><tbody>
+${rows || `<tr><td colspan="5"><div class="empty">${d.can.edit ? (ms.length ? "ยังไม่มี task กด “+ เพิ่ม task”" : "เริ่มจากเพิ่ม milestone (เช่น ติดตั้งระบบ, UAT) แล้วเพิ่ม task") : "ไม่มี task"}</div></td></tr>`}</tbody></table></div></section>`;
+  }
+
+  function pjTimeline(d, m) {
+    const ts = d.tasks.filter((t) => t.status !== "cancelled");
+    const dates = [d.project.start, d.project.end, m.today, ...ts.flatMap((t) => [t.start, t.due, t.base]), ...d.milestones.map((x) => x.due)].filter(Boolean).sort();
+    const monday = (iso) => {
+      const t = new Date(iso + "T00:00:00");
+      t.setDate(t.getDate() - ((t.getDay() + 6) % 7));
+      return isoDay(t);
+    };
+    const from = monday(dates[0]);
+    const end = new Date(dates[dates.length - 1] + "T00:00:00");
+    end.setDate(end.getDate() + 7);
+    const span = Math.max(7, Math.round((end - new Date(from + "T00:00:00")) / 86400000));
+    const x = (iso) => Math.max(0, Math.min(100, (Math.round((new Date(iso + "T00:00:00") - new Date(from + "T00:00:00")) / 86400000) / span) * 100));
+    const weeks = [];
+    for (let i = 0; i < span; i += 7) {
+      const t = new Date(from + "T00:00:00");
+      t.setDate(t.getDate() + i);
+      weeks.push(isoDay(t));
+    }
+    const grid = `<div class="g-grid">${weeks.map(() => "<i></i>").join("")}</div><div class="g-today" style="left:${x(m.today)}%" title="วันนี้"></div>`;
+    const cls = (t) => (["done", "submitted"].includes(t.status) ? "done" : t.overdue ? "over" : ["planned", "todo"].includes(t.status) ? "todo" : t.status === "pending" ? "wait" : "");
+    let names = `<div class="g-name g-hd">Task</div>`;
+    let lanes = `<div class="g-head">${weeks.map((w) => `<span>${fd(w)}</span>`).join("")}</div>`;
+    const groups = [...d.milestones.map((ms) => [ms, ts.filter((t) => t.milestoneId === ms.id)]), [null, ts.filter((t) => !t.milestoneId)]].filter(([, a]) => a.length);
+    for (const [ms, list] of groups) {
+      names += `<div class="g-name ms">◆ ${ms ? esc(ms.name) : "ไม่อยู่ใน milestone"}</div>`;
+      lanes += `<div class="g-lane ms">${grid}${ms ? `<span class="g-dia" style="left:${x(ms.due)}%" title="${esc(ms.name)} ต้อง meet ${fd(ms.due)}"></span>` : ""}</div>`;
+      for (const t of list) {
+        names += `<div class="g-name" data-task="${t.id}" tabindex="0">${esc(t.name)}</div>`;
+        lanes += `<div class="g-lane">${grid}<span class="g-bar ${cls(t)}" data-task="${t.id}" style="left:${x(t.start)}%;width:${Math.max(0.8, x(t.due) - x(t.start) + 100 / span)}%" title="${esc(t.name)} · ${fd(t.start)}–${fd(t.due)} · ${esc(t.statusLabel)}"></span>${t.base !== t.due ? `<span class="g-base" style="left:${x(t.start)}%;width:${Math.max(0.5, x(t.base) - x(t.start) + 100 / span)}%" title="แผนเดิม ${fd(t.base)}"></span>` : ""}</div>`;
+      }
+    }
+    return `<section class="card"><div class="title"><h2>Timeline</h2><span>เส้นแดง = วันนี้ · เส้นบางใต้แถบ = แผนเดิมก่อนเลื่อน · แก้วันที่ได้จากตาราง task</span></div>
+<div class="legend"><span><i class="lg done"></i>เสร็จ / ส่งงานแล้ว</span><span><i class="lg"></i>กำลังทำ</span><span><i class="lg wait"></i>รอรับงาน</span><span><i class="lg over"></i>เลยกำหนด</span><span><i class="lg todo"></i>ยังไม่เริ่ม</span><span>◆ Milestone</span></div>
+${ts.length ? `<div class="gwrap"><div class="gantt" style="min-width:${Math.max(760, weeks.length * 70 + 240)}px"><div>${names}</div><div>${lanes}</div></div></div>` : `<div class="empty">ยังไม่มี task</div>`}</section>`;
+  }
+
+  function pjDocs(d, m) {
+    const docs = d.docs.filter((f) => !f.task_id);
+    const taskFiles = d.docs.filter((f) => f.task_id);
+    const size = (n) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+    const row = (f, extra) => `<tr><td><a href="api/project-files/${f.id}" target="_blank" rel="noopener">📄 ${esc(f.file_name)}</a></td>${extra}<td>${esc(f.by_name || "-")}</td><td>${fdt(f.created_at)}</td><td class="n">${size(f.size || 0)}</td>
+<td class="n">${f.by_user === ME.user.id || d.can.edit ? `<button class="linkbtn danger" type="button" data-rmfile="${f.id}" aria-label="ลบ ${esc(f.file_name)}">ลบ</button>` : ""}</td></tr>`;
+    return `<section class="card"><div class="title"><h2>เอกสารโปรเจกต์</h2><span>เอกสารอ้างอิงของทั้งโปรเจกต์ · ทุกคนในโปรเจกต์เปิดดูได้</span></div>
+${d.can.upload ? `<form id="pj-up" class="formgrid" style="align-items:end"><label class="f">หมวด<select name="category">${m.docCats.map((c) => `<option>${esc(c)}</option>`).join("")}</select></label>
+<div class="f fp"><span>ไฟล์ (PDF, Word, Excel, PowerPoint, รูป · ไม่เกิน ${m.maxFileMb} MB)</span><input type="file" multiple accept="${m.fileExt.map((x) => "." + x).join(",")}"><div class="fp-list"></div></div>
+<div><button class="btn primary" type="submit">อัปโหลด</button></div></form>` : ""}
+<div class="tablewrap"><table><thead><tr><th>ไฟล์</th><th>หมวด</th><th>อัปโหลดโดย</th><th>วันที่</th><th class="n">ขนาด</th><th></th></tr></thead><tbody>
+${docs.map((f) => row(f, `<td>${esc(f.category || "-")}</td>`)).join("") || `<tr><td colspan="6"><div class="empty">ยังไม่มีเอกสาร</div></td></tr>`}</tbody></table></div></section>
+<section class="card"><div class="title"><h2>ไฟล์ที่แนบใน task</h2><span>รวมจากการบันทึกกิจกรรมของทุก task</span></div>
+<div class="tablewrap"><table><thead><tr><th>ไฟล์</th><th>จาก task</th><th>โดย</th><th>วันที่</th><th class="n">ขนาด</th><th></th></tr></thead><tbody>
+${taskFiles.map((f) => row(f, `<td>${esc(f.task_name || "-")}</td>`)).join("") || `<tr><td colspan="6"><div class="empty">ยังไม่มีไฟล์แนบใน task</div></td></tr>`}</tbody></table></div></section>`;
+  }
+  function bindPjDocs(d, m) {
+    const up = document.getElementById("pj-up");
+    if (up) {
+      const fp = filePicker(up, { fileExt: m.fileExt, maxFileMb: m.maxFileMb });
+      up.onsubmit = async (e) => {
+        e.preventDefault();
+        if (!fp.count()) return toast("เลือกไฟล์ก่อน");
+        const b = up.querySelector("button[type=submit]");
+        b.disabled = true;
+        try {
+          const r = await post(`/projects/${d.project.id}/files`, { category: up.category.value, files: await fp.get() });
+          toast(`อัปโหลด ${r.files} ไฟล์แล้ว`);
+          route();
+        } catch (err) {
+          b.disabled = false;
+          toast(err.message, 6000);
+        }
+      };
+    }
+    $app.querySelectorAll("[data-rmfile]").forEach((b) => {
+      b.onclick = () => {
+        if (!confirmInline(b, "กดอีกครั้งเพื่อลบ")) return;
+        api("/project-files/" + b.dataset.rmfile, { method: "DELETE" }).then(() => (toast("ลบแล้ว"), route()), (e) => toast(e.message, 6000));
+      };
+    });
+  }
+
+  function pjManday(d) {
+    const by = {};
+    for (const t of d.tasks) {
+      const k = t.kind === "own" ? "PM" : t.teamLabel || t.team;
+      by[k] = by[k] || { est: 0, act: 0, n: 0 };
+      by[k].n++;
+      if (t.status !== "cancelled") by[k].est += t.mdEst;
+      by[k].act += t.mdAct;
+    }
+    const rate = d.cost && d.cost.rate ? d.cost.rate : 0;
+    const baht = (n) => Math.round(n * rate).toLocaleString("th-TH");
+    const r1 = (n) => Math.round(n * 10) / 10;
+    const tot = Object.values(by).reduce((a, v) => ({ est: a.est + v.est, act: a.act + v.act }), { est: 0, act: 0 });
+    return `<section class="card"><div class="title"><h2>Man-day ตามทีม</h2><span>${d.cost ? (rate ? `ต้นทุนคิดที่ ${rate.toLocaleString("th-TH")} บาท / man-day (ตั้งค่าโดย Admin)` : "Admin ยังไม่ได้ตั้งอัตราต่อ man-day (ตั้งค่า → โปรเจกต์)") : ""}</span></div>
+<div class="tablewrap"><table><thead><tr><th>ทีม</th><th class="n">Task</th><th class="n">ประมาณการ (MD)</th><th class="n">ใช้จริง (MD)</th><th class="n">ต่าง</th>${rate ? `<th class="n">ต้นทุนจริง (บาท)</th>` : ""}</tr></thead><tbody>
+${Object.entries(by).map(([k, v]) => `<tr><td>${esc(k)}</td><td class="n">${v.n}</td><td class="n">${r1(v.est)}</td><td class="n">${r1(v.act)}</td><td class="n ${v.act > v.est ? "t-over" : ""}">${v.act - v.est > 0 ? "+" : ""}${r1(v.act - v.est)}</td>${rate ? `<td class="n">${baht(v.act)}</td>` : ""}</tr>`).join("")}
+<tr><td><b>รวม</b></td><td></td><td class="n"><b>${r1(tot.est)}</b></td><td class="n"><b>${r1(tot.act)}</b></td><td></td>${rate ? `<td class="n"><b>${baht(tot.act)}</b></td>` : ""}</tr></tbody></table></div>
+<div class="right"><a class="btn" href="api/projects/${d.project.id}/manday.xlsx">ดาวน์โหลด Excel</a></div>
+<p class="hint" style="margin:0">ผู้รับผิดชอบกรอก man-day ตอนบันทึกกิจกรรมใน task (ทีละครึ่งวัน) · PM ใส่ประมาณการตอนสร้าง task</p></section>`;
+  }
+
+  function openMilestone(p, ms) {
+    srDialog(ms ? "แก้ milestone" : "เพิ่ม milestone", `<label class="f">ชื่อ<input name="n" required maxlength="200" value="${esc(ms ? ms.name : "")}" placeholder="เช่น ติดตั้งระบบ, UAT และส่งมอบ"></label>
+<label class="f">วันที่ต้อง meet<input type="date" name="d" required value="${ms ? ms.due : p.end}"></label>
+${ms ? `<label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="rm"> ลบ milestone นี้ (ต้องไม่มี task อยู่)</label>` : ""}`, async (f) => {
+      if (ms) await post(`/project-milestones/${ms.id}`, { name: f.n.value, due: f.d.value, remove: f.rm.checked }, "PUT");
+      else await post(`/projects/${p.id}/milestones`, { name: f.n.value, due: f.d.value });
+      toast("บันทึกแล้ว");
+      route();
+    }, "บันทึก");
+  }
+
+  function openTaskForm(d, m, t) {
+    if (!d.milestones.length && !t) return toast("เพิ่ม milestone ก่อน แล้วค่อยเพิ่ม task", 5000);
+    const lockTeam = t && t.kind === "sr" && t.sr && !t.srGone;
+    const f = srDialog(t ? "แก้ไข task" : "เพิ่ม task", `<label class="f">ชื่องาน<input name="name" required minlength="3" maxlength="200" value="${esc(t ? t.name : "")}"></label>
+<div class="formgrid"><label class="f">Milestone<select name="ms">${d.milestones.map((x) => `<option value="${x.id}" ${t && t.milestoneId === x.id ? "selected" : ""}>${esc(x.name)} (${fd(x.due)})</option>`).join("")}</select></label>
+<label class="f">วันเริ่ม<input type="date" name="start" required value="${t ? t.start : m.today}"></label>
+${t ? "" : `<label class="f">กำหนดเสร็จ<input type="date" name="due" required></label>`}</div>
+${t ? `<p class="hint" style="margin:0">เปลี่ยนกำหนดเสร็จด้วยปุ่ม “เลื่อนกำหนด” ในรายละเอียด task (ระบบเก็บเหตุผลและแผนเดิมไว้)</p>` : `<div class="seg pj-kind"><label><input type="radio" name="kind" value="own" checked><span>PM ทำเอง</span></label><label><input type="radio" name="kind" value="sr"><span>มอบให้ทีมอื่น (เปิดคำขอบริการ)</span></label></div>`}
+<div class="formgrid" id="pt-sr" ${t ? (t.kind === "sr" ? "" : "hidden") : "hidden"}><label class="f">ทีม<select name="team" ${lockTeam ? "disabled" : ""}>${m.teams.filter((x) => !m.pmTeams.includes(x.code)).map((x) => `<option value="${x.code}" ${t && t.team === x.code ? "selected" : ""}>${esc(x.label)}</option>`).join("")}</select>${lockTeam ? `<span class="hint">เปิด SR แล้ว เปลี่ยนทีมไม่ได้</span>` : ""}</label>
+<label class="f">ความเร่งด่วน<select name="sev">${m.severities.map((x) => `<option value="${x.key}" ${(t ? t.severity : "normal") === x.key ? "selected" : ""}>${x.label}</option>`).join("")}</select></label>
+<label class="f">เปิดคำขอบริการ<select name="open" ${t && t.sr ? "disabled" : ""}><option value="now" ${t && t.srOpen === "now" ? "selected" : ""}>ตอนบันทึก</option><option value="auto" ${t && t.srOpen === "auto" ? "selected" : ""}>อัตโนมัติ ${m.autoOpenDays} วันทำการก่อนวันเริ่ม</option></select></label></div>
+<div class="formgrid"><label class="f">ประมาณการ man-day<input type="number" name="md" min="0" step="0.5" value="${t ? t.mdEst : 1}"></label></div>
+<label class="f"><span id="pt-dl">รายละเอียด / สิ่งที่ต้องส่งมอบ${t && t.kind === "sr" ? " (ทีมผู้รับเห็น)" : " (ไม่บังคับ)"}</span><textarea name="detail" rows="3" maxlength="5000">${esc(t ? t.detail : "")}</textarea></label>`,
+      async (f) => {
+        const body = { name: f.name.value, milestoneId: f.ms.value, start: f.start.value, mdEst: f.md.value, detail: f.detail.value, team: f.team.value, severity: f.sev.value, srOpen: f.open.value };
+        if (t) {
+          await post(`/project-tasks/${t.id}`, body, "PUT");
+          toast("บันทึกแล้ว");
+          route();
+        } else {
+          const r = await post(`/projects/${d.project.id}/tasks`, { ...body, kind: f.kind.value, due: f.due.value });
+          toast(r.srNo ? `เพิ่ม task แล้ว · เปิด ${r.srNo} ส่งให้ Manager ทีมผู้รับแล้ว` : f.kind.value === "sr" ? `เพิ่ม task แล้ว · ระบบจะเปิด SR ${m.autoOpenDays} วันทำการก่อนวันเริ่ม` : "เพิ่ม task แล้ว", 6000);
+          route();
+        }
+      }, t ? "บันทึก" : "เพิ่ม task");
+    if (!t) {
+      f.querySelectorAll("input[name=kind]").forEach((r) => {
+        r.onchange = () => {
+          const sr = f.kind.value === "sr";
+          f.querySelector("#pt-sr").hidden = !sr;
+          f.detail.required = sr;
+          f.detail.minLength = sr ? 20 : 0;
+          f.querySelector("#pt-dl").textContent = sr ? "รายละเอียด / สิ่งที่ต้องส่งมอบ (ทีมผู้รับเห็น อย่างน้อย 20 ตัวอักษร)" : "รายละเอียด (ไม่บังคับ)";
+        };
+      });
+      f.start.onchange = () => {
+        if (!f.due.value || f.due.value < f.start.value) f.due.value = f.start.value;
+      };
+    }
+  }
+
+  const PT_EV = { created: "สร้าง task", note: "บันทึก", status: "เปลี่ยนสถานะ", due: "เลื่อนกำหนด", sr_opened: "เปิดคำขอบริการ" };
+  async function openTask(tid, d, m) {
+    const r = await api(`/project-tasks/${tid}`).catch((e) => (toast(e.message, 6000), null));
+    if (!r) return;
+    const t = r.task;
+    const c = r.can;
+    const p = d.project;
+    const refresh = async (msg) => {
+      if (msg) toast(msg, 5000);
+      const dlg = document.getElementById("pjdlg");
+      dlg.onclose = null;
+      const fresh = await api("/projects/" + p.id);
+      Object.assign(d, fresh);
+      openTask(tid, d, m);
+      dlg.onclose = () => route();
+    };
+    const run = async (path, body, msg) => {
+      try {
+        await post(`/project-tasks/${tid}/${path}`, body);
+        refresh(msg);
+      } catch (e) {
+        toast(e.message, 6000);
+      }
+    };
+    const stBtns = c.status
+      ? { todo: [["doing", "เริ่มทำ", "primary"]], doing: [["done", "ปิด task", "ok"], ["todo", "กลับเป็นยังไม่เริ่ม", ""]], done: [["doing", "เปิดกลับมาทำต่อ", ""]] }[t.status] || []
+      : [];
+    const evLine = (e) => {
+      const dd = e.data || {};
+      const extra = e.kind === "due" ? `${fd(dd.from)} → <b>${fd(dd.to)}</b>${dd.kpi ? "" : " · <span class='t-over'>เลื่อนหลังครบกำหนด KPI นับตามวันเดิม</span>"}${dd.sr ? ` · อนุมัติผ่าน ${esc(dd.sr)}` : ""}` : e.kind === "status" ? esc({ todo: "ยังไม่เริ่ม", doing: "กำลังทำ", done: "เสร็จ", cancelled: "ยกเลิก" }[dd.status] || "") : e.kind === "sr_opened" ? esc(dd.sr || "") : "";
+      const fs = r.files.filter((f) => f.event_id === e.id);
+      return `<li><div><b>${PT_EV[e.kind] || esc(e.kind)}</b> โดย ${esc(e.by_name || "ระบบ")}${extra ? ` · ${extra}` : ""}${e.md ? ` · <b>${e.md} MD</b>` : ""}</div>${e.text ? `<div class="srtext">${esc(e.text)}</div>` : ""}${fs.length ? `<div>${fs.map((f) => `<a class="gchip" href="api/project-files/${f.id}" target="_blank" rel="noopener">📎 ${esc(f.file_name)}</a>`).join(" ")}</div>` : ""}<div class="hint">${fdt(e.created_at)}</div></li>`;
+    };
+    const dlg = pjDialog(esc(t.name), `<div class="pjt-head">${ptChip(t)} <span class="hint">${t.kind === "own" ? "Task ที่ PM ทำเอง" : `มอบให้ทีม ${esc(t.teamLabel)}`}</span></div>
+${t.sr && t.sr.ext ? `<div class="banner warn"><b>${esc(t.sr.ext.by)} ขอเลื่อนเป็น ${fd(t.sr.ext.target, true)}</b><br>${esc(t.sr.ext.reason || "")}<br><a href="#/sr/${t.sr.id}">เปิด ${esc(t.sr.no)} เพื่ออนุมัติ / ไม่อนุมัติ</a></div>` : ""}
+${t.srGone ? `<div class="banner warn">คำขอบริการเดิมถูกปฏิเสธหรือยกเลิก กด “มอบงานอีกครั้ง” เพื่อเปิดคำขอใหม่</div>` : ""}
+<table class="kvt"><tr><th>Milestone</th><td>${esc(t.milestone || "-")}</td></tr>
+<tr><th>ผู้รับผิดชอบ</th><td>${t.kind === "own" ? `PM · ${esc(p.pm ? p.pm.name : "-")}` : `${esc(t.teamLabel)} · ${t.assignee ? esc(t.assignee.name) : t.sr ? "รอ Manager มอบคน" : "ยังไม่ได้เปิด SR"}`}</td></tr>
+${t.sr ? `<tr><th>คำขอบริการ</th><td><a class="mono" href="#/sr/${t.sr.id}">${esc(t.sr.no)}</a> <span class="hint">ส่งงาน ขอเลื่อน ยืนยันรับงาน ทำในหน้าคำขอ</span></td></tr>` : ""}
+<tr><th>เริ่ม – กำหนดเสร็จ</th><td>${fd(t.start)} – <b>${fd(t.due, true)}</b>${t.base !== t.due ? `<div class="hint">แผนเดิม ${fd(t.base)} · KPI นับตาม ${fd(t.kpiDue)}</div>` : ""}</td></tr>
+${t.doneAt ? `<tr><th>เสร็จเมื่อ</th><td>${fd(t.doneAt, true)} ${t.onTime ? `<span class="chip c-ok">ทันกำหนด</span>` : `<span class="chip c-overdue">ช้ากว่ากำหนด</span>`}</td></tr>` : ""}
+${ME.user.role !== "viewer" ? `<tr><th>Man-day</th><td>ใช้จริง ${t.mdAct} · ประมาณการ ${t.mdEst}</td></tr>` : ""}
+${t.detail ? `<tr><th>รายละเอียด</th><td><div class="srtext">${esc(t.detail)}</div></td></tr>` : ""}</table>
+<div class="actions">${stBtns.map(([s, l, k]) => `<button class="btn ${k}" type="button" data-st="${s}">${l}</button>`).join("")}
+${c.openSr ? `<button class="btn primary" type="button" id="pt-open">มอบงาน (เปิด SR ตอนนี้)</button>` : ""}${c.reopenSr ? `<button class="btn primary" type="button" id="pt-open">มอบงานอีกครั้ง</button>` : ""}
+${c.due ? `<button class="btn" type="button" id="pt-due">เลื่อนกำหนด</button>` : ""}${c.edit && t.status !== "cancelled" ? `<button class="btn" type="button" id="pt-edit">แก้ไข</button>` : ""}
+${c.cancel ? `<button class="btn danger" type="button" id="pt-cancel">ยกเลิก task</button>` : ""}</div>
+${c.log ? `<form id="pt-log" class="stack pjlog"><label class="f">บันทึกกิจกรรม<textarea name="text" rows="2" maxlength="3000" placeholder="ทำอะไรไปแล้ว ติดอะไรอยู่"></textarea></label>
+<div class="formgrid" style="align-items:end"><label class="f">Man-day ที่ใช้ (ทีละ 0.5)<input type="number" name="md" min="0" max="30" step="0.5" value="0"></label>${fileBox({ fileExt: m.fileExt, maxFileMb: m.maxFileMb })}</div>
+<div class="right"><button class="btn primary" type="submit">บันทึก</button></div></form>` : ""}
+<h3 style="margin:8px 0 0;font-size:15px">ประวัติ</h3><ul class="srtl">${r.events.slice().reverse().map(evLine).join("") || `<li class="muted">ยังไม่มีกิจกรรม</li>`}</ul>
+${r.reminders.length ? `<h3 style="margin:8px 0 0;font-size:15px">การแจ้งเตือนของ task นี้</h3><ul class="pjrem">${r.reminders.map((x) => `<li class="${x.past ? "past" : ""}">${x.past ? "✓" : "○"} <b>${fd(x.date)}</b> · ${esc(x.label)} → ${esc(x.to)}</li>`).join("")}</ul><p class="hint" style="margin:0">ส่งทาง email ทุกเช้าวันทำการ (สรุปรวมต่อโปรเจกต์ให้ PM) และ Teams ถ้าเปิดไว้</p>` : ""}`, { wide: true });
+    dlg.onclose = () => route();
+    const $ = (x) => dlg.querySelector("#" + x);
+    dlg.querySelectorAll("[data-st]").forEach((b) => (b.onclick = () => run("status", { status: b.dataset.st }, "เปลี่ยนสถานะแล้ว")));
+    if ($("pt-open")) $("pt-open").onclick = () => run("open-sr", {}, `เปิดคำขอบริการแล้ว ระบบแจ้ง Manager ทีม ${t.teamLabel}`);
+    if ($("pt-edit")) $("pt-edit").onclick = () => {
+      dlg.onclose = null;
+      dlg.close();
+      openTaskForm(d, m, t);
+    };
+    if ($("pt-cancel")) $("pt-cancel").onclick = () => confirmInline($("pt-cancel"), t.sr ? `กดอีกครั้ง: ยกเลิก task และ ${t.sr.no}` : "กดอีกครั้งเพื่อยกเลิก") && run("status", { status: "cancelled" }, "ยกเลิก task แล้ว");
+    if ($("pt-due")) $("pt-due").onclick = () => {
+      const box = document.createElement("form");
+      box.className = "stack pjlog";
+      box.innerHTML = `<p class="hint" style="margin:0">${m.today <= t.due ? "เลื่อนก่อนครบกำหนด: KPI นับตามวันใหม่" : "task นี้เลยกำหนดแล้ว: เลื่อนได้ แต่ KPI ยังนับว่าช้าตามวันเดิม"}${t.sr ? " · SR ยังไม่อนุมัติ วันที่ต้องการใน SR เปลี่ยนตาม" : ""}</p>
+<div class="formgrid"><label class="f">กำหนดเสร็จใหม่<input type="date" name="due" required min="${t.start}" value="${t.due}"></label></div>
+<label class="f">เหตุผล (อย่างน้อย 10 ตัวอักษร)<textarea name="reason" rows="2" required minlength="10" maxlength="1000"></textarea></label><div class="right"><button class="btn primary" type="submit">บันทึก</button></div>`;
+      $("pt-due").closest(".actions").after(box);
+      box.onsubmit = (e) => {
+        e.preventDefault();
+        run("due", { due: box.due.value, reason: box.reason.value }, "เลื่อนกำหนดแล้ว");
+      };
+    };
+    const lf = $("pt-log");
+    if (lf) {
+      const fp = filePicker(lf, { fileExt: m.fileExt, maxFileMb: m.maxFileMb });
+      lf.onsubmit = async (e) => {
+        e.preventDefault();
+        run("log", { text: lf.text.value, md: lf.md.value, files: await fp.get() }, "บันทึกแล้ว");
+      };
+    }
+  }
+
+  /** "งานของฉัน": open project tasks a PM does personally. */
+  async function pjMyTasksSection() {
+    if (!ME.isPm || ME.user.role === "admin") return "";
+    const { items } = await api("/projects").catch(() => ({ items: [] }));
+    const mine = items.filter((p) => p.mine && ["plan", "active"].includes(p.status));
+    if (!mine.length) return "";
+    const rows = [];
+    for (const p of mine) {
+      const d = await api("/projects/" + p.id).catch(() => null);
+      if (!d) continue;
+      d.tasks.filter((t) => t.kind === "own" && ["todo", "doing"].includes(t.status)).forEach((t) => rows.push([p, t]));
+    }
+    if (!rows.length) return "";
+    rows.sort((a, b) => (b[1].overdue - a[1].overdue) || a[1].due.localeCompare(b[1].due));
+    return `<section class="card"><div class="title"><h2>Task โปรเจกต์ที่ฉันทำเอง</h2><a href="#/projects?f=mine">ดูทุกโปรเจกต์</a></div><div class="tablewrap"><table><thead><tr><th>Task</th><th>โปรเจกต์</th><th>กำหนดเสร็จ</th><th>สถานะ</th></tr></thead><tbody>
+${rows.slice(0, 12).map(([p, t]) => `<tr class="click" data-href="#/projects/${p.id}?task=${t.id}"><td style="font-weight:600">${esc(t.name)}</td><td>${esc(p.name)}</td><td>${ptDue(t)}</td><td>${ptChip(t)}</td></tr>`).join("")}</tbody></table></div></section>`;
+  }
+
   async function route() {
     const { parts, params } = (() => {
       const h = location.hash.replace(/^#/, "") || "/";
@@ -5476,6 +5920,7 @@ ${changed.length ? `<div class="tablewrap" style="max-height:50vh"><table style=
         case "kpi": return await viewKpi(params);
         case "response": return await viewResponse(params);
         case "rank": return await viewRank(params);
+        case "projects": return parts[1] ? await viewProject(parts[1], params) : await viewProjects(params);
         case "sr": return parts[1] === "new" ? await viewSrNew() : parts[1] ? await viewSrItem(parts[1]) : await viewSr(params);
         case "profile": return await viewProfile();
         default:

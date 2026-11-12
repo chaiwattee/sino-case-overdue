@@ -111,9 +111,12 @@ async function serviceOwners(R, cfg, teamsOf) {
     [ids, R.fromIso, nextIso]
   );
   const iso = (x) => (x instanceof Date ? d.toISODate(x) : x ? String(x).slice(0, 10) : null);
+  // A PM's project tasks (own and handed over) finished this month count as work, on time when done by the KPI due date.
+  const proj = await require("./projects").kpiByPm(R.fromIso, d.toISODate(R.to));
   const out = people.map((u) => {
     const mine = done.filter((s) => s.assignee_id === u.id);
-    let on = 0, half = 0, late = 0;
+    const pj = proj.get(u.id) || { done: 0, onTime: 0, moved: 0 };
+    let on = pj.onTime, half = 0, late = pj.done - pj.onTime;
     for (const s of mine) {
       const c = iso(s.closed);
       const first = iso(s.first_target) || iso(s.target_date);
@@ -128,13 +131,14 @@ async function serviceOwners(R, cfg, teamsOf) {
     mine.forEach((s) => s.category && (cats[s.category] = (cats[s.category] || 0) + 1));
     const m = {
       team: svcTeams[0] || null,
-      srDone: mine.length, srOnTime: on, srAfterExt: half, srLate: late,
-      srOnTimePct: mine.length ? Math.round(((on + half / 2) / mine.length) * 100) : null,
+      srDone: mine.length + pj.done, srOnTime: on, srAfterExt: half, srLate: late,
+      srOnTimePct: mine.length + pj.done ? Math.round(((on + half / 2) / (mine.length + pj.done)) * 100) : null,
+      projDone: pj.done, projOnTime: pj.onTime, projMoved: pj.moved,
       srOpen: op ? op.n : 0, srOverdueNow: op ? op.late : 0,
       ratingCount: rt.length, ratingAvg: rt.length ? r1(rt.reduce((a, b) => a + b, 0) / rt.length) : null,
-      closed: mine.length,
+      closed: mine.length + pj.done,
     };
-    return { id: u.id, name: u.name, email: u.email, active: u.active, handled: mine.length, profile: "service", metrics: m, types: cats, products: {}, sites: {}, kinds: {}, parts: {} };
+    return { id: u.id, name: u.name, email: u.email, active: u.active, handled: mine.length + pj.done, profile: "service", metrics: m, types: cats, products: {}, sites: {}, kinds: {}, parts: {} };
   });
   // Volume against the median of the same team (a team of one is compared with every service person).
   const all0 = out.map((o) => o.metrics.srDone).filter((n) => n > 0);
