@@ -2415,5 +2415,21 @@
 "ส่งคำขอแล้ว ระบบแจ้ง Manager ของทีมนี้ให้อนุมัติ": "Request sent. This team's manager has been asked to approve",
 "รับเคสแล้ว เคสใหม่": "Accepted. New case",
 "ระบบแจ้งทุกฝ่ายทาง email": "everyone has been notified by email",
-"คำขอโอนเคสข้ามทีม รออนุมัติ / รับเคส": "Cross-team transfer requests waiting for approval / acceptance"
+"คำขอโอนเคสข้ามทีม รออนุมัติ / รับเคส": "Cross-team transfer requests waiting for approval / acceptance",
+"แบบฟอร์ม MA": "MA form",
+"อัปโหลดแล้ว": "Uploaded",
+"อัปโหลดแล้ว (เคสเดิม)": "Uploaded (original case)",
+"ยังไม่อัปโหลด": "Not uploaded yet",
+"ดาวน์โหลดแบบฟอร์ม": "Download form",
+"อัปโหลดฉบับที่กรอกแล้ว": "Upload the filled-in form",
+"กรอกแล้วอัปโหลดกลับก่อนปิดเคส (ไฟล์ หรือถ่ายรูปแบบฟอร์มกระดาษก็ได้)": "Fill it in and upload it before closing the case (a file, or a photo of the paper form)",
+"ครบแล้ว เหลืออัปโหลดแบบฟอร์ม MA": "All done, upload the MA form",
+"และอัปโหลดแบบฟอร์ม MA": "and the MA form is uploaded",
+"อัปโหลดแบบฟอร์ม MA แล้ว": "MA form uploaded",
+"แบบฟอร์ม MA (ไม่บังคับ)": "MA form (optional)",
+"ไฟล์ปัจจุบัน:": "Current file:",
+"เลือกไฟล์ใหม่เพื่อแทนที่": "choose a new file to replace it",
+"เอาแบบฟอร์มออก": "Remove the form",
+"PDF, Word หรือ Excel ไม่เกิน 10 MB · ทุกรอบ ผู้รับผิดชอบดาวน์โหลดไปกรอก แล้วอัปโหลดกลับก่อนปิดเคส": "PDF, Word or Excel up to 10 MB · each round, the owner downloads it, fills it in and uploads it before closing the case",
+"แบบฟอร์ม MA ใหญ่เกิน 10 MB": "The MA form is larger than 10 MB"
 }

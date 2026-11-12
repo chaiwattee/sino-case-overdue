@@ -1085,7 +1085,7 @@ ${data && data.changes.length ? `<section class="card"><h2>ประวัติ
 ${slaCard}
 ${isNew ? "" : transferCard(c, data.transfer, closed)}
 ${closed ? "" : `<section class="card sim-card" id="sim-card" hidden></section>`}
-${data ? checklistCard(data.checklist, c, permsC) : ""}
+${data ? checklistCard(data.checklist, c, permsC, data.ma, data.files || []) : ""}
 ${data && data.csat ? csatCard(data.csat) : ""}
 ${closed ? `<section class="card"><div class="title"><h2>Resolution</h2>${permsC.edit && c.resolution ? `<button class="btn" type="button" id="btn-res" style="min-height:34px">แก้ไข</button>` : ""}</div>
 ${c.resolution ? `<div class="resol">${esc(c.resolution)}</div>
@@ -4952,19 +4952,43 @@ ${x.recentClosed.map((c) => `<tr class="click" data-href="#/case/${c.id}"><td><a
   }
 
   // ------------------------------------------------------------ checklist (PM cases) and team files on the case page
-  function checklistCard(list, c, permsC) {
-    if (!list || !list.length) return "";
+  function checklistCard(list, c, permsC, ma, files) {
+    if ((!list || !list.length) && !ma) return "";
+    list = list || [];
     const left = list.filter((x) => !x.done).length;
     const canTick = permsC.edit && c.stage !== "closed";
-    return `<section class="card" id="ck-card"><div class="title"><h2>Checklist งาน PM</h2><span>${left ? `เหลือ ${left} จาก ${list.length} ข้อ` : "ครบแล้ว ปิดเคสได้"}</span></div>
+    const filled = (files || []).filter((f) => f.kind === "ma");
+    const maHtml = ma
+      ? `<div class="ma-box"><div class="ma-h"><strong>แบบฟอร์ม MA</strong>${filled.length ? ` <span class="chip c-ok">อัปโหลดแล้ว</span>` : ma.filled ? ` <span class="chip c-ok">อัปโหลดแล้ว (เคสเดิม)</span>` : ` <span class="chip c-r1">ยังไม่อัปโหลด</span>`}</div>
+<div class="ma-row"><a class="btn" href="api/case/${c.id}/ma-form">ดาวน์โหลดแบบฟอร์ม</a>${canTick ? `<label class="btn primary"><input type="file" id="ma-up" accept=".pdf,.docx,.doc,.xlsx,.xls,image/*" hidden>อัปโหลดฉบับที่กรอกแล้ว</label>` : ""}</div>
+<div class="hint" style="margin:0">${esc(ma.fileName)} · กรอกแล้วอัปโหลดกลับก่อนปิดเคส (ไฟล์ หรือถ่ายรูปแบบฟอร์มกระดาษก็ได้)</div>
+${filled.length ? `<ul class="ma-files">${filled.map((f) => `<li><a href="api/case/${c.id}/files/${f.id}?dl=1">${esc(f.file_name)}</a> <span class="muted">${esc(f.by || "")} · ${fdt(f.created_at)}</span></li>`).join("")}</ul>` : ""}</div>`
+      : "";
+    return `<section class="card" id="ck-card"><div class="title"><h2>Checklist งาน PM</h2><span>${left ? `เหลือ ${left} จาก ${list.length} ข้อ` : ma && !filled.length && !ma.filled ? "ครบแล้ว เหลืออัปโหลดแบบฟอร์ม MA" : "ครบแล้ว ปิดเคสได้"}</span></div>
 <div class="ck-list">${list
       .map(
         (x) => `<label class="ck ${x.done ? "done" : ""}"><input type="checkbox" data-ck="${x.seq}" ${x.done ? "checked" : ""} ${canTick ? "" : "disabled"}><span><span class="ck-t">${x.seq}. ${esc(x.item)}</span>${x.done ? `<span class="ck-m">${esc(x.done_by || "")} · ${fdt(x.done_at)}${x.note ? " · " + esc(x.note) : ""}</span>` : ""}</span></label>`
       )
       .join("")}</div>
-${left && canTick ? `<p class="hint" style="margin:0">ปิดเคสได้เมื่อติ๊กครบทุกข้อ ถ้ารอบนี้ไม่ได้ทำ ให้ปิดเป็น Cancel หรือ N/A</p>` : ""}</section>`;
+${left && canTick ? `<p class="hint" style="margin:0">ปิดเคสได้เมื่อติ๊กครบทุกข้อ${ma ? " และอัปโหลดแบบฟอร์ม MA" : ""} ถ้ารอบนี้ไม่ได้ทำ ให้ปิดเป็น Cancel หรือ N/A</p>` : ""}
+${maHtml}</section>`;
   }
   function bindChecklist(c) {
+    const mu = document.getElementById("ma-up");
+    if (mu)
+      mu.onchange = async () => {
+        const file = mu.files[0];
+        if (!file) return;
+        try {
+          toast(`กำลังอัปโหลด ${file.name}…`, 2000);
+          const x = await readForUpload(file);
+          await post(`/case/${c.id}/files`, { ...x, kind: "ma" });
+          toast("อัปโหลดแบบฟอร์ม MA แล้ว");
+          viewCase(c.id);
+        } catch (e) {
+          toast(e.message, 6000);
+        }
+      };
     document.querySelectorAll("#ck-card [data-ck]").forEach(
       (el) =>
         (el.onchange = async () => {
@@ -5127,7 +5151,7 @@ ${r.canEdit ? `<div class="formgrid" style="grid-template-columns:1fr 1fr">
 <div class="head"><div><h1>งาน PM ตามรอบ</h1><p>ระบบเปิดเคสให้ผู้รับผิดชอบเองทุกเช้า 07:00 ในวันที่ถึงรอบ พร้อม checklist ปิดเคสได้เมื่อติ๊กครบ</p></div>
 <div class="actions">${r.canManage ? `<button class="btn primary" type="button" id="pm-new">+ เพิ่มงาน PM</button>` : ""}</div></div>
 <section class="card">${r.items.length ? `<div class="tablewrap"><table style="min-width:860px"><thead><tr><th>งาน</th><th>ลูกค้า</th><th>ทีม / ผู้รับผิดชอบ</th><th>ทุก</th><th>รอบถัดไป</th><th>เคสล่าสุด</th><th></th></tr></thead><tbody>
-${r.items.map((p) => `<tr class="${p.active ? "" : "off"}"><td style="font-weight:600">${esc(p.title)}<div class="muted" style="font-size:12px;font-weight:400">${p.checklist.length} ข้อใน checklist${p.product ? " · " + esc(p.product) : ""}</div></td>
+${r.items.map((p) => `<tr class="${p.active ? "" : "off"}"><td style="font-weight:600">${esc(p.title)}<div class="muted" style="font-size:12px;font-weight:400">${p.checklist.length} ข้อใน checklist${p.ma_file_name ? ` · <a href="api/pm/${p.id}/ma-form">แบบฟอร์ม MA</a>` : ""}${p.product ? " · " + esc(p.product) : ""}</div></td>
 <td><a href="#/customer?site=${encodeURIComponent(p.site)}">${esc(p.site)}</a></td>
 <td>${esc(p.team_label || p.team)}<div class="muted" style="font-size:12px">${esc(p.owner_name || "-")}</div></td>
 <td>${p.every_months} เดือน</td>
@@ -5151,6 +5175,9 @@ ${r.items.map((p) => `<tr class="${p.active ? "" : "off"}"><td style="font-weigh
 <label class="f"><span class="req">ทำทุก</span><select name="every_months">${[1, 2, 3, 4, 6, 12].map((n) => `<option value="${n}" ${(p ? p.every_months : 3) === n ? "selected" : ""}>${n} เดือน</option>`).join("")}</select></label>
 <label class="f"><span class="req">รอบถัดไป (วันที่เปิดเคส)</span><input type="date" name="next_date" value="${p ? String(p.next_date).slice(0, 10) : daysAgo(-1)}" required></label></div>
 <label class="f"><span class="req">Checklist (1 บรรทัด = 1 ข้อ)</span><textarea name="checklist" rows="6" placeholder="ตรวจพื้นที่ดิสก์ของ Logger&#10;ตรวจ backup ล่าสุด&#10;ทดสอบอัดเสียงและเปิดฟัง 3 สาย&#10;ส่งสรุปผลให้ลูกค้า">${esc(p ? p.checklist.join("\n") : "")}</textarea></label>
+<div class="f"><label for="pm-ma">แบบฟอร์ม MA (ไม่บังคับ)</label><input type="file" id="pm-ma" name="ma" accept=".pdf,.docx,.doc,.xlsx,.xls">
+<span class="hint">PDF, Word หรือ Excel ไม่เกิน 10 MB · ทุกรอบ ผู้รับผิดชอบดาวน์โหลดไปกรอก แล้วอัปโหลดกลับก่อนปิดเคส</span>
+${p && p.ma_file_name ? `<div class="ma-cur"><span>ไฟล์ปัจจุบัน: <a href="api/pm/${p.id}/ma-form">${esc(p.ma_file_name)}</a> · เลือกไฟล์ใหม่เพื่อแทนที่</span><label class="chk"><input type="checkbox" name="ma_remove"><span>เอาแบบฟอร์มออก</span></label></div>` : ""}</div>
 <label class="f">หมายเหตุสำหรับผู้รับผิดชอบ<textarea name="note" rows="2" maxlength="1000">${esc(p ? p.note || "" : "")}</textarea></label>
 ${p ? `<label class="chk"><input type="checkbox" name="active" ${p.active ? "checked" : ""}><span>ใช้งานอยู่ (เอาติ๊กออกเพื่อหยุดชั่วคราว)</span></label>` : ""}
 <div class="right"><button class="btn" value="cancel" formnovalidate>ยกเลิก</button><button class="btn primary" value="save">บันทึก</button></div></form>`;
@@ -5160,7 +5187,14 @@ ${p ? `<label class="chk"><input type="checkbox" name="active" ${p.active ? "che
         if (dlg.returnValue !== "save") return;
         const body = { title: f.title.value, site: f.site.value, product: f.product.value, team: f.team.value, owner_id: Number(f.owner_id.value), every_months: Number(f.every_months.value), next_date: f.next_date.value, checklist: f.checklist.value, note: f.note.value, active: f.active ? f.active.checked : true };
         try {
-          await post(p ? `/pm/${p.id}` : "/pm", body, p ? "PUT" : "POST");
+          const saved = await post(p ? `/pm/${p.id}` : "/pm", body, p ? "PUT" : "POST");
+          const id = saved.id || (p && p.id);
+          const file = f.ma && f.ma.files[0];
+          if (file) {
+            if (file.size > 10 * 1024 * 1024) throw new Error("แบบฟอร์ม MA ใหญ่เกิน 10 MB");
+            const x = await readForUpload(file);
+            await post(`/pm/${id}/ma-form`, x);
+          } else if (f.ma_remove && f.ma_remove.checked) await api(`/pm/${id}/ma-form`, { method: "DELETE" });
           toast("บันทึกงาน PM แล้ว");
           viewPm();
         } catch (e) {

@@ -1,6 +1,6 @@
 // Service worker: lets the site install as an app, open when the network is poor, and show push notifications.
 // Data (/api/…) is never cached: cases always come fresh from the server.
-const CACHE = "case-sla-v5";
+const CACHE = "case-sla-v6";
 const SHELL = ["/", "/style.css", "/app.js", "/i18n.js", "/i18n-en.json", "/icons/icon-192.png", "/sinostech-logo.png"];
 
 self.addEventListener("install", (e) => {

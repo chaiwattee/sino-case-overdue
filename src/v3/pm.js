@@ -24,7 +24,77 @@ const canManage = (user) => user.role === "admin" || user.role === "manager";
 async function list(user) {
   const scope = perms.teamScope(user);
   const rows = scope ? await all(`${SEL} WHERE p.team = ANY($1) ORDER BY p.active DESC, p.next_date, p.id`, [scope]) : await all(`${SEL} ORDER BY p.active DESC, p.next_date, p.id`);
+  rows.forEach((r) => delete r.ma_file_path); // server path stays on the server
   return rows;
+}
+
+// ------------------------------------------------------------ MA form (template file per schedule)
+const fs = require("fs");
+const path = require("path");
+const crypto = require("crypto");
+const MA_EXT = ["pdf", "docx", "doc", "xlsx", "xls"];
+const MA_MAX = 10 * 1024 * 1024;
+const maDir = () => path.join(require("./casefiles").DIR, "pm-forms");
+const MIME = { pdf: "application/pdf", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", doc: "application/msword", xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", xls: "application/vnd.ms-excel" };
+
+async function scheduleFor(user, id, { manage = false } = {}) {
+  const p = await one("SELECT * FROM pm_schedules WHERE id = $1", [id]);
+  if (!p) throw bad("ไม่พบงาน PM", 404);
+  const scope = perms.teamScope(user);
+  if (scope && !scope.includes(p.team)) throw bad("เฉพาะงาน PM ของทีมคุณ", 403);
+  if (manage && !canManage(user)) throw bad("เฉพาะ Admin / Manager", 403);
+  return p;
+}
+function removeStored(file) {
+  try {
+    if (file && file.startsWith(maDir())) fs.unlinkSync(file);
+  } catch (e) {}
+}
+async function setMaForm(user, id, b) {
+  const p = await scheduleFor(user, id, { manage: true });
+  const name = String(b.name || "").replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_").trim().slice(0, 150);
+  const ext = (name.split(".").pop() || "").toLowerCase();
+  if (!name || !MA_EXT.includes(ext)) throw bad(`แบบฟอร์ม MA รองรับไฟล์ ${MA_EXT.map((x) => "." + x).join(" ")}`);
+  const buf = Buffer.from(String(b.data || "").replace(/^data:[^,]*,/, ""), "base64");
+  if (!buf.length) throw bad("ไฟล์ว่าง");
+  if (buf.length > MA_MAX) throw bad("ไฟล์ใหญ่เกิน 10 MB");
+  fs.mkdirSync(maDir(), { recursive: true, mode: 0o750 });
+  const stored = path.join(maDir(), crypto.randomBytes(16).toString("hex") + "." + ext);
+  fs.writeFileSync(stored, buf, { mode: 0o640 });
+  await q("UPDATE pm_schedules SET ma_file_path = $2, ma_file_name = $3, ma_file_mime = $4, ma_file_size = $5, updated_at = now() WHERE id = $1", [p.id, stored, name, MIME[ext], buf.length]);
+  removeStored(p.ma_file_path);
+  await audit(user, "pm_ma_form", p.title, { id: p.id, file: name, size: buf.length });
+  return { ok: true, fileName: name };
+}
+async function clearMaForm(user, id) {
+  const p = await scheduleFor(user, id, { manage: true });
+  await q("UPDATE pm_schedules SET ma_file_path = NULL, ma_file_name = NULL, ma_file_mime = NULL, ma_file_size = NULL, updated_at = now() WHERE id = $1", [p.id]);
+  removeStored(p.ma_file_path);
+  await audit(user, "pm_ma_form_remove", p.title, { id: p.id });
+  return { ok: true };
+}
+function sendMaForm(res, p) {
+  if (!p || !p.ma_file_path || !p.ma_file_path.startsWith(maDir()) || !fs.existsSync(p.ma_file_path)) throw bad("ไม่พบแบบฟอร์ม MA", 404);
+  res.set("Content-Type", "application/octet-stream");
+  res.set("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(p.ma_file_name)}`);
+  res.set("Cache-Control", "private, no-store");
+  fs.createReadStream(p.ma_file_path).pipe(res);
+}
+/** Schedule of a PM case (or of the case it was transferred from), with its MA form. */
+const scheduleOfCase = (caseId) =>
+  one(
+    `SELECT p.* FROM cases c JOIN pm_schedules p ON p.id = c.pm_schedule_id WHERE c.id = $1`,
+    [caseId]
+  );
+/** MA form status on a case: { fileName, filled } or null when the schedule has no MA form. */
+async function maFor(caseId) {
+  const p = await scheduleOfCase(caseId);
+  if (!p || !p.ma_file_name) return null;
+  const n = await one(
+    `SELECT count(*)::int AS n FROM case_files WHERE kind = 'ma' AND (case_id = $1 OR case_id = (SELECT transferred_from FROM cases WHERE id = $1))`,
+    [caseId]
+  );
+  return { fileName: p.ma_file_name, filled: n.n };
 }
 
 function checkBody(b) {
@@ -97,7 +167,7 @@ async function openRound(p, { by = null, startDate } = {}) {
       .sendMail({
         to: [owner.email], cc: [],
         subject: `[งาน PM] ${p.site} · ${p.title} · ${kase.caseNo}`,
-        html: shell("#1F5FBF", `<p style="margin:0 0 12px">ระบบเปิดเคสงาน PM ตามรอบให้คุณแล้ว SLA ${require("../config").config.slaDays} วัน ปิดเคสได้เมื่อติ๊ก checklist ครบ</p>
+        html: shell("#1F5FBF", `<p style="margin:0 0 12px">ระบบเปิดเคสงาน PM ตามรอบให้คุณแล้ว SLA ${require("../config").config.slaDays} วัน ปิดเคสได้เมื่อติ๊ก checklist ครบ${p.ma_file_name ? ` และอัปโหลดแบบฟอร์ม MA (${p.ma_file_name}) ที่กรอกแล้ว ดาวน์โหลดแบบฟอร์มได้ในหน้าเคส` : ""}</p>
 ${fieldTable([["เคส", kase.caseNo], ["ลูกค้า", p.site], ["งาน", p.title], ["Checklist", p.checklist.map((c, i) => `${i + 1}. ${c}`).join("<br>")]])}
 <p style="margin:16px 0 0">${button(kase.caseUrl, "เปิดเคส")}</p>`),
       })
@@ -140,6 +210,8 @@ async function checkClose(caseId, status) {
   if (["cancel", "n/a"].includes(String(status || "").trim().toLowerCase())) return;
   const r = await one("SELECT count(*) FILTER (WHERE NOT done)::int AS left, count(*)::int AS total FROM case_checklist WHERE case_id = $1", [caseId]);
   if (r && r.left) throw bad(`ติ๊ก checklist ให้ครบก่อนปิดเคส (เหลือ ${r.left} จาก ${r.total} ข้อ) หรือปิดเป็น Cancel / N/A ถ้าไม่ได้ทำรอบนี้`);
+  const ma = await maFor(caseId);
+  if (ma && !ma.filled) throw bad(`อัปโหลดแบบฟอร์ม MA ที่กรอกแล้ว (${ma.fileName}) ในการ์ด Checklist งาน PM ก่อนปิดเคส หรือปิดเป็น Cancel / N/A ถ้าไม่ได้ทำรอบนี้`);
 }
 
 function mount(api, { wrap, loadVisible }) {
@@ -156,6 +228,14 @@ function mount(api, { wrap, loadVisible }) {
     if (scope && !scope.includes(p.team)) throw bad("เฉพาะงาน PM ของทีมคุณ", 403);
     const k = await openRound(p, { by: req.user });
     res.json({ ok: true, caseId: k.id, caseNo: k.caseNo });
+  }));
+  api.post("/pm/:id(\\d+)/ma-form", wrap(async (req, res) => res.json(await setMaForm(req.user, Number(req.params.id), req.body || {}))));
+  api.delete("/pm/:id(\\d+)/ma-form", wrap(async (req, res) => res.json(await clearMaForm(req.user, Number(req.params.id)))));
+  api.get("/pm/:id(\\d+)/ma-form", wrap(async (req, res) => sendMaForm(res, await scheduleFor(req.user, Number(req.params.id)))));
+  // The blank MA form from the case page (anyone who can see the case).
+  api.get("/case/:id(\\d+)/ma-form", wrap(async (req, res) => {
+    const c = await loadVisible(req);
+    sendMaForm(res, await scheduleOfCase(c.id));
   }));
   api.put("/case/:id/checklist/:seq(\\d+)", wrap(async (req, res) => {
     const c = await loadVisible(req);
@@ -177,4 +257,4 @@ function mount(api, { wrap, loadVisible }) {
   }));
 }
 
-module.exports = { mount, runDue, openRound, checklistFor, checkClose, addMonths, list };
+module.exports = { mount, runDue, openRound, checklistFor, checkClose, addMonths, list, maFor };

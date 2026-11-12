@@ -7,14 +7,14 @@ const { q, one, all, audit } = require("./db");
 
 // Inside the attachment folder, so the nightly backup (which archives that whole folder) includes these too.
 const DIR = path.resolve(process.env.CASE_FILE_DIR || path.join(process.env.INTAKE_FILE_DIR || path.join(__dirname, "..", "..", "data", "intake-files"), "case-files"));
-const EXT = ["jpg", "jpeg", "png", "webp", "gif", "pdf", "txt", "log", "csv", "zip", "docx", "xlsx", "pptx", "msg", "eml"];
+const EXT = ["jpg", "jpeg", "png", "webp", "gif", "pdf", "txt", "log", "csv", "zip", "docx", "doc", "xlsx", "xls", "pptx", "msg", "eml"];
 const IMG = /^image\/(png|jpe?g|gif|webp)$/;
 const MAX = 10 * 1024 * 1024;
 const PER_CASE = 50;
 const bad = (m, s = 400) => Object.assign(new Error(m), { status: s });
 
 const list = (caseId) =>
-  all(`SELECT f.id, f.file_name, f.mime, f.size, f.caption, f.created_at, f.created_by, u.display_name AS by FROM case_files f LEFT JOIN users u ON u.id = f.created_by WHERE f.case_id = $1 ORDER BY f.id DESC`, [caseId]);
+  all(`SELECT f.id, f.file_name, f.mime, f.size, f.caption, f.kind, f.created_at, f.created_by, u.display_name AS by FROM case_files f LEFT JOIN users u ON u.id = f.created_by WHERE f.case_id = $1 ORDER BY f.id DESC`, [caseId]);
 
 function mount(api, { wrap, loadVisible, perms }) {
   api.post("/case/:id/files", wrap(async (req, res) => {
@@ -39,10 +39,11 @@ function mount(api, { wrap, loadVisible, perms }) {
     fs.mkdirSync(dir, { recursive: true, mode: 0o750 });
     const stored = path.join(dir, crypto.randomBytes(16).toString("hex") + "." + ext);
     fs.writeFileSync(stored, buf, { mode: 0o640 });
-    const caption = String(b.caption || "").trim().slice(0, 300) || null;
-    const r = await one("INSERT INTO case_files (case_id, file_name, mime, size, path, caption, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id", [c.id, name, mime, buf.length, stored, caption, req.user.id]);
+    const kind = b.kind === "ma" ? "ma" : null; // the filled-in MA form of a PM round
+    const caption = String(b.caption || "").trim().slice(0, 300) || (kind ? "แบบฟอร์ม MA ที่กรอกแล้ว" : null);
+    const r = await one("INSERT INTO case_files (case_id, file_name, mime, size, path, caption, created_by, kind) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id", [c.id, name, mime, buf.length, stored, caption, req.user.id, kind]);
     await q("INSERT INTO case_activities (case_id, activity_date, kind, detail, is_system, created_by) VALUES ($1, current_date, 'แนบไฟล์', $2, true, $3)", [
-      c.id, `แนบ${IMG.test(mime) ? "รูป" : "ไฟล์"} ${name}${caption ? ` · ${caption}` : ""}`, req.user.id,
+      c.id, `${kind ? "อัปโหลดแบบฟอร์ม MA ที่กรอกแล้ว" : `แนบ${IMG.test(mime) ? "รูป" : "ไฟล์"}`} ${name}${caption && !kind ? ` · ${caption}` : ""}`, req.user.id,
     ]);
     await audit(req.user, "case_file_add", c.caseNo, { case_id: c.id, file: name, size: buf.length });
     res.json({ ok: true, id: r.id, files: await list(c.id) });

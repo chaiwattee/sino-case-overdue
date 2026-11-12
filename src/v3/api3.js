@@ -27,6 +27,7 @@ api.use((req, res, next) =>
     : /^\/sr(\/|$)/.test(req.path) && req.method !== "GET" ? jsonSr
     : /^\/case\/\d+\/rca$/.test(req.path) ? jsonRca
     : /^\/case\/\d+\/files$/.test(req.path) ? jsonRca // photos / files up to 10 MB (base64)
+    : /^\/pm\/\d+\/ma-form$/.test(req.path) ? jsonRca // PM: MA form template up to 10 MB (base64)
     : req.path === "/profile/avatar" ? jsonFile // a photo up to 400 KB arrives as ~540 KB of base64
     : jsonSmall)(req, res, next));
 api.use(requireUser());
@@ -367,6 +368,7 @@ api.get("/case/:id", wrap(async (req, res) => {
     intake: intakeRow,
     csat: await require("./csat").forCase(c.id),
     checklist: await require("./pm").checklistFor(c.id),
+    ma: await require("./pm").maFor(c.id),
     files: await require("./casefiles").list(c.id),
     activities: acts,
     alerts,

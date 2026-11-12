@@ -864,3 +864,10 @@ tr.off td { opacity: .55; }
 .tr-steps li::before { content: ""; position: absolute; left: 4px; top: 4px; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--line); background: var(--surface); }
 .tr-steps li.done::before { background: var(--normal); border-color: var(--normal); }
 .tr-steps li.cur::before { background: var(--r1); border-color: var(--r1); }
+
+/* PM: MA form on the case */
+.ma-box { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); padding-top: 12px; margin-top: 4px; }
+.ma-h { display: flex; align-items: center; gap: 8px; }
+.ma-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.ma-files { margin: 0; padding-left: 18px; font-size: 14px; }
+.ma-cur { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 14px; }
