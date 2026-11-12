@@ -58,10 +58,10 @@ ${replyHint}
 const ackSubject = (i, base) => `${testTag(i)}[${i.req_no}] ${base}`;
 
 /** An engineer took the case. */
-function claimedHtml(i, kase, owner, { updateUrl }) {
+function claimedHtml(i, kase, owner, { updateUrl, transfer = false }) {
   return layout(
     GREEN,
-    `${greet(i)}<p style="margin:0 0 14px">An engineer has taken your case.</p>
+    `${greet(i)}<p style="margin:0 0 14px">${transfer ? "Your case has moved to the team best placed to resolve it. Your new engineer and case number are below." : "An engineer has taken your case."}</p>
 ${fieldTable([["Reference", `${i.req_no} → ${kase.caseNo}${kase.csNumber ? ` (${kase.csNumber})` : ""}`], ["Subject", i.subject], ["Engineer", owner.display_name], ...(owner.phone ? [["Engineer phone", owner.phone]] : []), ...(owner.email ? [["Engineer email", owner.email]] : []), ["Your call-back", i.contact_phone || i.contact_email || "-"]])}
 <p style="margin:16px 0">${button(updateUrl, "Add details / screenshots", false)}</p>
 <p style="margin:0">To add information, reply to this email or use the button above. It will be recorded in your case for the engineer.</p>`

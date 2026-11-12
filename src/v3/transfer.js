@@ -6,7 +6,8 @@
 // so a case moved before its Due counts as closed on time for the old team and one already past Due stays late
 // (moving a case cannot clear an overdue one). A new case linked to the old one is opened for the new team and its
 // 7-day SLA starts on the acceptance day. The customer's request, files and email thread move to the new case, the
-// customer is told who the new engineer is, and the satisfaction survey goes out only when the new case closes.
+// customer is told who the new engineer is by email (LINE customers too; nothing is sent to the LINE OA chatbot), and
+// the satisfaction survey goes out only when the new case closes.
 // While a request waits, the case stays with the old team and its SLA keeps running.
 const { config } = require("../config");
 const { config3 } = require("./config3");
@@ -271,7 +272,7 @@ async function tellCustomer(newCaseId, ownerId) {
   if (!i || i.is_test) return;
   const owner = await one("SELECT id, display_name, email, phone FROM users WHERE id = $1", [ownerId]);
   const kase = await repo.getCase(newCaseId);
-  await require("./intake").notifyCustomerOwner(i, kase, owner, { claimedAt: new Date() });
+  await require("./intake").notifyCustomerOwner(i, kase, owner, { claimedAt: new Date(), transfer: true });
 }
 
 // ------------------------------------------------------------ notifications

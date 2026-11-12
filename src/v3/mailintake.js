@@ -387,12 +387,12 @@ async function onReleased(i) {
 }
 
 /** Case claimed: reply in the customer's thread. Returns false when it could not (caller falls back to a new email). */
-async function onClaimed(i, kase, owner) {
+async function onClaimed(i, kase, owner, { transfer = false } = {}) {
   if (i.channel !== "email") return false;
   const e = await emailSettings();
   const o = await originOf(i);
   if (!o || !e.mailbox) return false;
-  const html = cm.claimedHtml(i, kase, owner, { updateUrl: upd().updateUrl(i.id) });
+  const html = cm.claimedHtml(i, kase, owner, { updateUrl: upd().updateUrl(i.id), transfer });
   await replyInThread(e, o.message_id, { subject: cm.claimedSubject(i, kase, baseSubject(o.subject) || i.subject), html, cc: owner.email ? [owner.email] : [] });
   return true;
 }

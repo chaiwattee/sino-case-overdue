@@ -61,7 +61,7 @@ ${info.test ? `<div class="test">Test link: this case is for testing only.</div>
 ${field("contactName", "Contact name", { req: true, value: info.contactName, ex: "Somying Jaidee", hint: "The person our engineer should contact about this case", attrs: 'autocomplete="name" maxlength="120"' })}
 ${field("position", "Position / department", { ex: "IT Support, Contact Center", hint: "Helps us know whether to talk technical details or usage (optional)", attrs: 'maxlength="120"' })}
 ${field("phone", "Call-back number", { req: true, type: "tel", value: info.contactPhone, ex: "081-234-5678", hint: "A number we can reach you on during working hours", attrs: 'autocomplete="tel" maxlength="60"' })}
-${field("email", "Email", { type: "email", value: info.contactEmail, ex: "somying@company.co.th", hint: "We use it to send updates or ask for more information (optional)", attrs: 'autocomplete="email" maxlength="200"' })}
+${field("email", "Email", { req: true, type: "email", value: info.contactEmail, ex: "somying@company.co.th", hint: "We email you case updates, for example when another engineer takes over your case", attrs: 'autocomplete="email" maxlength="200"' })}
 </div></section>
 <section><h2>2. The problem</h2><div class="grid">
 <div class="f"><label for="product">Affected system <span class="req">*</span></label>

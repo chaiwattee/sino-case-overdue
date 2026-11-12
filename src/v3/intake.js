@@ -122,6 +122,7 @@ async function createLink(input, { apiKey = null, user = null, source = "api", i
   if (!customerText && lineUser && lineUser.site) site = lineUser.site; // returning customer, company remembered
   const contactName = clean(input.contactName, 120) || (lineUser && lineUser.contact_name) || "";
   const contactPhone = clean(input.contactPhone, 60) || (lineUser && lineUser.contact_phone) || "";
+  const contactEmail = clean(input.contactEmail, 200) || (lineUser && lineUser.contact_email) || "";
 
   const token = newToken();
   const expires = new Date(Date.now() + Number(minutes || s.linkMinutes || 60) * 60000);
@@ -130,19 +131,20 @@ async function createLink(input, { apiKey = null, user = null, source = "api", i
        contact_name, contact_phone, contact_email, external_ref, expires_at)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
     [sha(token), apiKey ? apiKey.id : null, user ? user.id : null, source, isTest, site, customerText || (lineUser && lineUser.customer_text) || null,
-      lineUserId, contactName || null, contactPhone || null, clean(input.contactEmail, 200) || null, clean(input.externalRef, 120) || null, expires]
+      lineUserId, contactName || null, contactPhone || null, contactEmail || null, clean(input.externalRef, 120) || null, expires]
   );
   if (lineUserId) {
     await q(
-      `INSERT INTO intake_line_users (line_user_id, display_name, site, customer_text, contact_name, contact_phone)
-       VALUES ($1,$2,$3,$4,$5,$6)
+      `INSERT INTO intake_line_users (line_user_id, display_name, site, customer_text, contact_name, contact_phone, contact_email)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
        ON CONFLICT (line_user_id) DO UPDATE SET last_seen = now(),
          display_name = COALESCE(EXCLUDED.display_name, intake_line_users.display_name),
          site = COALESCE(EXCLUDED.site, intake_line_users.site),
          customer_text = COALESCE(EXCLUDED.customer_text, intake_line_users.customer_text),
          contact_name = COALESCE(EXCLUDED.contact_name, intake_line_users.contact_name),
-         contact_phone = COALESCE(EXCLUDED.contact_phone, intake_line_users.contact_phone)`,
-      [lineUserId, clean(input.lineDisplayName, 120) || null, site, customerText || null, contactName || null, contactPhone || null]
+         contact_phone = COALESCE(EXCLUDED.contact_phone, intake_line_users.contact_phone),
+         contact_email = COALESCE(EXCLUDED.contact_email, intake_line_users.contact_email)`,
+      [lineUserId, clean(input.lineDisplayName, 120) || null, site, customerText || null, contactName || null, contactPhone || null, contactEmail || null]
     );
   }
   return {
@@ -311,6 +313,8 @@ async function submit(token, b) {
   const miss = [];
   if (!f.contact_name) miss.push("contact name");
   if (!f.contact_phone) miss.push("call-back number");
+  // Required for every channel, LINE included: updates such as a change of engineer after a team transfer go by email.
+  if (!f.contact_email) miss.push("email");
   if (!f.product) miss.push("affected system");
   if (!f.severity) miss.push("urgency");
   if (!f.subject) miss.push("subject");
@@ -351,7 +355,7 @@ async function submit(token, b) {
     );
     if (fileIds.length) await c.query("UPDATE intake_files SET intake_id = $1 WHERE link_id = $2 AND id = ANY($3)", [r.rows[0].id, link.id, fileIds]);
     if (link.line_user_id) {
-      await c.query("UPDATE intake_line_users SET contact_name = $2, contact_phone = $3, last_seen = now() WHERE line_user_id = $1", [link.line_user_id, f.contact_name, f.contact_phone]);
+      await c.query("UPDATE intake_line_users SET contact_name = $2, contact_phone = $3, contact_email = $4, last_seen = now() WHERE line_user_id = $1", [link.line_user_id, f.contact_name, f.contact_phone, f.contact_email]);
     }
     return r.rows[0];
   });
@@ -591,21 +595,24 @@ async function notifyClaimed(i, kase, by, owner) {
 }
 
 /** Tell the customer which engineer has their case: when it is first taken, and again when it moves to another team. */
-async function notifyCustomerOwner(i, kase, owner, { claimedAt }) {
+// `transfer`: the case moved to another team. The customer is told by email only (LINE customers too, at the email they
+// gave on the form); no webhook goes to the LINE OA chatbot, so it only ever gets one case.claimed per request.
+async function notifyCustomerOwner(i, kase, owner, { claimedAt, transfer = false }) {
   // Requests that came by email: reply in the customer's own thread from the shared mailbox.
   let threaded = false;
-  if (i.channel === "email") threaded = await mail().onClaimed(i, kase, owner).catch((e) => (console.error("[intake] email thread reply:", e.message), false));
+  if (i.channel === "email") threaded = await mail().onClaimed(i, kase, owner, { transfer }).catch((e) => (console.error("[intake] email thread reply:", e.message), false));
   // Customers who came through an emailed link (not LINE) get the "case accepted" message by email instead.
-  if (!threaded && !i.line_user_id && i.contact_email) {
+  if (!threaded && (!i.line_user_id || transfer) && i.contact_email) {
     await graph
       .sendMail({
         to: [i.contact_email],
         cc: owner.email ? [owner.email] : [],
-        subject: cm.claimedSubject(i, kase, `An engineer has taken your case: ${i.subject}`),
-        html: cm.claimedHtml(i, kase, owner, { updateUrl: updateUrl(i.id) }),
+        subject: cm.claimedSubject(i, kase, `${transfer ? "Your case has a new engineer" : "An engineer has taken your case"}: ${i.subject}`),
+        html: cm.claimedHtml(i, kase, owner, { updateUrl: updateUrl(i.id), transfer }),
       })
       .catch((e) => console.error("[intake] customer claim mail:", e.message));
   }
+  if (transfer) return;
   await enqueue("case.claimed", i, {
     event: "case.claimed",
     test: i.is_test,
