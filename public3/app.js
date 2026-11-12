@@ -2180,6 +2180,7 @@ ${newSites.length ? `<div class="banner warn">มีรายการที่�
 <section class="card" id="dept-card"><div class="title"><h2>หน่วยงาน</h2><span>รายการให้ผู้ใช้เลือกในบัญชีของฉัน</span></div><div id="dept-body">กำลังโหลด…</div></section>
 <section class="card" id="lb-card"><div class="title"><h2>อันดับ KPI</h2><span>กำลังโหลด…</span></div></section>
 <section class="card" id="hol-card"><div class="title"><h2>วันหยุดบริษัท</h2><span>กำลังโหลด…</span></div></section>
+<section class="card" id="pjset-card"><div class="title"><h2>โปรเจกต์</h2><span>กำลังโหลด…</span></div></section>
 <section class="card" id="bk-card"><div class="title"><h2>Backup และทดสอบ restore</h2><span>กำลังโหลด…</span></div></section>
 <section class="card" id="ae"><div class="title"><h2>Email แจ้งเตือน User</h2><span>ผู้รับ email แจ้งเตือนแต่ละรอบ</span></div>
 <div class="tablewrap"><table style="min-width:720px"><thead><tr><th>รอบ</th><th>ส่งเมื่อ</th><th>ถึง</th><th style="text-align:center">CC รายชื่อด้านล่าง</th><th></th></tr></thead><tbody>
@@ -2250,6 +2251,7 @@ ${s.annualReports.map((a) => `<tr><td style="font-weight:600">${a.year + 543} ($
     };
     loadBackupCard();
     bindHolidays();
+    bindProjectSettings();
     bindLeaderboardSettings();
     bindDepartments();
     bindTeamsNotify();
@@ -4143,6 +4145,29 @@ ${r.status === "info" ? `<label class="f">ข้อความถึง Manager
       };
   }
 
+  async function bindProjectSettings() {
+    const el = document.getElementById("pjset-card");
+    if (!el) return;
+    const s = await api("/settings/projects").catch(() => null);
+    if (!s) return el.remove();
+    el.innerHTML = `<div class="title"><h2>โปรเจกต์</h2><span>ทีมที่เป็น PM สร้างและดูแลโปรเจกต์ได้ · อัตราใช้คิดต้นทุน (เห็นเฉพาะ PM, Manager, Admin)</span></div>
+<form id="pjset" class="stack"><div class="f"><span>ทีม Project Manager</span><div class="fpills">${ME.teams.map((t) => `<label class="fpill"><input type="checkbox" name="team" value="${esc(t.key)}" ${s.teams.includes(t.key) ? "checked" : ""}>${esc(t.label)}</label>`).join("")}</div></div>
+<label class="f" style="max-width:260px">ต้นทุนต่อ man-day (บาท)<input type="number" name="rate" min="0" step="100" value="${s.mdRate || 0}"></label>
+${s.templates.length ? `<div class="f"><span>Template (ติ๊กเพื่อลบ) · สร้างหรือแก้ template ด้วยปุ่ม “บันทึกเป็น template” ในหน้าโปรเจกต์</span><div class="fpills">${s.templates.map((t) => `<label class="fpill"><input type="checkbox" name="rm" value="${t.id}">${esc(t.name)} <span class="n">${t.milestones} milestone</span></label>`).join("")}</div></div>` : ""}
+<div class="right"><button class="btn primary" type="submit">บันทึก</button></div></form>`;
+    const f = document.getElementById("pjset");
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      try {
+        await post("/settings/projects", { teams: [...f.querySelectorAll("input[name=team]:checked")].map((x) => x.value), mdRate: f.rate.value, removeTemplates: [...f.querySelectorAll("input[name=rm]:checked")].map((x) => x.value) }, "PUT");
+        PJ_META = null;
+        toast("บันทึกแล้ว");
+        bindProjectSettings();
+      } catch (err) {
+        toast(err.message, 6000);
+      }
+    };
+  }
   async function bindHolidays() {
     const el = document.getElementById("hol-card");
     if (!el) return;
