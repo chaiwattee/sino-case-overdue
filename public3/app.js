@@ -5545,7 +5545,7 @@ ${changed.length ? `<div class="tablewrap" style="max-height:50vh"><table style=
     const g = groups.find((x) => x[0] === (params.f || "")) || groups[0];
     const rows = items.filter(g[2]);
     $app.innerHTML = `<div class="pagehead"><div><h1>โปรเจกต์</h1><p class="muted" style="margin:0">${m.canCreate ? "รวม task ที่ PM ทำเอง และ task ที่มอบให้ทีมอื่นผ่านคำขอบริการ (SR) ไว้ที่เดียว" : "โปรเจกต์ที่มี task มอบมาที่ทีมหรือที่คุณ"}</p></div>
-${m.canCreate ? `<button class="btn primary" type="button" id="pj-new">+ โปรเจกต์ใหม่</button>` : ""}</div>
+${m.canCreate ? `<div class="actions" style="margin:0"><button class="btn" type="button" id="pj-tpls">Template</button><button class="btn primary" type="button" id="pj-new">+ โปรเจกต์ใหม่</button></div>` : ""}</div>
 <div class="fpills">${groups.map(([k, l, f]) => {
       const n = items.filter(f).length;
       return k && !n && k !== (params.f || "") ? "" : `<a class="fpill ${k === (params.f || "") ? "on" : ""}" href="#/projects?${qs({ f: k })}">${l} <b>${n}</b></a>`;
@@ -5559,6 +5559,55 @@ ${rows.map((p) => `<tr class="click" data-href="#/projects/${p.id}"><td><a href=
     bindRowLinks();
     const nb = document.getElementById("pj-new");
     if (nb) nb.onclick = () => openProjectForm(m);
+    const tb = document.getElementById("pj-tpls");
+    if (tb) tb.onclick = () => openTemplates();
+  }
+
+  /** Templates: what exists, the blank Excel form, and upload of a filled form (checked first, saved on confirm). */
+  async function openTemplates() {
+    const m = await pjMeta(true);
+    const dlg = pjDialog("Template โปรเจกต์", `<div class="tablewrap" style="margin:0;padding:0"><table><thead><tr><th>Template</th><th class="n">Milestone</th><th class="n">Task</th></tr></thead><tbody>
+${m.templates.map((t) => `<tr><td style="font-weight:600">${esc(t.name)}</td><td class="n">${t.milestones.length}</td><td class="n">${t.milestones.reduce((a, x) => a + (x.tasks || []).length, 0)}</td></tr>`).join("") || `<tr><td colspan="3"><div class="empty">ยังไม่มี template</div></td></tr>`}</tbody></table></div>
+<form id="tpl-up" class="stack pjlog"><b>นำเข้าจาก Excel</b>
+<p class="hint" style="margin:0">1) <a href="api/project-templates/form.xlsx">ดาวน์โหลดแบบฟอร์ม</a> · 2) กรอก Milestone, Task, ทีม, เริ่ม, เสร็จ, Man-day (สูงสุด 1,000 task) · 3) อัปโหลด ระบบตรวจให้ดูก่อนบันทึก<br>ช่องเริ่ม/เสร็จ ใส่เป็น “วันทำการที่” นับจากวันเริ่มโปรเจกต์ หรือใส่วันที่จริงจากแผนงานเดิมก็ได้ ระบบแปลงเป็นจำนวนวันทำการให้ · ไฟล์จาก MS Project ให้ Export เป็น Excel แล้วตั้งชื่อคอลัมน์ตามแบบฟอร์ม</p>
+<div class="formgrid" style="align-items:end"><label class="f">ชื่อ template<input name="n" required minlength="3" maxlength="120" placeholder="เช่น ติดตั้ง CXone (เต็มรูปแบบ)"></label>
+<label class="f">ไฟล์ .xlsx<input type="file" name="file" accept=".xlsx" required></label></div>
+<div id="tpl-prev"></div>
+<div class="right"><button class="btn" type="submit" name="act" value="check">ตรวจไฟล์</button><button class="btn primary" type="submit" name="act" value="save" id="tpl-save" disabled>บันทึก template</button></div></form>`, { wide: true });
+    dlg.onclose = null;
+    const f = dlg.querySelector("#tpl-up");
+    const prev = dlg.querySelector("#tpl-prev");
+    const saveBtn = dlg.querySelector("#tpl-save");
+    const reset = () => {
+      saveBtn.disabled = true;
+      prev.innerHTML = "";
+    };
+    f.file.onchange = reset;
+    f.n.oninput = reset;
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      const save = e.submitter && e.submitter.value === "save";
+      const file = f.file.files[0];
+      if (!file) return toast("เลือกไฟล์ก่อน");
+      if (file.size > 3 * 1048576) return toast("ไฟล์ใหญ่เกิน 3 MB ลบ sheet หรือรูปที่ไม่ใช้ออกก่อน", 6000);
+      e.submitter.disabled = true;
+      try {
+        const [fd0] = await readFiles([file]);
+        const r = await post("/project-templates/import", { name: f.n.value, file: fd0, save });
+        if (r.saved) {
+          toast(`บันทึก template “${r.name}” แล้ว · ${r.tasks} task`, 5000);
+          PJ_META = null;
+          return openTemplates();
+        }
+        prev.innerHTML = `${r.errors.length ? `<div class="banner err"><b>แก้ไฟล์ก่อนบันทึก (${r.errors.length + r.moreErrors} จุด)</b><ul style="margin:6px 0 0;padding-left:18px">${r.errors.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>${r.moreErrors ? `<div>และอีก ${r.moreErrors} จุด</div>` : ""}</div>` : `<div class="banner ok"><b>ไฟล์ถูกต้อง</b> · ${r.milestones.length} milestone · ${r.tasks} task · ยาว ${r.days} วันทำการ · รวม ${r.md} man-day · ทีม ${r.teams.map((t) => esc(t === "PM" ? "PM" : teamLabel(t))).join(", ")}${r.fromDates ? " · แปลงจากวันที่ในไฟล์เป็นจำนวนวันทำการแล้ว" : ""}${r.exists ? `<br><b>มี template ชื่อนี้อยู่แล้ว</b> การบันทึกจะแทนที่ของเดิม (ทำได้เฉพาะ Manager ทีม PM หรือ Admin) โปรเจกต์ที่สร้างไปแล้วไม่เปลี่ยน` : ""}</div>`}
+<div class="tablewrap" style="margin:0;padding:0"><table><thead><tr><th>Milestone</th><th class="n">Task</th><th class="n">PM ทำเอง</th><th>ตัวอย่าง</th></tr></thead><tbody>${r.milestones.map((x) => `<tr><td style="font-weight:600">${esc(x.name)}</td><td class="n">${x.tasks}</td><td class="n">${x.own}</td><td class="hint">${x.sample.map(esc).join(" · ")}${x.tasks > 3 ? " …" : ""}</td></tr>`).join("")}</tbody></table></div>`;
+        saveBtn.disabled = r.errors.length > 0;
+      } catch (err) {
+        toast(err.message, 7000);
+        reset();
+      }
+      if (e.submitter.value === "check") e.submitter.disabled = false;
+    };
   }
 
   async function openProjectForm(m, p) {

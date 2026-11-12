@@ -535,6 +535,149 @@ async function saveTemplate(user, p, b) {
   await audit(user, "project_template_save", name, { from: p.id });
 }
 
+// ------------------------------------------------------------ templates from Excel
+const TPL_COLS = {
+  milestone: ["milestone", "phase", "เฟส", "ขั้นตอน"],
+  task: ["task", "task name", "ชื่องาน", "งาน", "name"],
+  team: ["team", "ทีม", "resource", "resource names", "ผู้รับผิดชอบ"],
+  start: ["start", "เริ่ม", "วันเริ่ม", "เริ่ม (วันทำการที่)", "start day"],
+  end: ["end", "finish", "เสร็จ", "กำหนดเสร็จ", "เสร็จ (วันทำการที่)", "end day", "due"],
+  md: ["man-day", "manday", "md", "work", "man day", "ประมาณการ man-day"],
+};
+const MAX_TPL_ROWS = 1000;
+async function templateForm() {
+  const ExcelJS = require("exceljs");
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Template");
+  ws.columns = [
+    { header: "Milestone", key: "m", width: 26 }, { header: "Task", key: "t", width: 44 }, { header: "ทีม", key: "team", width: 16 },
+    { header: "เริ่ม (วันทำการที่)", key: "s", width: 18 }, { header: "เสร็จ (วันทำการที่)", key: "e", width: 18 }, { header: "Man-day", key: "md", width: 10 },
+  ];
+  [["เริ่มโครงการ", "Kick-off และเก็บ requirement", "PM", 0, 5, 2], ["", "ส่งแผนงานให้ลูกค้าลงนาม", "PM", 4, 7, 1], ["ติดตั้งระบบ", "ติดตั้ง server และ network", "ENGAGE", 8, 16, 4], ["", "เชื่อมต่อ CRM", "DEV", 12, 22, 5], ["UAT และส่งมอบ", "UAT กับลูกค้า", "PM", 24, 28, 3]]
+    .forEach((r) => ws.addRow(r));
+  ws.getRow(1).font = { bold: true };
+  ws.views = [{ state: "frozen", ySplit: 1 }];
+  const h = wb.addWorksheet("วิธีกรอก");
+  h.columns = [{ width: 26 }, { width: 90 }];
+  [
+    ["Milestone", "ชื่อ milestone · เว้นว่างได้ = ใช้ milestone เดียวกับแถวบน"],
+    ["Task", "ชื่องาน (ต้องมี)"],
+    ["ทีม", "รหัสหรือชื่อทีมที่จะมอบงาน · เว้นว่างหรือใส่ PM = PM ทำเอง"],
+    ["เริ่ม / เสร็จ", "ใส่เป็นตัวเลข = วันทำการที่นับจากวันเริ่มโปรเจกต์ (0 = วันเริ่ม) หรือใส่เป็นวันที่จริงทั้งสองช่อง ระบบจะแปลงเป็นจำนวนวันทำการจากวันที่เร็วที่สุดในไฟล์"],
+    ["Man-day", "ประมาณการ ใส่ทีละ 0.5 · เว้นว่างได้"],
+    ["", ""],
+    ["รหัสทีม", "ชื่อทีม"],
+    ...(await all("SELECT code, label FROM teams ORDER BY sort")).map((t) => [t.code, t.label]),
+  ].forEach((r) => h.addRow(r));
+  h.getRow(1).font = { bold: true };
+  return Buffer.from(await wb.xlsx.writeBuffer());
+}
+/** Reads the first sheet of an .xlsx into template milestones. Returns { milestones, tasks, errors[] }. */
+async function parseTemplate(file) {
+  const buf = Buffer.from(String((file && file.data) || "").replace(/^data:[^,]*,/, ""), "base64");
+  if (!buf.length) throw bad("เลือกไฟล์ Excel (.xlsx)");
+  if (!/\.xlsx$/i.test(String(file.name || ""))) throw bad("รองรับเฉพาะไฟล์ .xlsx (ไฟล์จาก MS Project ให้ Export เป็น Excel ก่อน)");
+  const ExcelJS = require("exceljs");
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(buf).catch(() => { throw bad("อ่านไฟล์ไม่ได้ ตรวจว่าเป็น .xlsx ที่ไม่ได้ตั้งรหัสผ่าน"); });
+  const ws = wb.worksheets[0];
+  if (!ws) throw bad("ไฟล์ไม่มี sheet");
+  const val = (c) => {
+    let v = c.value;
+    if (v && typeof v === "object" && !(v instanceof Date)) v = v.result !== undefined ? v.result : v.text !== undefined ? v.text : Array.isArray(v.richText) ? v.richText.map((x) => x.text).join("") : "";
+    return v == null ? "" : v;
+  };
+  // Header row: the first of the top 10 rows that has a "task" column.
+  let head = 0;
+  const col = {};
+  for (let r = 1; r <= Math.min(10, ws.rowCount) && !head; r++) {
+    const found = {};
+    ws.getRow(r).eachCell((c, i) => {
+      const t = String(val(c)).trim().toLowerCase();
+      for (const [k, names] of Object.entries(TPL_COLS)) if (!found[k] && names.includes(t)) found[k] = i;
+    });
+    if (found.task) {
+      head = r;
+      Object.assign(col, found);
+    }
+  }
+  if (!head) throw bad("ไม่พบหัวคอลัมน์ “Task” ใช้แบบฟอร์มที่ดาวน์โหลดจากระบบ หรือตั้งชื่อคอลัมน์ Milestone, Task, ทีม, เริ่ม, เสร็จ, Man-day");
+  if (!col.start || !col.end) throw bad("ต้องมีคอลัมน์ “เริ่ม” และ “เสร็จ” (Start / Finish)");
+  const teams = await all("SELECT code, label FROM teams");
+  const pmTeams = (await settings()).teams;
+  const teamOf = (raw) => {
+    const t = String(raw || "").trim().toLowerCase();
+    if (!t || t === "pm" || t === "-") return null;
+    const m = teams.find((x) => x.code.toLowerCase() === t || x.label.toLowerCase() === t);
+    if (!m) return undefined;
+    return pmTeams.includes(m.code) ? null : m.code;
+  };
+  const rows = [];
+  const errors = [];
+  let ms = "";
+  for (let r = head + 1; r <= ws.rowCount; r++) {
+    const row = ws.getRow(r);
+    const name = clean(val(row.getCell(col.task)), 200);
+    const mname = col.milestone ? clean(val(row.getCell(col.milestone)), 200) : "";
+    if (mname) ms = mname;
+    if (!name) continue; // an empty line, or a milestone-only line
+    if (rows.length >= MAX_TPL_ROWS) {
+      errors.push(`เกิน ${MAX_TPL_ROWS} task ต่อ template แถวที่ ${r} เป็นต้นไปไม่ได้นำเข้า`);
+      break;
+    }
+    const team = col.team ? teamOf(val(row.getCell(col.team))) : null;
+    if (team === undefined) errors.push(`แถว ${r}: ไม่รู้จักทีม “${clean(val(row.getCell(col.team)), 60)}” (ดูรหัสทีมใน sheet วิธีกรอก)`);
+    const s0 = val(row.getCell(col.start));
+    const e0 = val(row.getCell(col.end));
+    const okv = (v) => v instanceof Date || (v !== "" && Number.isFinite(Number(v)) && Number(v) >= 0);
+    if (!okv(s0) || !okv(e0)) errors.push(`แถว ${r}: “เริ่ม” และ “เสร็จ” ต้องเป็นตัวเลข (วันทำการที่) หรือวันที่`);
+    else if (s0 instanceof Date !== e0 instanceof Date) errors.push(`แถว ${r}: “เริ่ม” และ “เสร็จ” ต้องเป็นแบบเดียวกัน (ตัวเลขทั้งคู่ หรือวันที่ทั้งคู่)`);
+    const md = col.md ? Number(val(row.getCell(col.md))) || 0 : 0;
+    rows.push({ r, ms: ms || "งานทั้งหมด", name, team: team || null, s0, e0, md: Math.max(0, Math.round(md * 2) / 2) });
+  }
+  if (!rows.length) throw bad("ไม่พบ task ในไฟล์");
+  // Dates → working days from the earliest date in the file.
+  const dates = rows.flatMap((x) => [x.s0, x.e0]).filter((v) => v instanceof Date);
+  if (dates.length && dates.length !== rows.length * 2 && !errors.length) errors.push("ใช้ตัวเลขหรือวันที่อย่างใดอย่างหนึ่งทั้งไฟล์ อย่าปนกัน");
+  const hol = await sr.holidays();
+  const isoOf = (v) => `${v.getUTCFullYear()}-${String(v.getUTCMonth() + 1).padStart(2, "0")}-${String(v.getUTCDate()).padStart(2, "0")}`; // Excel dates are UTC midnights
+  const day0 = dates.length ? dates.map(isoOf).sort()[0] : null;
+  const off = (v) => (v instanceof Date ? Math.max(0, sr.workdaysBetween(day0, isoOf(v), hol)) : Math.round(Number(v)));
+  const milestones = [];
+  for (const x of rows) {
+    let m = milestones.find((k) => k.name === x.ms);
+    if (!m) milestones.push((m = { name: x.ms, tasks: [] }));
+    const start = off(x.s0);
+    const end = off(x.e0);
+    if (Number.isFinite(start) && Number.isFinite(end) && end < start) errors.push(`แถว ${x.r}: “เสร็จ” ก่อน “เริ่ม”`);
+    m.tasks.push({ name: x.name, team: x.team, start: start || 0, end: Math.max(end || 0, start || 0), md: x.md });
+  }
+  return { milestones, tasks: rows.length, errors: errors.slice(0, 30), moreErrors: Math.max(0, errors.length - 30), fromDates: !!day0 };
+}
+async function importTemplate(user, b) {
+  if (!(await isPm(user))) throw bad("นำเข้า template ได้เฉพาะทีม Project Manager", 403);
+  const name = clean(b.name, 120);
+  if (name.length < 3) throw bad("ตั้งชื่อ template อย่างน้อย 3 ตัวอักษร");
+  const out = await parseTemplate(b.file);
+  const ex = await one("SELECT id FROM project_templates WHERE name = $1", [name]);
+  const summary = {
+    name, exists: !!ex, tasks: out.tasks, errors: out.errors, moreErrors: out.moreErrors, fromDates: out.fromDates,
+    days: Math.max(0, ...out.milestones.flatMap((m) => m.tasks.map((t) => t.end))),
+    md: num(out.milestones.reduce((a, m) => a + m.tasks.reduce((x, t) => x + t.md, 0), 0)),
+    milestones: out.milestones.map((m) => ({ name: m.name, tasks: m.tasks.length, own: m.tasks.filter((t) => !t.team).length, sample: m.tasks.slice(0, 3).map((t) => t.name) })),
+    teams: [...new Set(out.milestones.flatMap((m) => m.tasks.map((t) => t.team || "PM")))],
+  };
+  if (!b.save || out.errors.length) return { saved: false, ...summary };
+  if (ex && !(await isPmLead(user))) throw bad("มี template ชื่อนี้แล้ว ตั้งชื่ออื่น (แทนที่ template เดิมได้เฉพาะ Manager ทีม PM หรือ Admin)");
+  await q(
+    `INSERT INTO project_templates (name, milestones, updated_by, updated_at) VALUES ($1,$2,$3,now())
+     ON CONFLICT (name) DO UPDATE SET milestones = EXCLUDED.milestones, updated_by = EXCLUDED.updated_by, updated_at = now()`,
+    [name, JSON.stringify(out.milestones), user.id]
+  );
+  await audit(user, "project_template_import", name, { tasks: out.tasks, milestones: out.milestones.length, file: clean(b.file && b.file.name, 150) });
+  return { saved: true, ...summary };
+}
+
 // ------------------------------------------------------------ reminders (job, working days 08:40)
 async function runReminders() {
   const hol = await sr.holidays();
@@ -659,6 +802,13 @@ function mount(api, { wrap }) {
       severities: Object.entries(sr.SEV).map(([k, v]) => ({ key: k, label: v })), holidays: [...(await sr.holidays())].sort(), today: todayIso(), autoOpenDays: AUTO_OPEN_DAYS,
     });
   }));
+  api.get("/project-templates/form.xlsx", wrap(async (req, res) => {
+    if (!(await isPm(req.user))) throw bad("ไม่มีสิทธิ์", 403);
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", "attachment; filename=project-template-form.xlsx");
+    res.end(await templateForm());
+  }));
+  api.post("/project-templates/import", wrap(async (req, res) => res.json({ ok: true, ...(await importTemplate(req.user, req.body || {})) })));
   api.get("/projects", wrap(async (req, res) => {
     noRequester(req);
     const ids = (await visibleProjects(req.user)).map((r) => r.id);
