@@ -1,9 +1,9 @@
 // Customer details + installed solution (several products) shown on the customer page.
-// Everyone who sees the customer page reads it; admins and managers edit it.
+// Everyone who sees the customer page reads it; the "customer_edit" permission edits it (admin, manager and viewer by role; other users one by one).
 const { q, one, all, tx, audit } = require("./db");
 
 const bad = (msg, status = 400) => Object.assign(new Error(msg), { status });
-const canEdit = (u) => ["admin", "manager"].includes(u.role);
+const canEdit = (u) => require("./perms").can(u, "customer_edit");
 const FIELDS = ["full_name", "location", "contact", "account_manager", "engineers", "contract_sla", "remote_access", "notes"];
 const SUPPORT = ["MA", "Subscription", "Warranty", "ไม่มีสัญญา"];
 const clip = (v, n = 300) => {
@@ -28,7 +28,7 @@ async function get(site) {
 }
 
 async function save(user, b) {
-  if (!canEdit(user)) throw bad("แก้ข้อมูลลูกค้าได้เฉพาะ Admin และ Manager", 403);
+  if (!(await canEdit(user))) throw bad("ไม่มีสิทธิ์แก้ข้อมูลลูกค้า", 403);
   const site = clip(b.site, 120);
   if (!site) throw bad("ไม่ระบุลูกค้า");
   const p = b.profile || {};
@@ -64,7 +64,7 @@ async function save(user, b) {
 }
 
 function mount(api, { wrap }) {
-  api.get("/customer-info", wrap(async (req, res) => res.json({ ...(await get(req.query.site)), canEdit: canEdit(req.user), supportKinds: SUPPORT })));
+  api.get("/customer-info", wrap(async (req, res) => res.json({ ...(await get(req.query.site)), canEdit: await canEdit(req.user), supportKinds: SUPPORT })));
   api.put("/customer-info", wrap(async (req, res) => res.json({ ok: true, ...(await save(req.user, req.body || {})), canEdit: true, supportKinds: SUPPORT })));
 }
 
