@@ -5554,7 +5554,7 @@ ${changed.length ? `<div class="tablewrap" style="max-height:50vh"><table style=
     return `<span class="chip ${PT_ST[t.status]}">${esc(t.statusLabel)}${t.status === "done" && t.sr && t.sr.rating ? ` · ${t.sr.rating}/5` : ""}</span>`;
   }
   const ptDue = (t) => `${fd(t.due)}${t.base !== t.due ? `<div class="hint">แผนเดิม ${fd(t.base)}</div>` : ""}${t.daysLeft != null && t.daysLeft <= 3 ? `<div class="hint t-r1">อีก ${t.daysLeft} วันทำการ</div>` : ""}${t.doneAt ? `<div class="hint">${t.onTime ? "เสร็จทันกำหนด" : "เสร็จช้ากว่ากำหนด"} · ${fd(t.doneAt)}</div>` : ""}`;
-  const ptWho = (t) => (t.kind === "own" ? `PM ทำเอง` : `${esc(t.teamLabel)}<div class="hint">${t.assignee ? esc(t.assignee.name) : t.sr ? "รอ Manager มอบคน" : "ยังไม่ได้เปิด SR"}</div>`);
+  const ptWho = (t) => (t.kind === "own" ? (t.ownerText ? esc(t.ownerText) : `PM ทำเอง`) : `${esc(t.teamLabel)}<div class="hint">${t.assignee ? esc(t.assignee.name) : t.sr ? "รอ Manager มอบคน" : "ยังไม่ได้เปิด SR"}</div>`);
   const pjBar = (done, total) => `<div class="pjbar" role="img" aria-label="เสร็จ ${done} จาก ${total}"><div style="width:${total ? Math.round((done / total) * 100) : 0}%"></div></div>`;
   /** Working days, the same rule the server uses (Mon–Fri minus the holiday list). */
   function pjAddWorkdays(iso, n, hol) {
@@ -5615,7 +5615,7 @@ ${rows.map((p) => `<tr class="click" data-href="#/projects/${p.id}"><td><a href=
     const dlg = pjDialog("Template โปรเจกต์", `<div class="tablewrap" style="margin:0;padding:0"><table><thead><tr><th>Template</th><th class="n">Milestone</th><th class="n">Task</th></tr></thead><tbody>
 ${m.templates.map((t) => `<tr><td style="font-weight:600">${esc(t.name)}</td><td class="n">${t.milestones.length}</td><td class="n">${t.milestones.reduce((a, x) => a + (x.tasks || []).length, 0)}</td></tr>`).join("") || `<tr><td colspan="3"><div class="empty">ยังไม่มี template</div></td></tr>`}</tbody></table></div>
 <form id="tpl-up" class="stack pjlog"><b>นำเข้าจาก Excel</b>
-<p class="hint" style="margin:0">1) <a href="api/project-templates/form.xlsx">ดาวน์โหลดแบบฟอร์ม</a> · 2) กรอก Milestone, Task, ทีม, เริ่ม, เสร็จ, Man-day (สูงสุด 1,000 task) · 3) อัปโหลด ระบบตรวจให้ดูก่อนบันทึก<br>ช่องเริ่ม/เสร็จ ใส่เป็น “วันทำการที่” นับจากวันเริ่มโปรเจกต์ หรือใส่วันที่จริงจากแผนงานเดิมก็ได้ ระบบแปลงเป็นจำนวนวันทำการให้ · ไฟล์จาก MS Project ให้ Export เป็น Excel แล้วตั้งชื่อคอลัมน์ตามแบบฟอร์ม</p>
+<p class="hint" style="margin:0">1) <a href="api/project-templates/form.xlsx">ดาวน์โหลดแบบฟอร์มมาตรฐาน (TemplateProjectPlan)</a> · 2) แก้ milestone และ task ในไฟล์ (สูงสุด 1,000 task) · 3) อัปโหลด ระบบตรวจให้ดูก่อนบันทึก<br>คอลัมน์: No., Activity / Task, Owner (Who), Estimate Manday, Predecessors, Start, Finish · Start / Finish ใส่วันที่จริง ระบบแปลงเป็นจำนวนวันทำการนับจากวันแรกในไฟล์ · Owner ที่ตรงกับรหัสหรือชื่อทีม = มอบงานให้ทีมนั้น · template “Standard Project Plan” มีในระบบแล้ว</p>
 <div class="formgrid" style="align-items:end"><label class="f">ชื่อ template<input name="n" required minlength="3" maxlength="120" placeholder="เช่น ติดตั้ง CXone (เต็มรูปแบบ)"></label>
 <label class="f">ไฟล์ .xlsx<input type="file" name="file" accept=".xlsx" required></label></div>
 <div id="tpl-prev"></div>
@@ -5708,7 +5708,7 @@ ${p ? "" : `<div class="banner" id="pj-tpl" hidden></div>`}
     $app.innerHTML = `<div class="pagehead"><div><a href="#/projects" class="muted">← โปรเจกต์</a>
 <h1 style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">${esc(p.name)} ${pjChip(p)}</h1>
 <p class="muted" style="margin:0">${esc(p.customer || "ไม่ระบุลูกค้า")} · PM ${p.pm ? esc(p.pm.name) : "-"} · ${fd(p.start)} – ${fd(p.end, true)}${p.template ? ` · Template “${esc(p.template)}”` : ""}</p></div>
-${d.can.edit ? `<div class="actions" style="margin:0"><button class="btn" type="button" id="pj-edit">แก้ไขโปรเจกต์</button>${d.can.template ? `<button class="btn" type="button" id="pj-tpl">บันทึกเป็น template</button>` : ""}<button class="btn" type="button" id="pj-imp">นำเข้าจาก Excel</button>${d.can.deliver && p.status !== "cancelled" ? `<button class="btn" type="button" id="pj-deliver">ส่งมอบโปรเจกต์</button>` : ""}<button class="btn" type="button" id="pj-ms">+ Milestone</button><button class="btn primary" type="button" id="pj-task">+ เพิ่ม task</button></div>` : ""}</div>
+${d.can.edit ? `<div class="actions" style="margin:0"><button class="btn" type="button" id="pj-edit">แก้ไขโปรเจกต์</button><a class="btn" href="api/projects/${p.id}/plan.xlsx">Export Project Plan</a>${d.can.template ? `<button class="btn" type="button" id="pj-tpl">บันทึกเป็น template</button>` : ""}<button class="btn" type="button" id="pj-imp">นำเข้าจาก Excel</button>${d.can.deliver && p.status !== "cancelled" ? `<button class="btn" type="button" id="pj-deliver">ส่งมอบโปรเจกต์</button>` : ""}<button class="btn" type="button" id="pj-ms">+ Milestone</button><button class="btn primary" type="button" id="pj-task">+ เพิ่ม task</button></div>` : d.full ? `<div class="actions" style="margin:0"><a class="btn" href="api/projects/${p.id}/plan.xlsx">Export Project Plan</a></div>` : ""}</div>
 ${p.description ? `<p class="muted" style="margin:0">${esc(p.description)}</p>` : ""}
 ${d.full ? `<div class="kpis">
 <div class="kpi k-all"><span class="l">ความคืบหน้า</span><span class="v">${pct}%</span><span class="s">เสร็จ ${s.done} จาก ${s.total} task</span></div>
@@ -5749,7 +5749,7 @@ ${body}`;
 ${pjBar(x.done, x.total)}<div class="pjms-top"><span class="hint">${x.done}/${x.total} task · ต้อง meet ${fd(x.due)}</span><span class="chip ${MS_ST[x.state]}">${esc(x.stateLabel)}</span></div></div>`).join("")}</div>` : "";
     const groups = [...ms.map((x) => [x, d.tasks.filter((t) => t.milestoneId === x.id)]), [null, d.tasks.filter((t) => !t.milestoneId)]].filter(([, ts]) => ts.length);
     const rows = groups.map(([x, ts]) => `<tr class="pjmsrow"><td colspan="${full ? 5 : 4}"><strong>◆ ${x ? esc(x.name) : "ไม่อยู่ใน milestone"}</strong>${x ? ` <span class="hint">· ต้อง meet ${fd(x.due)}</span>` : ""}</td></tr>
-${ts.map((t) => `<tr class="click ${t.status === "cancelled" ? "pj-off" : ""}" data-task="${t.id}" tabindex="0"><td><span style="font-weight:600;color:var(--accent)">${esc(t.name)}</span><div class="hint">${t.kind === "own" ? "PM ทำเอง" : t.sr ? `<a class="mono" href="#/sr/${t.sr.id}">${esc(t.sr.no)}</a>` : t.srOpen === "auto" ? "เปิด SR อัตโนมัติก่อนเริ่ม 7 วันทำการ" : "ยังไม่ได้เปิด SR"}</div></td>
+${ts.map((t) => `<tr class="click ${t.status === "cancelled" ? "pj-off" : ""}" data-task="${t.id}" tabindex="0"><td><span style="font-weight:600;color:var(--accent)">${esc(t.name)}</span><div class="hint">${t.kind === "own" ? `PM ทำเอง${t.pct > 0 && t.pct < 100 ? ` · ${t.pct}%` : ""}${t.pred ? ` · ต่อจาก task ลำดับ ${esc(t.pred)}` : ""}` : t.sr ? `<a class="mono" href="#/sr/${t.sr.id}">${esc(t.sr.no)}</a>` : t.srOpen === "auto" ? "เปิด SR อัตโนมัติก่อนเริ่ม 7 วันทำการ" : "ยังไม่ได้เปิด SR"}</div></td>
 <td>${ptWho(t)}</td><td>${ptDue(t)}</td><td>${ptChip(t)}</td>${full ? `<td class="n">${ME.user.role === "viewer" ? "" : `${t.noMd ? "-" : t.mdAct} / ${t.mdEst}`}</td>` : ""}</tr>`).join("")}`).join("");
     return `${cards}<section class="card"><div class="title"><h2>Task</h2><span>กดที่ task เพื่อดูรายละเอียด${full ? " · สถานะ task ที่มอบงานดึงจาก SR อัตโนมัติ" : ""}</span></div>
 <div class="tablewrap"><table><thead><tr><th>Task</th><th>ผู้รับผิดชอบ</th><th>กำหนดเสร็จ</th><th>สถานะ</th>${full ? `<th class="n">${ME.user.role === "viewer" ? "" : "Man-day ใช้ / ประมาณ"}</th>` : ""}</tr></thead><tbody>
@@ -5894,7 +5894,7 @@ ${Object.entries(by).map(([k, v]) => `<tr><td>${esc(k)}</td><td class="n">${v.n}
   /** Adds many tasks to this project from an Excel file (same form as templates); checked first, saved on confirm. */
   function openTaskImport(d) {
     const p = d.project;
-    const dlg = pjDialog("นำเข้า task จาก Excel", `<form id="pj-impf" class="stack"><p class="hint" style="margin:0">ใช้แบบฟอร์มเดียวกับ template: <a href="api/project-templates/form.xlsx">ดาวน์โหลดแบบฟอร์ม</a> · ถ้าช่องเริ่ม/เสร็จเป็นวันที่ ระบบใช้วันที่นั้นเลย ถ้าเป็นตัวเลข นับวันทำการจากวันเริ่มโปรเจกต์ (${fd(p.start, true)}) · milestone ชื่อเดียวกับที่มีอยู่จะรวมกัน · task ของทีมอื่นเปิด SR อัตโนมัติก่อนวันเริ่ม 7 วันทำการ</p>
+    const dlg = pjDialog("นำเข้า task จาก Excel", `<form id="pj-impf" class="stack"><p class="hint" style="margin:0">ใช้แบบฟอร์มมาตรฐาน: <a href="api/project-templates/form.xlsx">ดาวน์โหลด TemplateProjectPlan</a> · Start / Finish เป็นวันที่จริง ระบบใช้วันที่นั้นเลย (โปรเจกต์เริ่ม ${fd(p.start, true)}) · milestone ชื่อเดียวกับที่มีอยู่จะรวมกัน · Owner ที่ตรงกับรหัสหรือชื่อทีม = มอบงานให้ทีมนั้น เปิด SR อัตโนมัติก่อนวันเริ่ม 7 วันทำการ · Status “Completed” / “In Progress” และ % Comp. ถูกนำเข้าสำหรับ task ที่ PM ทำเอง</p>
 <label class="f">ไฟล์ .xlsx<input type="file" name="file" accept=".xlsx" required></label><div id="pj-impv"></div>
 <div class="right"><button class="btn" type="submit" value="check">ตรวจไฟล์</button><button class="btn primary" type="submit" value="save" id="pj-imps" disabled>เพิ่ม task เข้าโปรเจกต์</button></div></form>`, { wide: true });
     dlg.onclose = null;
@@ -5992,10 +5992,13 @@ ${t ? `<p class="hint" style="margin:0">เปลี่ยนกำหนดเ�
 <div class="formgrid" id="pt-sr" ${t ? (t.kind === "sr" ? "" : "hidden") : "hidden"}><label class="f">ทีม<select name="team" ${lockTeam ? "disabled" : ""}>${m.teams.filter((x) => !m.pmTeams.includes(x.code)).map((x) => `<option value="${x.code}" ${t && t.team === x.code ? "selected" : ""}>${esc(x.label)}</option>`).join("")}</select>${lockTeam ? `<span class="hint">เปิด SR แล้ว เปลี่ยนทีมไม่ได้</span>` : ""}</label>
 <label class="f">ความเร่งด่วน<select name="sev">${m.severities.map((x) => `<option value="${x.key}" ${(t ? t.severity : "normal") === x.key ? "selected" : ""}>${x.label}</option>`).join("")}</select></label>
 <label class="f">เปิดคำขอบริการ<select name="open" ${t && t.sr ? "disabled" : ""}><option value="now" ${t && t.srOpen === "now" ? "selected" : ""}>ตอนบันทึก</option><option value="auto" ${t && t.srOpen === "auto" ? "selected" : ""}>อัตโนมัติ ${m.autoOpenDays} วันทำการก่อนวันเริ่ม</option></select></label></div>
-<div class="formgrid"><label class="f">ประมาณการ man-day<input type="number" name="md" min="0" step="0.5" value="${t ? t.mdEst : 1}"></label></div>
+<div class="formgrid"><label class="f">ประมาณการ man-day<input type="number" name="md" min="0" step="0.5" value="${t ? t.mdEst : 1}"></label>
+<label class="f">Predecessors<input name="pred" maxlength="100" inputmode="numeric" placeholder="เช่น 4,5" value="${esc(t ? t.pred : "")}"><span class="hint">ลำดับ (No.) ของ task ที่ต้องเสร็จก่อน</span></label></div>
+<div class="formgrid" id="pt-own" ${t ? (t.kind === "own" ? "" : "hidden") : ""}><label class="f">ผู้รับผิดชอบ (Owner)<input name="owner" maxlength="200" placeholder="เว้นว่าง = PM ทำเอง" value="${esc(t ? t.ownerText : "")}"></label>
+<label class="f">% ความคืบหน้า<input type="number" name="pct" min="0" max="100" step="5" value="${t ? t.pct : 0}"></label></div>
 <label class="f"><span id="pt-dl">รายละเอียด / สิ่งที่ต้องส่งมอบ${t && t.kind === "sr" ? " (ทีมผู้รับเห็น)" : " (ไม่บังคับ)"}</span><textarea name="detail" rows="3" maxlength="5000">${esc(t ? t.detail : "")}</textarea></label>`,
       async (f) => {
-        const body = { name: f.name.value, milestoneId: f.ms.value, start: f.start.value, mdEst: f.md.value, detail: f.detail.value, team: f.team.value, severity: f.sev.value, srOpen: f.open.value };
+        const body = { name: f.name.value, milestoneId: f.ms.value, start: f.start.value, mdEst: f.md.value, detail: f.detail.value, team: f.team.value, severity: f.sev.value, srOpen: f.open.value, pred: f.pred.value, ownerText: f.owner.value, pct: Number(f.pct.value) || 0 };
         if (t) {
           await post(`/project-tasks/${t.id}`, body, "PUT");
           toast("บันทึกแล้ว");
@@ -6011,6 +6014,7 @@ ${t ? `<p class="hint" style="margin:0">เปลี่ยนกำหนดเ�
         r.onchange = () => {
           const sr = f.kind.value === "sr";
           f.querySelector("#pt-sr").hidden = !sr;
+          f.querySelector("#pt-own").hidden = sr;
           f.detail.required = sr;
           f.detail.minLength = sr ? 20 : 0;
           f.querySelector("#pt-dl").textContent = sr ? "รายละเอียด / สิ่งที่ต้องส่งมอบ (ทีมผู้รับเห็น อย่างน้อย 20 ตัวอักษร)" : "รายละเอียด (ไม่บังคับ)";

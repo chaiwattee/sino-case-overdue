@@ -125,6 +125,7 @@ function serTask(t, hol, noKpi) {
     sr: t.sr_id ? { id: t.sr_id, no: t.sr_no, status: t.sr_status, rating: t.sr_rating, ext: t.sr_ext_target ? { target: isoDay(t.sr_ext_target), reason: t.sr_ext_reason, by: t.sr_ext_by } : null } : null,
     assignee: t.assignee_id || t.assignee_name ? { id: t.assignee_id, name: t.assignee_name } : null,
     mdEst: num(t.md_est), mdAct: num(t.md_act), sort: t.sort,
+    ownerText: t.owner_text || "", planNo: t.plan_no || null, pred: t.pred || "", pct: ["done", "submitted"].includes(st.status) ? 100 : t.kind === "own" ? t.pct || 0 : 0,
     noMd: !!(noKpi && t.kind === "sr" && noKpi.has(t.team)), // a team without KPI is not asked for man-days
   };
 }
@@ -239,9 +240,9 @@ async function createProject(user, b) {
         const s0 = at(Number(x.start) || 0);
         const e0 = at(Math.max(Number(x.end) || 0, Number(x.start) || 0));
         const tr = await c.query(
-          `INSERT INTO project_tasks (project_id, milestone_id, name, kind, team, start_date, due_date, base_date, kpi_due, status, sr_open, md_est, sort, created_by)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$7,'todo',$8,$9,$10,$11) RETURNING id`,
-          [pid, mr.rows[0].id, clean(x.name, 200), team ? "sr" : "own", team, s0, e0, team ? "auto" : "now", num(x.md), j, user.id]
+          `INSERT INTO project_tasks (project_id, milestone_id, name, kind, team, start_date, due_date, base_date, kpi_due, status, sr_open, md_est, sort, created_by, owner_text, plan_no, pred, detail)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$7,'todo',$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id`,
+          [pid, mr.rows[0].id, clean(x.name, 200), team ? "sr" : "own", team, s0, e0, team ? "auto" : "now", num(x.md), j, user.id, clean(x.owner, 200) || null, Number.isInteger(x.no) ? x.no : null, clean(x.pred, 100) || null, String(x.detail || "").slice(0, 5000) || null]
         );
         await addEvent(c, tr.rows[0].id, "created", null, { template: tpl.name }, user.id);
       }
@@ -304,6 +305,8 @@ async function updateMilestone(user, mid, b) {
   return p;
 }
 
+const predOf = (v) => clean(String(v == null ? "" : v).replace(/[^0-9,;\s]/g, "").replace(/[;\s]+/g, ",").replace(/,+/g, ",").replace(/^,|,$/g, ""), 100) || null;
+const pctOf = (v) => Math.max(0, Math.min(100, Math.round(Number(v) || 0)));
 async function addTask(user, p, b) {
   const name = clean(b.name, 200);
   if (name.length < 3) throw bad("ใส่ชื่องาน");
@@ -324,9 +327,9 @@ async function addTask(user, p, b) {
   const srOpen = b.srOpen === "auto" ? "auto" : "now";
   const tid = await tx(async (c) => {
     const r = await c.query(
-      `INSERT INTO project_tasks (project_id, milestone_id, name, detail, kind, team, severity, start_date, due_date, base_date, kpi_due, sr_open, md_est, sort, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$9,$10,$11,(SELECT COALESCE(max(sort),-1)+1 FROM project_tasks WHERE milestone_id = $2),$12) RETURNING id`,
-      [p.id, ms.id, name, clean(b.detail, 5000) || null, kind, team, b.severity && sr.SEV[b.severity] ? b.severity : "normal", start, due, srOpen, md, user.id]
+      `INSERT INTO project_tasks (project_id, milestone_id, name, detail, kind, team, severity, start_date, due_date, base_date, kpi_due, sr_open, md_est, sort, created_by, owner_text, pred, pct)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$9,$10,$11,(SELECT COALESCE(max(sort),-1)+1 FROM project_tasks WHERE milestone_id = $2),$12,$13,$14,$15) RETURNING id`,
+      [p.id, ms.id, name, clean(b.detail, 5000) || null, kind, team, b.severity && sr.SEV[b.severity] ? b.severity : "normal", start, due, srOpen, md, user.id, kind === "own" ? clean(b.ownerText, 200) || null : null, predOf(b.pred), kind === "own" ? pctOf(b.pct) : 0]
     );
     await addEvent(c, r.rows[0].id, "created", null, null, user.id);
     return r.rows[0].id;
@@ -354,9 +357,30 @@ async function updateTask(user, t, p, b) {
     team = b.team;
   }
   await q(
-    `UPDATE project_tasks SET name=$2, detail=$3, milestone_id=$4, start_date=$5, md_est=$6, team=$7, severity=$8, sr_open=$9, updated_at=now() WHERE id=$1`,
-    [t.id, name, clean(b.detail ?? t.detail, 5000) || null, mid, start, Math.max(0, num(b.mdEst ?? t.md_est)), team, b.severity && sr.SEV[b.severity] ? b.severity : t.severity, b.srOpen === "auto" || b.srOpen === "now" ? b.srOpen : t.sr_open]
+    `UPDATE project_tasks SET name=$2, detail=$3, milestone_id=$4, start_date=$5, md_est=$6, team=$7, severity=$8, sr_open=$9, owner_text=$10, pred=$11, pct=$12, updated_at=now() WHERE id=$1`,
+    [t.id, name, clean(b.detail ?? t.detail, 5000) || null, mid, start, Math.max(0, num(b.mdEst ?? t.md_est)), team, b.severity && sr.SEV[b.severity] ? b.severity : t.severity, b.srOpen === "auto" || b.srOpen === "now" ? b.srOpen : t.sr_open,
+      t.kind === "own" ? (b.ownerText === undefined ? t.owner_text : clean(b.ownerText, 200) || null) : null, b.pred === undefined ? t.pred : predOf(b.pred), t.kind === "own" ? (b.pct === undefined ? t.pct : pctOf(b.pct)) : 0]
   );
+}
+
+/** The project as the Sinostech standard plan sheet. Predecessors keep pointing at the right line after tasks move. */
+async function planExport(p, tasks) {
+  const live = tasks.filter((t) => t.status !== "cancelled");
+  const seqOf = new Map();
+  live.forEach((t, i) => t.planNo && !seqOf.has(t.planNo) && seqOf.set(t.planNo, i + 1));
+  const stOf = (t) => (["done", "submitted"].includes(t.status) ? "Completed" : t.overdue ? "Delayed" : ["doing", "pending"].includes(t.status) || t.pct > 0 ? "In Progress" : "Not Started");
+  const names = [...new Set(live.map((t) => t.milestone || "ไม่อยู่ใน milestone"))];
+  let n = 0;
+  const numbered = live.map((t) => ({ t, no: ++n }));
+  return PLAN.planWorkbook({
+    milestones: names.map((name) => ({
+      name,
+      tasks: numbered.filter((x) => (x.t.milestone || "ไม่อยู่ใน milestone") === name).map(({ t, no }) => ({
+        no, name: t.detail ? `${t.name}\n${t.detail}` : t.name, owner: t.kind === "own" ? t.ownerText || p.pm_name || "PM" : [t.teamLabel, t.assignee && t.assignee.name].filter(Boolean).join(" · "),
+        md: t.mdEst || null, pred: String(t.pred || "").split(",").filter(Boolean).map((x) => seqOf.get(Number(x)) || x).join(","), start: t.start, finish: t.due, pct: t.pct, status: stOf(t),
+      })),
+    })),
+  });
 }
 
 /** PM moves a due date (own task, or a handed-over task whose SR is not approved yet). After approval the
@@ -529,7 +553,7 @@ async function saveTemplate(user, p, b) {
   const off = (x) => Math.max(0, sr.workdaysBetween(day0, isoDay(x), hol));
   const ms = await all("SELECT * FROM project_milestones WHERE project_id = $1 ORDER BY sort, due_date", [p.id]);
   const ts = await all("SELECT * FROM project_tasks WHERE project_id = $1 AND status <> 'cancelled' ORDER BY sort, start_date", [p.id]);
-  const milestones = ms.map((m) => ({ name: m.name, tasks: ts.filter((t) => t.milestone_id === m.id).map((t) => ({ name: t.name, team: t.kind === "sr" ? t.team : null, start: off(t.start_date), end: off(t.base_date), md: num(t.md_est) })) }));
+  const milestones = ms.map((m) => ({ name: m.name, tasks: ts.filter((t) => t.milestone_id === m.id).map((t) => ({ name: t.name, team: t.kind === "sr" ? t.team : null, start: off(t.start_date), end: off(t.base_date), md: num(t.md_est), ...(t.owner_text ? { owner: t.owner_text } : {}), ...(t.plan_no ? { no: t.plan_no } : {}), ...(t.pred ? { pred: t.pred } : {}), ...(t.detail ? { detail: t.detail } : {}) })) }));
   const ex = await one("SELECT id FROM project_templates WHERE name = $1", [name]);
   if (ex && !(await isPmLead(user))) throw bad("มี template ชื่อนี้แล้ว ตั้งชื่ออื่น (แก้ template เดิมได้เฉพาะ Manager ทีม PM)");
   await q(
@@ -541,41 +565,53 @@ async function saveTemplate(user, p, b) {
 }
 
 // ------------------------------------------------------------ templates from Excel
+// Column names the importer knows: the Sinostech standard plan (projectplan.js) first, then the older simple form.
+// Compared in lower case with every space and line break removed.
 const TPL_COLS = {
+  no: ["no.", "no", "#", "ลำดับ"],
   milestone: ["milestone", "phase", "เฟส", "ขั้นตอน"],
-  task: ["task", "task name", "ชื่องาน", "งาน", "name"],
-  team: ["team", "ทีม", "resource", "resource names", "ผู้รับผิดชอบ"],
-  start: ["start", "เริ่ม", "วันเริ่ม", "เริ่ม (วันทำการที่)", "start day"],
-  end: ["end", "finish", "เสร็จ", "กำหนดเสร็จ", "เสร็จ (วันทำการที่)", "end day", "due"],
-  md: ["man-day", "manday", "md", "work", "man day", "ประมาณการ man-day"],
+  task: ["activity/task", "activity", "task", "taskname", "ชื่องาน", "งาน", "name"],
+  owner: ["owner(who)", "owner", "who"],
+  team: ["team", "ทีม", "resource", "resourcenames", "ผู้รับผิดชอบ"],
+  start: ["start", "เริ่ม", "วันเริ่ม", "เริ่ม(วันทำการที่)", "startday"],
+  end: ["finish", "end", "เสร็จ", "กำหนดเสร็จ", "เสร็จ(วันทำการที่)", "endday", "due"],
+  md: ["estimatemanday", "estimateman-day", "man-day", "manday", "md", "work", "ประมาณการman-day"],
+  pred: ["predecessors/dependency", "predecessors", "predecessor", "dependency"],
+  pct: ["%comp.", "%comp", "%complete", "%"],
+  status: ["status", "สถานะ"],
 };
 const MAX_TPL_ROWS = 1000;
+const PLAN = require("./projectplan");
+const STD_TEMPLATE = "Standard Project Plan";
+/** The blank standard form: the Standard Project Plan template laid out from next Monday, ready to overwrite. */
 async function templateForm() {
-  const ExcelJS = require("exceljs");
-  const wb = new ExcelJS.Workbook();
-  const ws = wb.addWorksheet("Template");
-  ws.columns = [
-    { header: "Milestone", key: "m", width: 26 }, { header: "Task", key: "t", width: 44 }, { header: "ทีม", key: "team", width: 16 },
-    { header: "เริ่ม (วันทำการที่)", key: "s", width: 18 }, { header: "เสร็จ (วันทำการที่)", key: "e", width: 18 }, { header: "Man-day", key: "md", width: 10 },
-  ];
-  [["เริ่มโครงการ", "Kick-off และเก็บ requirement", "PM", 0, 5, 2], ["", "ส่งแผนงานให้ลูกค้าลงนาม", "PM", 4, 7, 1], ["ติดตั้งระบบ", "ติดตั้ง server และ network", "ENGAGE", 8, 16, 4], ["", "เชื่อมต่อ CRM", "DEV", 12, 22, 5], ["UAT และส่งมอบ", "UAT กับลูกค้า", "PM", 24, 28, 3]]
-    .forEach((r) => ws.addRow(r));
-  ws.getRow(1).font = { bold: true };
-  ws.views = [{ state: "frozen", ySplit: 1 }];
-  const h = wb.addWorksheet("วิธีกรอก");
-  h.columns = [{ width: 26 }, { width: 90 }];
-  [
-    ["Milestone", "ชื่อ milestone · เว้นว่างได้ = ใช้ milestone เดียวกับแถวบน"],
-    ["Task", "ชื่องาน (ต้องมี)"],
-    ["ทีม", "รหัสหรือชื่อทีมที่จะมอบงาน · เว้นว่างหรือใส่ PM = PM ทำเอง"],
-    ["เริ่ม / เสร็จ", "ใส่เป็นตัวเลข = วันทำการที่นับจากวันเริ่มโปรเจกต์ (0 = วันเริ่ม) หรือใส่เป็นวันที่จริงทั้งสองช่อง ระบบจะแปลงเป็นจำนวนวันทำการจากวันที่เร็วที่สุดในไฟล์"],
-    ["Man-day", "ประมาณการ ใส่ทีละ 0.5 · เว้นว่างได้"],
-    ["", ""],
-    ["รหัสทีม", "ชื่อทีม"],
-    ...(await all("SELECT code, label FROM teams ORDER BY sort")).map((t) => [t.code, t.label]),
-  ].forEach((r) => h.addRow(r));
-  h.getRow(1).font = { bold: true };
-  return Buffer.from(await wb.xlsx.writeBuffer());
+  const hol = await sr.holidays();
+  const t0 = new Date(todayIso() + "T00:00:00Z");
+  t0.setUTCDate(t0.getUTCDate() + ((8 - t0.getUTCDay()) % 7 || 7));
+  let day0 = t0.toISOString().slice(0, 10);
+  if (!sr.isWorkday(day0, hol)) day0 = sr.addWorkdays(day0, 1, hol);
+  const at = (n) => (n > 0 ? sr.addWorkdays(day0, n, hol) : day0);
+  const tpl = await one("SELECT milestones FROM project_templates WHERE name = $1", [STD_TEMPLATE]);
+  const src = tpl && Array.isArray(tpl.milestones) && tpl.milestones.length ? tpl.milestones : [{ name: "Assessment & Planning", tasks: [{ name: "Kick-off meeting and implementation plan", start: 0, end: 0, md: 1 }] }];
+  const teams = await all("SELECT code, label FROM teams ORDER BY sort");
+  return PLAN.planWorkbook({
+    milestones: src.map((m) => ({ name: m.name, tasks: (m.tasks || []).map((t) => ({ no: t.no, name: t.name, owner: t.team || t.owner || "", md: t.md, pred: t.pred, start: at(Number(t.start) || 0), finish: at(Math.max(Number(t.end) || 0, Number(t.start) || 0)), pct: 0, status: "Not Started" })) })),
+    help: [
+      ["คอลัมน์", "วิธีกรอก"],
+      ["แถว Milestone", "แถวสีเขียวเข้ม พิมพ์ชื่อ milestone ในคอลัมน์ A เช่น “Milestone 2 — Discovery & Design” (ข้อความหลังเครื่องหมาย | ไม่ถูกนำเข้า) · task ที่อยู่ใต้แถวนี้อยู่ใน milestone นี้"],
+      ["No.", "ลำดับของ task ใช้อ้างในคอลัมน์ Predecessors"],
+      ["Activity / Task", "ชื่องาน (ต้องมี) · แถวที่ช่องนี้ว่างจะถูกข้าม"],
+      ["Owner (Who)", "ชื่อผู้รับผิดชอบ พิมพ์ได้อิสระ เช่น “SINO Weerachai / ลูกค้า” · ถ้าพิมพ์รหัสหรือชื่อทีมในตารางด้านล่างตรงตัว ระบบจะมอบงานให้ทีมนั้นผ่านคำขอบริการ (SR)"],
+      ["Estimate Manday", "ประมาณการ man-day ใส่ทีละ 0.5 · เว้นว่างได้"],
+      ["Predecessors / Dependency", "No. ของ task ที่ต้องเสร็จก่อน คั่นด้วย , · เว้นว่างได้"],
+      ["Start / Finish", "วันที่จริง · ตอนบันทึกเป็น template ระบบแปลงเป็นจำนวนวันทำการนับจากวันแรกในไฟล์ เพื่อใช้กับโปรเจกต์ที่เริ่มวันอื่น"],
+      ["% Comp. / Status", "ใช้ตอนนำเข้า task เข้าโปรเจกต์ที่กำลังทำอยู่ (Completed = เสร็จแล้ว, In Progress = กำลังทำ) · ไม่ถูกเก็บใน template"],
+      ["คอลัมน์สัปดาห์ (J เป็นต้นไป)", "แถบสีวาดจาก Start / Finish อัตโนมัติ ไม่ต้องกรอก"],
+      ["", ""],
+      ["รหัสทีม", "ชื่อทีม"],
+      ...teams.map((t) => [t.code, t.label]),
+    ],
+  });
 }
 /** Reads the first sheet of an .xlsx into template milestones. Returns { milestones, tasks, errors[] }. */
 async function parseTemplate(file) {
@@ -588,6 +624,7 @@ async function parseTemplate(file) {
   const ws = wb.worksheets[0];
   if (!ws) throw bad("ไฟล์ไม่มี sheet");
   const val = (c) => {
+    if (c.isMerged && c.master && c.master.address !== c.address) return ""; // a merged cell repeats its first cell's value
     let v = c.value;
     if (v && typeof v === "object" && !(v instanceof Date)) v = v.result !== undefined ? v.result : v.text !== undefined ? v.text : Array.isArray(v.richText) ? v.richText.map((x) => x.text).join("") : "";
     return v == null ? "" : v;
@@ -598,7 +635,7 @@ async function parseTemplate(file) {
   for (let r = 1; r <= Math.min(10, ws.rowCount) && !head; r++) {
     const found = {};
     ws.getRow(r).eachCell((c, i) => {
-      const t = String(val(c)).trim().toLowerCase();
+      const t = String(val(c)).toLowerCase().replace(/\s+/g, "");
       for (const [k, names] of Object.entries(TPL_COLS)) if (!found[k] && names.includes(t)) found[k] = i;
     });
     if (found.task) {
@@ -606,8 +643,8 @@ async function parseTemplate(file) {
       Object.assign(col, found);
     }
   }
-  if (!head) throw bad("ไม่พบหัวคอลัมน์ “Task” ใช้แบบฟอร์มที่ดาวน์โหลดจากระบบ หรือตั้งชื่อคอลัมน์ Milestone, Task, ทีม, เริ่ม, เสร็จ, Man-day");
-  if (!col.start || !col.end) throw bad("ต้องมีคอลัมน์ “เริ่ม” และ “เสร็จ” (Start / Finish)");
+  if (!head) throw bad("ไม่พบหัวคอลัมน์ “Activity / Task” ใช้แบบฟอร์มมาตรฐานที่ดาวน์โหลดจากระบบ (No., Activity / Task, Owner, Estimate Manday, Predecessors, Start, Finish, % Comp., Status)");
+  if (!col.start || !col.end) throw bad("ต้องมีคอลัมน์ Start และ Finish");
   const teams = await all("SELECT code, label FROM teams");
   const pmTeams = (await settings()).teams;
   const teamOf = (raw) => {
@@ -622,15 +659,32 @@ async function parseTemplate(file) {
   let ms = "";
   for (let r = head + 1; r <= ws.rowCount; r++) {
     const row = ws.getRow(r);
-    const name = clean(val(row.getCell(col.task)), 200);
-    const mname = col.milestone ? clean(val(row.getCell(col.milestone)), 200) : "";
+    // "Task title\n- sub item\n- sub item": the first line is the task, the lines under it are its detail.
+    const rawTask = String(val(row.getCell(col.task)) || "").replace(/\r/g, "");
+    const name = clean(rawTask.split("\n")[0], 200);
+    const detail = rawTask.split("\n").slice(1).map((x) => x.trim()).filter(Boolean).join("\n").slice(0, 5000);
+    let mname = col.milestone ? clean(val(row.getCell(col.milestone)), 200) : "";
+    // Standard plan: a milestone is a full-width row with its title in the first column and no task name.
+    if (!name && !col.milestone) {
+      const first = String(val(row.getCell(col.no || 1)) || "").trim();
+      if (first && !/^\d+(\.\d+)?$/.test(first)) mname = clean(PLAN.milestoneName(first), 200);
+    }
     if (mname) ms = mname;
     if (!name) continue; // an empty line, or a milestone-only line
     if (rows.length >= MAX_TPL_ROWS) {
       errors.push(`เกิน ${MAX_TPL_ROWS} task ต่อ template แถวที่ ${r} เป็นต้นไปไม่ได้นำเข้า`);
       break;
     }
-    const team = col.team ? teamOf(val(row.getCell(col.team))) : null;
+    // "Owner (Who)" is free text: a team's code or name hands the task to that team, anything else stays a name on the PM's own task.
+    const ownerRaw = col.owner ? clean(val(row.getCell(col.owner)), 200) : "";
+    const ownerTeam = ownerRaw ? teamOf(ownerRaw) : null;
+    const team = col.team ? teamOf(val(row.getCell(col.team))) : ownerTeam || null;
+    const owner = ownerRaw && !ownerTeam ? ownerRaw : "";
+    const no = col.no ? Number(val(row.getCell(col.no))) : NaN;
+    const pred = col.pred ? clean(String(val(row.getCell(col.pred))).replace(/[^0-9,;\s]/g, "").replace(/[;\s]+/g, ",").replace(/,+/g, ",").replace(/^,|,$/g, ""), 100) : "";
+    let pct = col.pct ? Number(val(row.getCell(col.pct))) : 0;
+    pct = Number.isFinite(pct) ? Math.max(0, Math.min(100, Math.round(pct <= 1 ? pct * 100 : pct))) : 0;
+    const st = col.status ? String(val(row.getCell(col.status))).trim().toLowerCase() : "";
     if (team === undefined) errors.push(`แถว ${r}: ไม่รู้จักทีม “${clean(val(row.getCell(col.team)), 60)}” (ดูรหัสทีมใน sheet วิธีกรอก)`);
     const s0 = val(row.getCell(col.start));
     const e0 = val(row.getCell(col.end));
@@ -638,7 +692,7 @@ async function parseTemplate(file) {
     if (!okv(s0) || !okv(e0)) errors.push(`แถว ${r}: “เริ่ม” และ “เสร็จ” ต้องเป็นตัวเลข (วันทำการที่) หรือวันที่`);
     else if (s0 instanceof Date !== e0 instanceof Date) errors.push(`แถว ${r}: “เริ่ม” และ “เสร็จ” ต้องเป็นแบบเดียวกัน (ตัวเลขทั้งคู่ หรือวันที่ทั้งคู่)`);
     const md = col.md ? Number(val(row.getCell(col.md))) || 0 : 0;
-    rows.push({ r, ms: ms || "งานทั้งหมด", name, team: team || null, s0, e0, md: Math.max(0, Math.round(md * 2) / 2) });
+    rows.push({ r, ms: ms || "งานทั้งหมด", name, team: team || null, s0, e0, md: Math.max(0, Math.round(md * 2) / 2), owner, no: Number.isInteger(no) && no > 0 ? no : null, pred, pct: st === "completed" ? 100 : pct, st, detail });
   }
   if (!rows.length) throw bad("ไม่พบ task ในไฟล์");
   // Dates → working days from the earliest date in the file.
@@ -655,7 +709,7 @@ async function parseTemplate(file) {
     const start = off(x.s0);
     const end = off(x.e0);
     if (Number.isFinite(start) && Number.isFinite(end) && end < start) errors.push(`แถว ${x.r}: “เสร็จ” ก่อน “เริ่ม”`);
-    m.tasks.push({ name: x.name, team: x.team, start: start || 0, end: Math.max(end || 0, start || 0), md: x.md, ...(day0 && x.s0 instanceof Date && x.e0 instanceof Date ? { sIso: isoOf(x.s0), eIso: isoOf(x.e0) } : {}) });
+    m.tasks.push({ name: x.name, team: x.team, start: start || 0, end: Math.max(end || 0, start || 0), md: x.md, owner: x.owner, no: x.no, pred: x.pred, pct: x.pct, st: x.st, detail: x.detail, ...(day0 && x.s0 instanceof Date && x.e0 instanceof Date ? { sIso: isoOf(x.s0), eIso: isoOf(x.e0) } : {}) });
   }
   return { milestones, tasks: rows.length, errors: errors.slice(0, 30), moreErrors: Math.max(0, errors.length - 30), fromDates: !!day0 };
 }
@@ -677,7 +731,7 @@ async function importTemplate(user, b) {
   await q(
     `INSERT INTO project_templates (name, milestones, updated_by, updated_at) VALUES ($1,$2,$3,now())
      ON CONFLICT (name) DO UPDATE SET milestones = EXCLUDED.milestones, updated_by = EXCLUDED.updated_by, updated_at = now()`,
-    [name, JSON.stringify(out.milestones.map((m) => ({ name: m.name, tasks: m.tasks.map(({ name: n, team, start, end, md }) => ({ name: n, team, start, end, md })) }))), user.id]
+    [name, JSON.stringify(out.milestones.map((m) => ({ name: m.name, tasks: m.tasks.map(({ name: n, team, start, end, md, owner, no, pred, detail }) => ({ name: n, team, start, end, md, ...(owner ? { owner } : {}), ...(no ? { no } : {}), ...(pred ? { pred } : {}), ...(detail ? { detail } : {}) })) }))), user.id]
   );
   await audit(user, "project_template_import", name, { tasks: out.tasks, milestones: out.milestones.length, file: clean(b.file && b.file.name, 150) });
   return { saved: true, ...summary };
@@ -710,9 +764,11 @@ async function importTasks(user, p, b) {
       let k = (await c.query("SELECT COALESCE(max(sort),-1)+1 AS n FROM project_tasks WHERE milestone_id = $1", [mid])).rows[0].n;
       for (const t of m.tasks) {
         const r = await c.query(
-          `INSERT INTO project_tasks (project_id, milestone_id, name, kind, team, start_date, due_date, base_date, kpi_due, sr_open, md_est, sort, created_by)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$7,$8,$9,$10,$11) RETURNING id`,
-          [p.id, mid, t.name, t.team ? "sr" : "own", t.team, t.s, t.e, t.team ? "auto" : "now", t.md, k++, user.id]
+          `INSERT INTO project_tasks (project_id, milestone_id, name, kind, team, start_date, due_date, base_date, kpi_due, sr_open, md_est, sort, created_by, owner_text, plan_no, pred, pct, status, done_at, detail)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING id`,
+          // The file's progress is kept for the PM's own tasks; a task handed to a team takes its status from the service request.
+          [p.id, mid, t.name, t.team ? "sr" : "own", t.team, t.s, t.e, t.team ? "auto" : "now", t.md, k++, user.id, t.owner || null, t.no || null, t.pred || null, t.team ? 0 : t.pct || 0,
+            t.team ? "todo" : t.st === "completed" ? "done" : t.st === "in progress" || (t.pct > 0 && t.pct < 100) ? "doing" : "todo", !t.team && t.st === "completed" ? t.e : null, t.detail || null]
         );
         await addEvent(c, r.rows[0].id, "created", null, { import: clean(b.file && b.file.name, 150) }, user.id);
       }
@@ -1048,7 +1104,7 @@ function mount(api, { wrap }) {
   api.get("/project-templates/form.xlsx", wrap(async (req, res) => {
     if (!(await isPm(req.user))) throw bad("ไม่มีสิทธิ์", 403);
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-    res.setHeader("Content-Disposition", "attachment; filename=project-template-form.xlsx");
+    res.setHeader("Content-Disposition", "attachment; filename=TemplateProjectPlan.xlsx");
     res.end(await templateForm());
   }));
   api.post("/project-templates/import", wrap(async (req, res) => res.json({ ok: true, ...(await importTemplate(req.user, req.body || {})) })));
@@ -1116,6 +1172,13 @@ function mount(api, { wrap }) {
     const { p } = await projectFor(req.user, req.params.id, { edit: true });
     await saveTemplate(req.user, p, req.body || {});
     res.json({ ok: true });
+  }));
+  api.get("/projects/:id/plan.xlsx", wrap(async (req, res) => {
+    const { p, full } = await projectFor(req.user, req.params.id);
+    if (!full) throw bad("ดาวน์โหลดแผนทั้งโปรเจกต์ได้เฉพาะผู้ที่เห็นทั้งโปรเจกต์", 403);
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename=ProjectPlan-${p.id}.xlsx`);
+    res.send(await planExport(p, await tasksOf(p.id)));
   }));
   api.post("/projects/:id/import", wrap(async (req, res) => {
     const { p } = await projectFor(req.user, req.params.id, { edit: true });
