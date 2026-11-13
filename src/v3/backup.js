@@ -186,7 +186,7 @@ async function record(kind, result) {
 }
 async function alert(subject, text) {
   await telegram.sendText(`⚠️ ${subject}\n${text}`).catch(() => {});
-  const admins = (await all("SELECT email FROM users WHERE active AND role = 'admin' AND email IS NOT NULL")).map((r) => r.email);
+  const admins = await require("./adminnotify").adminEmails();
   if (admins.length) await graph.sendMail({ to: admins, cc: [], subject: `[Sino Case SLA] ${subject}`, html: shell("#C0283C", `<p style="white-space:pre-wrap">${esc(text)}\n\nดูสถานะ: ${esc(config3.baseUrl)}/#/settings</p>`) }).catch(() => {});
 }
 

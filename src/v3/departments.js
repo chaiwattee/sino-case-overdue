@@ -34,7 +34,7 @@ async function check(dept, other, current) {
 
 /** Email the admins that someone asked for a department that is not in the list yet. */
 async function notifyRequest(user, name) {
-  const admins = (await all("SELECT email FROM users WHERE active AND role = 'admin' AND email IS NOT NULL")).map((r) => r.email);
+  const admins = await require("./adminnotify").adminEmails();
   if (!admins.length) return;
   const graph = require("../graph");
   const { esc, shell, button } = require("../emails");

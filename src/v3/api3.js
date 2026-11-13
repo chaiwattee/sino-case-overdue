@@ -69,6 +69,7 @@ api.put("/profile/lang", wrap(async (req, res) => {
 }));
 require("./customers").mount(api, { wrap });
 require("./teamsnotify").mount(api, { wrap, need });
+require("./adminnotify").mount(api, { wrap, need });
 require("./teamadmin").mount(api, { wrap, need });
 require("./skills").mount(api, { wrap });
 require("./insights").mount(api, { wrap });

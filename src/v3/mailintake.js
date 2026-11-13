@@ -501,7 +501,7 @@ async function alertStuck(prev, msg) {
   await setSetting("intake_email_alert_at", new Date().toISOString());
   const text = `อ่านกล่องจดหมายแจ้งเคสไม่ได้มากกว่า 30 นาที: ${msg}\nลูกค้าที่ส่ง email มาจะยังไม่ได้เลข REQ ตรวจที่ ${config3.baseUrl}/#/intake-admin`;
   await telegram.sendText("⚠️ " + text).catch(() => {});
-  const admins = (await all("SELECT email FROM users WHERE active AND role = 'admin' AND email IS NOT NULL")).map((r) => r.email);
+  const admins = await require("./adminnotify").adminEmails();
   if (admins.length) await graph.sendMail({ to: admins, cc: [], subject: "[Sino Case SLA] อ่านกล่องจดหมายแจ้งเคสไม่ได้", html: shell("#C0283C", `<p style="white-space:pre-wrap">${esc(text)}</p>`) }).catch(() => {});
 }
 

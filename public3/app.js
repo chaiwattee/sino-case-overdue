@@ -2194,6 +2194,7 @@ ${newSites.length ? `<div class="banner warn">มีรายการที่�
 <section class="card" id="lb-card"><div class="title"><h2>อันดับ KPI</h2><span>กำลังโหลด…</span></div></section>
 <section class="card" id="hol-card"><div class="title"><h2>วันหยุดบริษัท</h2><span>กำลังโหลด…</span></div></section>
 <section class="card" id="pjset-card"><div class="title"><h2>โปรเจกต์</h2><span>กำลังโหลด…</span></div></section>
+<section class="card" id="adminnotify-card"><div class="title"><h2>ผู้รับแจ้งเตือนของระบบ</h2><span>กำลังโหลด…</span></div></section>
 <section class="card" id="bk-card"><div class="title"><h2>Backup และทดสอบ restore</h2><span>กำลังโหลด…</span></div></section>
 <section class="card" id="ae"><div class="title"><h2>Email แจ้งเตือน User</h2><span>ผู้รับ email แจ้งเตือนแต่ละรอบ</span></div>
 <div class="tablewrap"><table style="min-width:720px"><thead><tr><th>รอบ</th><th>ส่งเมื่อ</th><th>ถึง</th><th style="text-align:center">CC รายชื่อด้านล่าง</th><th></th></tr></thead><tbody>
@@ -2265,6 +2266,7 @@ ${s.annualReports.map((a) => `<tr><td style="font-weight:600">${a.year + 543} ($
     loadBackupCard();
     bindHolidays();
     bindProjectSettings();
+    bindAdminNotify();
     bindLeaderboardSettings();
     bindDepartments();
     bindTeamsNotify();
@@ -4188,6 +4190,28 @@ ${r.status === "info" ? `<label class="f">ข้อความถึง Manager
           }, r.status === "info" ? "ส่งใหม่" : "บันทึก");
         const fp = filePicker(f, m);
       };
+  }
+
+  async function bindAdminNotify() {
+    const el = document.getElementById("adminnotify-card");
+    if (!el) return;
+    const s = await api("/settings/admin-notify").catch(() => null);
+    if (!s) return el.remove();
+    el.innerHTML = `<div class="title"><h2>ผู้รับแจ้งเตือนของระบบ</h2><span>สำรองข้อมูลไม่สำเร็จ · อ่านกล่องจดหมายแจ้งเคสไม่ได้ · มีคนขอเพิ่มหน่วยงาน</span></div>
+<form id="adminnotify" class="stack"><p class="muted" style="margin:0">Admin ทุกคนได้รับอยู่แล้ว: ${s.admins.map((a) => `${esc(a.name)} (${esc(a.email || "-")})`).join(", ") || "-"}${s.admins.length < 2 ? ` <span class="chip c-r1">มี Admin คนเดียว ควรเพิ่มผู้รับสำรอง</span>` : ""}</p>
+<label class="f">ผู้รับเพิ่ม (email คั่นด้วย , สูงสุด 10)<input name="emails" maxlength="1500" placeholder="เช่น it-support@sinostech.co.th, manager@sinostech.co.th" value="${esc(s.emails.join(", "))}"><span class="hint">ผู้รับเพิ่มได้ email แจ้งเตือนอย่างเดียว ไม่ได้สิทธิ์ Admin ในระบบ · การแจ้งว่าแอปไม่ตอบสนองส่งเข้า Teams (ช่องกลาง) และ Telegram</span></label>
+<div class="right"><button class="btn primary" type="submit">บันทึก</button></div></form>`;
+    const f = document.getElementById("adminnotify");
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      try {
+        await post("/settings/admin-notify", { emails: f.emails.value }, "PUT");
+        toast("บันทึกแล้ว");
+        bindAdminNotify();
+      } catch (err) {
+        toast(err.message, 6000);
+      }
+    };
   }
 
   async function bindProjectSettings() {

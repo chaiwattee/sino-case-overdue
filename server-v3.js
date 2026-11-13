@@ -1,4 +1,9 @@
 // Sino Case SLA v3: cases are entered on the web and stored in PostgreSQL.
+// Every log line starts with the local time, so an error in "pm2 logs" can be dated.
+for (const k of ["log", "error", "warn"]) {
+  const orig = console[k].bind(console);
+  console[k] = (...a) => orig(new Date().toLocaleString("sv-SE", { timeZone: process.env.TZ || "Asia/Bangkok" }), ...a);
+}
 const path = require("path");
 const fs = require("fs");
 const https = require("https");
@@ -53,7 +58,16 @@ app.use((req, res, next) => {
   next();
 });
 
-app.get("/health", (req, res) => res.json({ ok: true }));
+// Answers only when the database answers too: this is what scripts/watchdog.js asks every minute.
+const startedAt = Date.now();
+app.get("/health", async (req, res) => {
+  try {
+    await Promise.race([require("./src/v3/db").q("SELECT 1"), new Promise((_, no) => setTimeout(() => no(new Error("ฐานข้อมูลไม่ตอบภายใน 5 วินาที")), 5000))]);
+    res.json({ ok: true, uptimeSec: Math.round((Date.now() - startedAt) / 1000) });
+  } catch (e) {
+    res.status(503).json({ ok: false, error: `ฐานข้อมูลมีปัญหา: ${String(e.message).slice(0, 200)}` });
+  }
+});
 app.get("/robots.txt", (req, res) => res.type("text/plain").send("User-agent: *\nDisallow: /\n"));
 // RFC 9116: where to report security problems with this site.
 app.get(["/.well-known/security.txt", "/security.txt"], (req, res) => {
