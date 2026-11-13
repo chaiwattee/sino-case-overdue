@@ -178,7 +178,7 @@ api.get("/overview", wrap(async (req, res) => {
     changes,
     topCases: open.filter((c) => c.stage === "overdue" || c.stage === "r2").sort((a, b) => (b.age || 0) - (a.age || 0)).slice(0, 10).map(ser3),
     runway: open.filter((c) => c.age != null).map((c) => ({
-      id: c.id, caseNo: c.caseNo, csNumber: c.csNumber, site: c.site, owner: c.owner, ownerId: ownerId(c), age: c.age, stage: c.stage, daysOverdue: c.daysOverdue || 0,
+      id: c.id, caseNo: c.caseNo, csNumber: c.csNumber, site: c.site, owner: c.owner, ownerId: ownerId(c), age: c.age, stage: c.stage, daysOverdue: c.daysOverdue || 0, slaDays: c.slaDays,
     })),
   });
 }));
@@ -186,7 +186,7 @@ api.get("/overview", wrap(async (req, res) => {
 function ser3(c) {
   const iso = (x) => (x instanceof Date ? d.toISODate(x) : x || null);
   return { ...ser(c), caseNo: c.caseNo, caseNoOld: c.caseNoOld || "", extCount: c.extCount || 0, origDueDate: iso(c.origDueDate), periodStart: iso(c.periodStart), totalAge: c.totalAge,
-    pendingExtId: c.pendingExtId, lastExt: c.lastExt, closedInExtension: c.closedInExtension ?? null, severity: c.severity, id: c.id, team: c.team,
+    pendingExtId: c.pendingExtId, lastExt: c.lastExt, closedInExtension: c.closedInExtension ?? null, severity: c.severity, id: c.id, team: c.team, slaDays: c.slaDays,
     customerUnconfirmed: c.customerUnconfirmed || "",
     resolution: c.resolution || "", rootCause: c.rootCause || "", resolvedAt: c.resolvedAt || null, resolvedBy: c.resolvedBy || "", ownerUserId: c.owner_id, updatedAt: c.updatedAt, startAt: c.startAt,
     rcaText: c.rcaText || "", rcaCategory: c.rcaCategory || "", rcaDate: c.rcaDate || "", rcaFileName: c.rcaFileName || "", rcaBy: c.rcaBy || "", rcaAt: c.rcaAt || null,
@@ -807,7 +807,7 @@ api.put("/permissions", need("users_manage"), wrap(async (req, res) => {
     clean[r] = {};
     for (const p of perms.PERMS) {
       const v = m[r]?.[p.key];
-      if (["all", "own", "none"].includes(v)) clean[r][p.key] = v;
+      if (["all", "none"].includes(v) || (v === "own" && !p.binary)) clean[r][p.key] = v;
     }
   }
   await setSetting("permissions", clean);

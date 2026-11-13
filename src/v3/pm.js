@@ -19,7 +19,9 @@ function addMonths(iso, n) {
   x.setDate(Math.min(day, new Date(x.getFullYear(), x.getMonth() + 1, 0).getDate()));
   return d.toISODate(x);
 }
-const canManage = (user) => user.role === "admin" || user.role === "manager";
+/** May set up and edit PM schedules: the "pm_manage" permission (admin, manager and viewer by default). */
+const canManage = (user) => perms.can(user, "pm_manage");
+const DEFAULT_SLA = 14; // days a PM case has from its Start date (ordinary cases: SLA_DAYS)
 
 async function list(user) {
   const scope = perms.teamScope(user);
@@ -42,7 +44,7 @@ async function scheduleFor(user, id, { manage = false } = {}) {
   if (!p) throw bad("ไม่พบงาน PM", 404);
   const scope = perms.teamScope(user);
   if (scope && !scope.includes(p.team)) throw bad("เฉพาะงาน PM ของทีมคุณ", 403);
-  if (manage && !canManage(user)) throw bad("เฉพาะ Admin / Manager", 403);
+  if (manage && !(await canManage(user))) throw bad("ไม่มีสิทธิ์ตั้งหรือแก้งาน PM", 403);
   return p;
 }
 function removeStored(file) {
@@ -108,11 +110,13 @@ function checkBody(b) {
   if (!next) throw bad("ใส่วันที่รอบถัดไป");
   const checklist = (Array.isArray(b.checklist) ? b.checklist : String(b.checklist || "").split("\n")).map((x) => clean(x, 300)).filter(Boolean).slice(0, 40);
   if (!checklist.length) throw bad("ใส่ checklist อย่างน้อย 1 ข้อ");
-  return { title, site, product: clean(b.product, 60) || null, team: String(b.team || ""), owner_id: Number(b.owner_id) || null, every_months: every, next_date: d.toISODate(next), checklist, note: clean(b.note, 1000) || null, active: b.active !== false };
+  const sla = b.sla_days == null || b.sla_days === "" ? DEFAULT_SLA : Number(b.sla_days);
+  if (!(Number.isInteger(sla) && sla >= 1 && sla <= 90)) throw bad("SLA ของเคส PM ต้องอยู่ระหว่าง 1–90 วัน");
+  return { sla_days: sla, title, site, product: clean(b.product, 60) || null, team: String(b.team || ""), owner_id: Number(b.owner_id) || null, every_months: every, next_date: d.toISODate(next), checklist, note: clean(b.note, 1000) || null, active: b.active !== false };
 }
 
 async function save(user, id, b) {
-  if (!canManage(user)) throw bad("เฉพาะ Admin / Manager ตั้งงาน PM ได้", 403);
+  if (!(await canManage(user))) throw bad("ไม่มีสิทธิ์ตั้งหรือแก้งาน PM", 403);
   const x = checkBody(b);
   if (!(await one("SELECT 1 FROM teams WHERE code = $1", [x.team]))) throw bad("เลือกทีม");
   if (!(await one("SELECT 1 FROM lookups WHERE kind = 'site' AND lower(value) = lower($1) AND NOT pending", [x.site]))) throw bad("เลือกลูกค้าจากรายการ (ลูกค้าที่อนุมัติแล้ว)");
@@ -124,15 +128,15 @@ async function save(user, id, b) {
     const scope = perms.teamScope(user);
     if (scope && !scope.includes(old.team)) throw bad("แก้ได้เฉพาะงาน PM ของทีมคุณ", 403);
     await q(
-      `UPDATE pm_schedules SET title=$2, site=$3, product=$4, team=$5, owner_id=$6, every_months=$7, next_date=$8, checklist=$9, note=$10, active=$11, updated_at=now() WHERE id=$1`,
-      [id, x.title, x.site, x.product, x.team, x.owner_id, x.every_months, x.next_date, x.checklist, x.note, x.active]
+      `UPDATE pm_schedules SET title=$2, site=$3, product=$4, team=$5, owner_id=$6, every_months=$7, next_date=$8, checklist=$9, note=$10, active=$11, sla_days=$12, updated_at=now() WHERE id=$1`,
+      [id, x.title, x.site, x.product, x.team, x.owner_id, x.every_months, x.next_date, x.checklist, x.note, x.active, x.sla_days]
     );
-    await audit(user, "pm_update", x.title, { id, site: x.site, every: x.every_months, next: x.next_date, active: x.active });
+    await audit(user, "pm_update", x.title, { id, site: x.site, every: x.every_months, next: x.next_date, active: x.active, sla: x.sla_days });
     return id;
   }
   const r = await one(
-    `INSERT INTO pm_schedules (title, site, product, team, owner_id, every_months, next_date, checklist, note, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
-    [x.title, x.site, x.product, x.team, x.owner_id, x.every_months, x.next_date, x.checklist, x.note, user.id]
+    `INSERT INTO pm_schedules (title, site, product, team, owner_id, every_months, next_date, checklist, note, created_by, sla_days) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
+    [x.title, x.site, x.product, x.team, x.owner_id, x.every_months, x.next_date, x.checklist, x.note, user.id, x.sla_days]
   );
   await audit(user, "pm_create", x.title, { id: r.id, site: x.site, every: x.every_months, next: x.next_date });
   return r.id;
@@ -147,8 +151,8 @@ async function createFromProject(user, b) {
   const owner = x.owner_id ? await one("SELECT u.id, u.display_name, u.email FROM users u JOIN user_teams t ON t.user_id = u.id WHERE u.id = $1 AND u.active AND u.role IN ('engineer','manager') AND t.team = $2", [x.owner_id, x.team]) : null;
   if (!owner) throw bad("เลือกผู้รับผิดชอบ PM จากสมาชิกทีมที่เลือก");
   const r = await one(
-    `INSERT INTO pm_schedules (title, site, product, team, owner_id, every_months, next_date, checklist, note, created_by, project_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
-    [x.title, x.site, x.product, x.team, owner.id, x.every_months, x.next_date, x.checklist, x.note || `สร้างตอนส่งมอบโปรเจกต์ ${clean(b.project_name, 200)}`, user.id, Number(b.project_id) || null]
+    `INSERT INTO pm_schedules (title, site, product, team, owner_id, every_months, next_date, checklist, note, created_by, project_id, sla_days) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+    [x.title, x.site, x.product, x.team, owner.id, x.every_months, x.next_date, x.checklist, x.note || `สร้างตอนส่งมอบโปรเจกต์ ${clean(b.project_name, 200)}`, user.id, Number(b.project_id) || null, x.sla_days]
   );
   await audit(user, "pm_create", x.title, { id: r.id, site: x.site, every: x.every_months, next: x.next_date, project: Number(b.project_id) || null });
   const mgrs = (await all("SELECT DISTINCT u.email FROM users u JOIN user_teams t ON t.user_id = u.id WHERE u.active AND u.role = 'manager' AND t.team = $1 AND u.email IS NOT NULL", [x.team])).map((m) => m.email);
@@ -178,7 +182,7 @@ async function openRound(p, { by = null, startDate } = {}) {
       note: `งาน PM ตามรอบ ทุก ${p.every_months} เดือน${p.note ? `\n${p.note}` : ""}`,
       detail: `เปิดอัตโนมัติจากงาน PM "${p.title}" (รอบวันที่ ${d.thaiDate(d.fromISODate(start))})\nChecklist:\n${p.checklist.map((c, i) => `${i + 1}. ${c}`).join("\n")}`,
     },
-    { ownerId: owner ? owner.id : null, startDate: start }
+    { ownerId: owner ? owner.id : null, startDate: start, slaDays: p.sla_days || DEFAULT_SLA }
   );
   await tx(async (c) => {
     await c.query("UPDATE cases SET pm_schedule_id = $2 WHERE id = $1", [r.id, p.id]);
@@ -193,7 +197,7 @@ async function openRound(p, { by = null, startDate } = {}) {
       .sendMail({
         to: [owner.email], cc: [],
         subject: `[งาน PM] ${p.site} · ${p.title} · ${kase.caseNo}`,
-        html: shell("#1F5FBF", `<p style="margin:0 0 12px">ระบบเปิดเคสงาน PM ตามรอบให้คุณแล้ว SLA ${require("../config").config.slaDays} วัน ปิดเคสได้เมื่อติ๊ก checklist ครบ${p.ma_file_name ? ` และอัปโหลดแบบฟอร์ม MA (${p.ma_file_name}) ที่กรอกแล้ว ดาวน์โหลดแบบฟอร์มได้ในหน้าเคส` : ""}</p>
+        html: shell("#1F5FBF", `<p style="margin:0 0 12px">ระบบเปิดเคสงาน PM ตามรอบให้คุณแล้ว SLA ${kase.slaDays} วัน (ครบกำหนด ${d.thaiDate(kase.dueDate)}) ปิดเคสได้เมื่อติ๊ก checklist ครบ${p.ma_file_name ? ` และอัปโหลดแบบฟอร์ม MA (${p.ma_file_name}) ที่กรอกแล้ว ดาวน์โหลดแบบฟอร์มได้ในหน้าเคส` : ""}</p>
 ${fieldTable([["เคส", kase.caseNo], ["ลูกค้า", p.site], ["งาน", p.title], ["Checklist", p.checklist.map((c, i) => `${i + 1}. ${c}`).join("<br>")]])}
 <p style="margin:16px 0 0">${button(kase.caseUrl, "เปิดเคส")}</p>`),
       })
@@ -242,12 +246,12 @@ async function checkClose(caseId, status) {
 
 function mount(api, { wrap, loadVisible }) {
   api.get("/pm", wrap(async (req, res) => {
-    res.json({ items: await list(req.user), canManage: canManage(req.user) });
+    res.json({ items: await list(req.user), canManage: await canManage(req.user), defaultSla: DEFAULT_SLA });
   }));
   api.post("/pm", wrap(async (req, res) => res.json({ ok: true, id: await save(req.user, null, req.body || {}) })));
   api.put("/pm/:id(\\d+)", wrap(async (req, res) => res.json({ ok: true, id: await save(req.user, Number(req.params.id), req.body || {}) })));
   api.post("/pm/:id(\\d+)/open-now", wrap(async (req, res) => {
-    if (!canManage(req.user)) throw bad("เฉพาะ Admin / Manager", 403);
+    if (!(await canManage(req.user))) throw bad("ไม่มีสิทธิ์ตั้งหรือแก้งาน PM", 403);
     const p = await one("SELECT * FROM pm_schedules WHERE id = $1", [Number(req.params.id)]);
     if (!p) throw bad("ไม่พบงาน PM", 404);
     const scope = perms.teamScope(req.user);

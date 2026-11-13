@@ -94,7 +94,11 @@ function isClosed(c) {
 /** Add computed SLA fields (age, due, stage …) as of `today`. */
 function withStage(c, today = todayFn()) {
   const x = { ...c };
-  x.dueDate = c.startDate ? addDays(c.startDate, config.slaDays) : null;
+  // A case may carry its own SLA length (PM cases: 14 days). Alert rounds keep the same distance from Due as ordinary cases.
+  const sla = c.slaDays || config.slaDays;
+  const shift = sla - config.slaDays;
+  x.slaDays = sla;
+  x.dueDate = c.startDate ? addDays(c.startDate, sla) : null;
   if (isClosed(c)) {
     x.stage = "closed";
     const closedOn = c.endDate || null;
@@ -108,8 +112,8 @@ function withStage(c, today = todayFn()) {
     x.daysLeft = daysBetween(today, x.dueDate);
     x.daysOverdue = x.daysLeft < 0 ? -x.daysLeft : 0;
     if (x.daysLeft < 0) x.stage = "overdue";
-    else if (x.age >= config.alert2Day) x.stage = "r2";
-    else if (x.age >= config.alert1Day) x.stage = "r1";
+    else if (x.age >= config.alert2Day + shift) x.stage = "r2";
+    else if (x.age >= config.alert1Day + shift) x.stage = "r1";
     else x.stage = "normal";
   }
   x.stageLabel = STAGES[x.stage].label;

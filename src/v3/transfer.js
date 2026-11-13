@@ -224,7 +224,7 @@ async function accept(user, id, b) {
         note: [kase.note, `รับโอนจาก ${kase.caseNo}${csNote}`].filter(Boolean).join("\n"), detail, status: "In Progress",
         customer_unconfirmed: kase.customerUnconfirmed || undefined,
       },
-      { ownerId: owner.id }
+      { ownerId: owner.id, slaDays: kase.slaDays }
     );
     newId = r.id;
   } catch (e) {

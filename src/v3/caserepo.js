@@ -68,6 +68,7 @@ function toCase(r) {
     key: `v3:${r.id}`,
     id: r.id,
     owner_id: r.owner_id,
+    slaDays: r.sla_days || null,
     team: r.team,
     source: r.team,
     sourceLabel: r.team_label,
@@ -122,7 +123,7 @@ function toCase(r) {
   c.lastExt = r.last_ext || null;
   if (ext > 0) {
     const due = d.fromISODate(r.due_date);
-    const periodStart = d.addDays(due, -config.slaDays);
+    const periodStart = d.addDays(due, -c.slaDays);
     c.dueDate = due;
     c.periodStart = periodStart;
     c.alertKey = `${c.key}|e${ext}`;
@@ -215,10 +216,11 @@ async function logChange(client, kase, user, field, oldV, newV, reason) {
 
 const clean = (s, max = 2000) => (s === undefined || s === null ? null : String(s).trim().slice(0, max));
 
-async function createCase(user, body, { ownerId, startDate } = {}) {
+async function createCase(user, body, { ownerId, startDate, slaDays } = {}) {
   const today = d.today();
   const start = startDate ? d.fromISODate(startDate) : today;
-  const due = d.addDays(start, config.slaDays);
+  const sla = Number(slaDays) > 0 && Number(slaDays) !== config.slaDays ? Number(slaDays) : null; // null = the default SLA
+  const due = d.addDays(start, sla || config.slaDays);
   return tx(async (c) => {
     // Customer not known yet: keep a placeholder name out of the customer dropdown.
     const site = body.customer_unconfirmed ? { value: clean(body.site, 120), created: false } : await ensureLookup(c, "site", body.site, user);
@@ -231,12 +233,12 @@ async function createCase(user, body, { ownerId, startDate } = {}) {
     if (closed && !body.legacy_key && site.created) throw Object.assign(new Error(`ลูกค้า "${site.value}" ยังไม่อยู่ในรายการ ต้องให้ Manager อนุมัติก่อน เปิดเคสเป็นสถานะที่ยังไม่ปิดก่อน`), { status: 400 });
     const r = await c.query(
       `INSERT INTO cases (team, cs_number, status, site, product, owner_id, task, note, start_date, due_date, end_date,
-         closed_at, created_by, legacy_key, start_at, severity)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, COALESCE($15, now()), COALESCE($16, 'High')) RETURNING id`,
+         closed_at, created_by, legacy_key, start_at, severity, sla_days)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, COALESCE($15, now()), COALESCE($16, 'High'), $17) RETURNING id`,
       [body.team, clean(body.cs_number, 60), status, site.value, clean(body.product, 60), ownerId || user?.id,
         clean(body.task, 300), clean(body.note), d.toISODate(start), d.toISODate(due),
         closed ? d.toISODate(body.end_date ? d.fromISODate(body.end_date) : today) : null, closed ? new Date() : null,
-        user?.id || null, body.legacy_key || null, body.start_at || null, severityOf(body.severity)]
+        user?.id || null, body.legacy_key || null, body.start_at || null, severityOf(body.severity), sla]
     );
     const id = r.rows[0].id;
     if (body.customer_unconfirmed) await c.query("UPDATE cases SET customer_unconfirmed = $2 WHERE id = $1", [id, clean(body.customer_unconfirmed, 200)]);
@@ -397,7 +399,7 @@ async function editStartDate(user, kase, newDate, reason) {
   if (oldIso === iso) return;
   await tx(async (c) => {
     await c.query("UPDATE cases SET start_date=$1, due_date=$2, updated_at=now() WHERE id=$3", [
-      iso, d.toISODate(d.addDays(start, config.slaDays * (1 + (kase.extCount || 0)))), kase.id,
+      iso, d.toISODate(d.addDays(start, (kase.slaDays || config.slaDays) * (1 + (kase.extCount || 0)))), kase.id,
     ]);
     await logChange(c, kase, user, "start_date", oldIso, iso, String(reason).trim());
     await addActivity(c, kase.id, user, { kind: "แก้ Start date", detail: `${oldIso} → ${iso} เหตุผล: ${String(reason).trim()}`, system: true });

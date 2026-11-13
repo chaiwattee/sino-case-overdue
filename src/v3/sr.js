@@ -381,6 +381,8 @@ const MEETING_MODE = { onsite: "Onsite (ที่ลูกค้า)", online: "
 const meetingFacts = (s) => (s.request_kind === "meeting" ? [["ประเภทคำขอ", `ขอให้เข้าร่วม Meeting · ${MEETING_MODE[s.meeting_mode] || "-"}`], ["เหตุผลที่ต้องให้ทีมเข้าร่วม", s.meeting_reason || "-"]] : []);
 
 async function create(user, b) {
+  // Staff roles need the "sr_create" permission; requester accounts exist only to send requests.
+  if (user.role !== "requester" && !(await perms.can(user, "sr_create"))) throw bad("บทบาทของคุณยังไม่ได้รับสิทธิ์ส่งคำขอบริการ ติดต่อ Admin", 403);
   const miss = profileMissing(user);
   if (miss.length) throw bad("กรอกข้อมูลของคุณ (หน่วยงาน ตำแหน่ง เบอร์โทร) ให้ครบก่อนส่งคำขอ", 428);
   const team = clean(b.team, 40);

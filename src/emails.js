@@ -61,7 +61,7 @@ function caseAlertEmail(c, type) {
   let lead;
   if (type === "r1") {
     subject = `[แจ้งเตือนรอบ 1] เคส ${id} เหลือ ${c.daysLeft} วันก่อนครบกำหนด`;
-    lead = `เคสด้านล่างเปิดมาแล้ว <strong>${c.age} วัน</strong> ต้องปิดภายใน ${config.slaDays} วัน (ครบกำหนด ${esc(
+    lead = `เคสด้านล่างเปิดมาแล้ว <strong>${c.age} วัน</strong> ต้องปิดภายใน ${c.slaDays || config.slaDays} วัน (ครบกำหนด ${esc(
       thaiDate(c.dueDate)
     )})`;
   } else if (type === "r2") {

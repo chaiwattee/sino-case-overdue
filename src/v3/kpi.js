@@ -111,7 +111,7 @@ async function compute(ym) {
   // Cases the owner worked on in the month: open at any point during it.
   const cases = await all(
     `SELECT c.id, c.case_no, c.owner_id, c.site, c.product, c.severity, c.task, c.start_date, c.due_date, c.end_date, c.start_at, c.created_at,
-            c.closed_at, c.ext_count, c.legacy_key, c.resolution, c.team, c.cs_number, c.complexity, c.status, u.display_name AS owner_name, u.email AS owner_email, u.active,
+            c.closed_at, c.ext_count, c.sla_days, c.legacy_key, c.resolution, c.team, c.cs_number, c.complexity, c.status, u.display_name AS owner_name, u.email AS owner_email, u.active,
             u.dedicated_customer
        FROM cases c JOIN users u ON u.id = c.owner_id
       WHERE c.start_date <= $2 AND (c.end_date IS NULL OR c.end_date >= $1)`,
@@ -193,7 +193,7 @@ async function compute(ym) {
     let wGot = 0;
     let onTime = 0;
     closed.forEach((c) => {
-      const origDue = d.toISODate(d.addDays(d.fromISODate(c.start_date), config.slaDays));
+      const origDue = d.toISODate(d.addDays(d.fromISODate(c.start_date), c.sla_days || config.slaDays));
       const ok = c.end_date <= origDue;
       const inExt = !ok && c.ext_count > 0 && c.end_date <= c.due_date;
       const w = c.severity === "Critical" ? 2 : 1;

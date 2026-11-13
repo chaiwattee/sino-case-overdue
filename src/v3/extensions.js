@@ -35,19 +35,20 @@ async function request(user, kase, b) {
   if (!approver) throw bad("กรุณาเลือก Manager ที่จะอนุมัติ");
   if (approver.id === user.id && user.role !== "admin") throw bad("อนุมัติคำขอของตัวเองไม่ได้ เลือก Manager คนอื่น");
   const oldDue = d.toISODate(kase.dueDate);
-  const newDue = d.toISODate(d.addDays(kase.dueDate, config.slaDays));
+  const days = kase.slaDays || config.slaDays; // PM cases extend by their own SLA length
+  const newDue = d.toISODate(d.addDays(kase.dueDate, days));
   const ext = await tx(async (c) => {
     const seq = (await c.query("SELECT count(*)::int AS n FROM case_extensions WHERE case_id = $1 AND status <> 'cancelled'", [kase.id])).rows[0].n + 1;
     const r = await c.query(
       `INSERT INTO case_extensions (case_id, seq, reason, requested_by, approver_id, old_due, new_due, days)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
-      [kase.id, seq, reason, user.id, approver.id, oldDue, newDue, config.slaDays]
+      [kase.id, seq, reason, user.id, approver.id, oldDue, newDue, days]
     ).catch((e) => {
       if (e.code === "23505") throw bad("เคสนี้มีคำขอขยายเวลาที่รออนุมัติอยู่แล้ว");
       throw e;
     });
     await c.query("INSERT INTO case_activities (case_id, activity_date, kind, detail, is_system, created_by) VALUES ($1,$2,$3,$4,true,$5)", [
-      kase.id, d.toISODate(d.today()), "ขอขยายเวลา", `คำขอขยายครั้งที่ ${seq} (${config.slaDays} วัน) Due ${th(oldDue)} → ${th(newDue)} ส่งให้ ${approver.display_name} อนุมัติ เหตุผล: ${reason}`, user.id,
+      kase.id, d.toISODate(d.today()), "ขอขยายเวลา", `คำขอขยายครั้งที่ ${seq} (${days} วัน) Due ${th(oldDue)} → ${th(newDue)} ส่งให้ ${approver.display_name} อนุมัติ เหตุผล: ${reason}`, user.id,
     ]);
     return { id: r.rows[0].id, seq };
   });
