@@ -918,3 +918,14 @@ tr.pj-off td { opacity: .55; }
 .sr-scope-p .chip { display: inline-flex; gap: 5px; }
 .sr-scope-n b { font-size: 30px; line-height: 1; font-weight: 700; margin-right: 4px; }
 .sr-scope-p { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; min-height: 24px; }
+
+/* Workload page */
+.wl-bar { display: flex; height: 14px; border-radius: 7px; overflow: hidden; background: var(--line); min-width: 8px; }
+.wl-bar i, .wl-key { display: block; }
+.w-case { background: var(--accent); } .w-sr { background: #9B59B6; } .w-task { background: var(--normal); }
+.wl-key { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin: 0 4px 0 10px; vertical-align: baseline; }
+/* Customer satisfaction: 1–5 distribution */
+.csat-dist { display: flex; gap: 8px; align-items: flex-end; height: 56px; margin-top: 6px; }
+.csat-dist div { flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 2px; }
+.csat-dist i { display: block; width: 100%; min-height: 2px; border-radius: 3px 3px 0 0; background: var(--accent); }
+.csat-dist span { font-size: 11px; color: var(--muted); }

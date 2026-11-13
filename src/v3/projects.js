@@ -140,7 +140,17 @@ const serProject = (p) => ({
 async function tasksOf(projectId, hol) {
   hol = hol || (await sr.holidays());
   const noKpi = await require("./kpiprofiles").noKpiTeams();
-  return (await all(`${TASK_SQL} WHERE t.project_id = $1 ORDER BY m.sort NULLS LAST, m.due_date, t.sort, t.start_date, t.id`, [projectId])).map((t) => serTask(t, hol, noKpi));
+  const list = (await all(`${TASK_SQL} WHERE t.project_id = $1 ORDER BY m.sort NULLS LAST, m.due_date, t.sort, t.start_date, t.id`, [projectId])).map((t) => serTask(t, hol, noKpi));
+  // Predecessors (the plan's No.): a task that should have started while one of them is still open is "blocked".
+  const byNo = new Map();
+  list.forEach((t) => t.planNo && t.status !== "cancelled" && !byNo.has(t.planNo) && byNo.set(t.planNo, t));
+  const t0 = todayIso();
+  const closed = (t) => ["done", "submitted", "cancelled"].includes(t.status);
+  for (const t of list) {
+    t.waitingFor = closed(t) ? [] : String(t.pred || "").split(",").map((n) => byNo.get(Number(n))).filter((x) => x && x.id !== t.id && !closed(x)).map((x) => ({ id: x.id, no: x.planNo, name: x.name, due: x.due }));
+    t.blocked = t.waitingFor.length > 0 && t.start <= t0;
+  }
+  return list;
 }
 function summary(tasks) {
   const live = tasks.filter((t) => t.status !== "cancelled");
@@ -778,6 +788,58 @@ async function importTasks(user, p, b) {
   return { saved: true, ...summary };
 }
 
+// ------------------------------------------------------------ register: risks, issues, change requests
+const LOG_KIND = { risk: ["R", "Risk"], issue: ["I", "Issue"], change: ["CR", "Change request"] };
+const LOG_ST = { risk: ["open", "closed"], issue: ["open", "closed"], change: ["proposed", "approved", "rejected", "done"] };
+const LOG_ST_LABEL = { open: "เปิดอยู่", closed: "ปิดแล้ว", proposed: "รออนุมัติ", approved: "อนุมัติแล้ว", rejected: "ไม่อนุมัติ", done: "ทำเสร็จแล้ว" };
+const LOG_LEVEL = { low: "ต่ำ", medium: "กลาง", high: "สูง" };
+const logOpen = (r) => ["open", "proposed", "approved"].includes(r.status);
+const serLog = (r) => ({
+  id: r.id, kind: r.kind, code: `${LOG_KIND[r.kind][0]}-${r.no}`, title: r.title, detail: r.detail || "", level: r.level, levelLabel: LOG_LEVEL[r.level], owner: r.owner_text || "",
+  status: r.status, statusLabel: LOG_ST_LABEL[r.status], open: logOpen(r), due: isoDay(r.due_date), overdue: logOpen(r) && !!r.due_date && isoDay(r.due_date) < todayIso(),
+  impactDays: r.impact_days, impactMd: num(r.impact_md), resolution: r.resolution || "", by: r.by_name || "", createdAt: r.created_at, updatedAt: r.updated_at,
+});
+const logsOf = async (pid) => (await all("SELECT l.*, u.display_name AS by_name FROM project_logs l LEFT JOIN users u ON u.id = l.created_by WHERE l.project_id = $1 ORDER BY (l.status IN ('open','proposed','approved')) DESC, l.kind, l.no DESC", [pid])).map(serLog);
+function logBody(b, kind, cur) {
+  const title = clean(b.title ?? (cur && cur.title), 200);
+  if (title.length < 3) throw bad("ใส่หัวข้ออย่างน้อย 3 ตัวอักษร");
+  const level = LOG_LEVEL[b.level] ? b.level : (cur && cur.level) || "medium";
+  const status = LOG_ST[kind].includes(b.status) ? b.status : (cur && cur.status) || LOG_ST[kind][0];
+  const resolution = clean(b.resolution ?? (cur && cur.resolution), 3000) || null;
+  if (["closed", "rejected", "done"].includes(status) && !resolution) throw bad(kind === "change" ? "ใส่ผลการพิจารณา / สิ่งที่ทำ ก่อนปิดรายการ" : "ใส่วิธีแก้หรือผลสรุป ก่อนปิดรายการ");
+  return {
+    title, level, status, resolution, detail: clean(b.detail ?? (cur && cur.detail), 5000) || null, owner: clean(b.owner ?? (cur && cur.owner_text), 200) || null,
+    due: b.due ? validDate(b.due, "กำหนด") : b.due === "" ? null : cur ? isoDay(cur.due_date) : null,
+    days: kind === "change" ? Math.max(0, Math.min(999, Math.round(Number(b.impactDays ?? (cur && cur.impact_days)) || 0))) : 0,
+    md: kind === "change" ? Math.max(0, Math.min(9999, num(b.impactMd ?? (cur && cur.impact_md)))) : 0,
+  };
+}
+async function addLog2(user, p, b) {
+  const kind = LOG_KIND[b.kind] ? b.kind : null;
+  if (!kind) throw bad("เลือกประเภท Risk, Issue หรือ Change request");
+  const x = logBody(b, kind, null);
+  const r = await tx(async (c) => {
+    await c.query("SELECT id FROM projects WHERE id = $1 FOR UPDATE", [p.id]); // one number at a time per project
+    const no = (await c.query("SELECT COALESCE(max(no),0)+1 AS n FROM project_logs WHERE project_id = $1 AND kind = $2", [p.id, kind])).rows[0].n;
+    return (await c.query(
+      `INSERT INTO project_logs (project_id, kind, no, title, detail, level, owner_text, status, due_date, impact_days, impact_md, resolution, created_by, closed_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13, CASE WHEN $8 IN ('closed','rejected','done') THEN now() END) RETURNING id, no`,
+      [p.id, kind, no, x.title, x.detail, x.level, x.owner, x.status, x.due, x.days, x.md, x.resolution, user.id]
+    )).rows[0];
+  });
+  await audit(user, "project_log_add", `${p.name} · ${LOG_KIND[kind][0]}-${r.no} ${x.title}`, { project: p.id, kind });
+  return { id: r.id, code: `${LOG_KIND[kind][0]}-${r.no}` };
+}
+async function updateLog(user, row, p, b) {
+  const x = logBody(b, row.kind, row);
+  await q(
+    `UPDATE project_logs SET title=$2, detail=$3, level=$4, owner_text=$5, status=$6, due_date=$7, impact_days=$8, impact_md=$9, resolution=$10, updated_at=now(),
+       closed_at = CASE WHEN $6 IN ('closed','rejected','done') THEN COALESCE(closed_at, now()) ELSE NULL END WHERE id=$1`,
+    [row.id, x.title, x.detail, x.level, x.owner, x.status, x.due, x.days, x.md, x.resolution]
+  );
+  if (x.status !== row.status) await audit(user, "project_log_status", `${p.name} · ${LOG_KIND[row.kind][0]}-${row.no} ${x.title}`, { project: p.id, from: row.status, to: x.status });
+}
+
 // ------------------------------------------------------------ hand-over: deliver + the customer's PM schedule
 async function deliver(user, p, b) {
   const open = (await tasksOf(p.id)).filter((t) => !["done", "submitted", "cancelled"].includes(t.status));
@@ -1009,9 +1071,11 @@ async function runReminders() {
     for (const t of tasks) {
       if (["done", "submitted", "cancelled"].includes(t.status)) continue;
       const left = t.due < t0 ? -1 : sr.workdaysBetween(t0, t.due, hol);
+      const raw = await one("SELECT reminded FROM project_tasks WHERE id = $1", [t.id]);
+      // Reaching its start date with a predecessor still open is told once (and again only if it happens after a later reminder was cleared).
+      if (t.blocked && !(raw.reminded || {}).blocked) rows.push([t, "blocked"]);
       const key = t.overdue ? "overdue" : left === 3 ? "d3" : left === 1 ? "d1" : null;
       if (!key) continue;
-      const raw = await one("SELECT reminded FROM project_tasks WHERE id = $1", [t.id]);
       if ((raw.reminded || {})[key] === t0) continue;
       rows.push([t, key]);
       if (key === "overdue" && t.kind === "own") ownLate = true;
@@ -1025,20 +1089,23 @@ async function runReminders() {
       }
     }
     if (!rows.length) continue;
-    const label = { overdue: "เลยกำหนด", d3: "อีก 3 วันทำการ", d1: "อีก 1 วันทำการ" };
-    const color = { overdue: "#A5162E", d3: "#7A5600", d1: "#9A3412" };
+    const label = { overdue: "เลยกำหนด", d3: "อีก 3 วันทำการ", d1: "อีก 1 วันทำการ", blocked: "ถึงวันเริ่มแล้ว แต่งานก่อนหน้ายังไม่เสร็จ" };
+    const color = { overdue: "#A5162E", d3: "#7A5600", d1: "#9A3412", blocked: "#7A3E9D" };
+    const wait = (t) => t.waitingFor.map((w) => `ลำดับ ${w.no} ${w.name}`).join(", ");
     const td = (v, st = "") => `<td style="padding:8px 10px;border-bottom:1px solid #E2E5EA;${st}">${v}</td>`;
     const table = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:14px;border:1px solid #E2E5EA"><tr style="background:#F6F7F9;color:#5B6576">${td("Task")}${td("ผู้รับผิดชอบ")}${td("กำหนดเสร็จ")}${td("สถานะ")}</tr>${rows
-      .map(([t, k]) => `<tr>${td(`<strong>${esc(t.name)}</strong>${t.sr ? `<br><span style="color:#5B6576">${esc(t.sr.no)}</span>` : ""}`)}${td(t.kind === "own" ? "PM" : `${esc(t.teamLabel)}${t.assignee ? `<br>${esc(t.assignee.name)}` : ""}`)}${td(thai(t.due))}${td(k === "overdue" ? `เลย ${t.overdueDays} วันทำการ` : label[k], `color:${color[k]};font-weight:600`)}</tr>`)
+      .map(([t, k]) => `<tr>${td(`<strong>${esc(t.name)}</strong>${t.sr ? `<br><span style="color:#5B6576">${esc(t.sr.no)}</span>` : ""}`)}${td(t.kind === "own" ? "PM" : `${esc(t.teamLabel)}${t.assignee ? `<br>${esc(t.assignee.name)}` : ""}`)}${td(thai(t.due))}${td(k === "overdue" ? `เลย ${t.overdueDays} วันทำการ` : k === "blocked" ? `${label[k]}<br><span style="font-weight:400;color:#5B6576">รอ: ${esc(wait(t))}</span>` : label[k], `color:${color[k]};font-weight:600`)}</tr>`)
       .join("")}</table>`;
     const late = rows.filter(([, k]) => k === "overdue").length;
-    const subject = `[โปรเจกต์] ${p.name} · ${late ? `เลยกำหนด ${late} task` : `ใกล้ครบกำหนด ${rows.length} task`}`;
+    const near = rows.filter(([, k]) => k === "d3" || k === "d1").length;
+    const stuck = rows.filter(([, k]) => k === "blocked").length;
+    const subject = `[โปรเจกต์] ${p.name} · ${late ? `เลยกำหนด ${late} task` : near ? `ใกล้ครบกำหนด ${near} task` : `รองานก่อนหน้า ${stuck} task`}`;
     await graph.sendMail({ to: [p.pm_email], cc: ownLate ? leads.filter((e) => e !== p.pm_email) : [], subject,
       html: shell(late ? "#C0283C" : "#C07A00", `<p style="margin:0 0 14px">สรุป task ที่ต้องติดตามวันนี้ของโปรเจกต์ <strong>${esc(p.name)}</strong>${p.customer ? ` (${esc(p.customer)})` : ""}</p>${table}<p style="margin:16px 0 0">${button(url(p.id), "เปิดโปรเจกต์")}</p>`) })
       .catch((e) => { out.errors++; console.error("[projects] digest:", e.message); });
     await require("./teamsnotify").notify((await settings()).teams[0], "project", {
       title: `📋 ${subject}`, color: late ? "Attention" : "Warning", text: `PM ${p.pm_name}`,
-      facts: rows.slice(0, 8).map(([t, k]) => [t.name, `${k === "overdue" ? `เลย ${t.overdueDays} วันทำการ` : label[k]} · ${thai(t.due)}`]),
+      facts: rows.slice(0, 8).map(([t, k]) => [t.name, k === "blocked" ? `รองานก่อนหน้า: ${wait(t)}` : `${k === "overdue" ? `เลย ${t.overdueDays} วันทำการ` : label[k]} · ${thai(t.due)}`]),
       actions: [["เปิดโปรเจกต์", url(p.id)]],
     });
     for (const [t, k] of rows) await q("UPDATE project_tasks SET reminded = reminded || jsonb_build_object($2::text, $3::text) WHERE id = $1", [t.id, k, t0]);
@@ -1145,7 +1212,7 @@ function mount(api, { wrap }) {
     const s = await settings();
     const edit = await canEdit(req.user, p);
     res.json({
-      project: serProject(p), full, milestones, tasks, docs, summary: summary(tasks),
+      project: serProject(p), full, milestones, tasks, docs, summary: summary(tasks), logs: full ? await logsOf(p.id) : [],
       cost: full && (await costVisible(req.user, p)) ? { rate: s.mdRate } : null,
       can: { edit, upload: full && req.user.role !== "viewer" && req.user.role !== "observer", deliver: edit && p.status !== "delivered", template: edit && (await isPm(req.user)) },
     });
@@ -1179,6 +1246,17 @@ function mount(api, { wrap }) {
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     res.setHeader("Content-Disposition", `attachment; filename=ProjectPlan-${p.id}.xlsx`);
     res.send(await planExport(p, await tasksOf(p.id)));
+  }));
+  api.post("/projects/:id/logs", wrap(async (req, res) => {
+    const { p } = await projectFor(req.user, req.params.id, { edit: true });
+    res.json({ ok: true, ...(await addLog2(req.user, p, req.body || {})) });
+  }));
+  api.put("/project-logs/:lid", wrap(async (req, res) => {
+    const row = await one("SELECT * FROM project_logs WHERE id = $1", [Number(req.params.lid)]);
+    if (!row) throw bad("ไม่พบรายการ", 404);
+    const { p } = await projectFor(req.user, row.project_id, { edit: true });
+    await updateLog(req.user, row, p, req.body || {});
+    res.json({ ok: true });
   }));
   api.post("/projects/:id/import", wrap(async (req, res) => {
     const { p } = await projectFor(req.user, req.params.id, { edit: true });

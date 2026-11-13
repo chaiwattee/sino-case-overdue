@@ -367,6 +367,8 @@ ${edit || !csOf(c) ? "" : `<div class="rca-sec" id="rca-sec"></div>`}
       ["kpi", "#/kpi", "KPI (ทดลองใช้)", ME.user.role !== "viewer" && ME.user.role !== "requester" && (!["response", "none"].includes(ME.kpiProfile) || ["admin", "manager", "observer"].includes(ME.user.role))],
       ["response", "#/response", "การตอบกลับ", ME.kpiProfile === "response" || !!ME.responseTeams],
       ["rank", "#/rank", "อันดับ KPI", !!(ME.leaderboard && ME.leaderboard.visible)],
+      ["workload", "#/workload", "ภาระงาน", ["admin", "manager", "observer"].includes(ME.user.role)],
+      ["csat", "#/csat", "ความพึงพอใจลูกค้า", ["admin", "manager", "observer", "viewer"].includes(ME.user.role)],
       ["reports", "#/reports", "Report &amp; Export", lvl("export") !== "none" || lvl("reports_manage") !== "none"],
       ["audit", "#/audit", "ประวัติแก้ไข", lvl("audit_view") !== "none"],
       ["users", "#/users", "จัดการผู้ใช้", lvl("users_manage") !== "none"],
@@ -428,8 +430,8 @@ ${edit || !csOf(c) ? "" : `<div class="rca-sec" id="rca-sec"></div>`}
   const NAV_GROUPS = [
     ["work", "งานของฉัน", ["mine", "intake", "sr", "projects", "pm"]],
     ["view", "ภาพรวม", ["overview", "team", "owner", "customer"]],
-    ["team", "ทีมและผลงาน", ["kpi", "response", "rank", "skills"]],
-    ["report", "Report", ["reports"]],
+    ["team", "ทีมและผลงาน", ["kpi", "response", "rank", "skills", "workload"]],
+    ["report", "Report", ["reports", "csat"]],
     ["admin", "ผู้ดูแลระบบ", ["users", "settings", "audit"]],
   ];
   function closeGroups(except) {
@@ -3341,6 +3343,56 @@ ${owners.map((o) => {
 </tbody></table></div><p class="hint">เกรด A ≥85 · A- 80–84 · B+ 75–79 · B 70–74 · C 60–69 · D ต่ำกว่า 60 · ทำเสร็จน้อยกว่า 3 งานยังไม่ให้เกรด · เทียบคะแนนกันได้เฉพาะในทีมเดียวกัน</p></details></section>`;
   }
 
+  // ------------------------------------------------------------ workload: what each person has open right now
+  async function viewWorkload(params) {
+    setNav("workload");
+    const r = await api("/workload?" + qs({ team: params.team || "" }));
+    const seg = (n, cls, label) => (n ? `<i class="${cls}" style="flex:${n}" title="${label} ${n}"></i>` : "");
+    const cell = (x, extra) => `<td class="n"><b>${x.open}</b>${x.late ? ` <span class="chip c-overdue">เลย ${x.late}</span>` : ""}${extra ? `<div class="hint">${extra}</div>` : ""}</td>`;
+    const heavy = r.people.filter((p) => p.heavy);
+    $app.innerHTML = `<div class="pagehead"><div><h1>ภาระงาน</h1><p class="muted" style="margin:0">งานที่ยังเปิดอยู่ของแต่ละคน ณ วันนี้ รวมเคส คำขอบริการ และ task โปรเจกต์ที่ PM ทำเอง · “ใน 7 วัน” = ครบกำหนดถึง ${fd(r.soonUntil)}</p></div></div>
+${r.teams.length > 1 ? `<div class="fpills"><span class="hint" style="align-self:center">ทีม</span><a class="fpill ${r.team ? "" : "on"}" href="#/workload">ทุกทีม</a>${r.teams.map((t) => `<a class="fpill ${t.code === r.team ? "on" : ""}" href="#/workload?${qs({ team: t.code })}">${esc(t.label)}</a>`).join("")}</div>` : ""}
+<div class="kpis"><div class="kpi k-all"><span class="l">คน</span><span class="v">${r.people.length}</span><span class="s">Engineer และ Manager ในทีมที่เลือก</span></div>
+<div class="kpi k-normal"><span class="l">งานเปิดรวม</span><span class="v">${r.people.reduce((a, p) => a + p.total, 0)}</span><span class="s">ค่ากลางต่อคน ${r.median}</span></div>
+<div class="kpi ${r.people.some((p) => p.late) ? "k-overdue" : "k-normal"}"><span class="l">เลยกำหนด</span><span class="v">${r.people.reduce((a, p) => a + p.late, 0)}</span><span class="s">ทุกประเภทรวมกัน</span></div>
+<div class="kpi ${heavy.length ? "k-r2" : "k-normal"}"><span class="l">งานมากกว่าคนอื่นชัดเจน</span><span class="v">${heavy.length}</span><span class="s">ตั้งแต่ 5 งาน และ 1.5 เท่าของค่ากลาง</span></div></div>
+<section class="card" style="padding:0"><div class="tablewrap"><table><thead><tr><th>คน</th><th style="min-width:200px">งานเปิดรวม</th><th class="n">เคส</th><th class="n">คำขอบริการ</th><th class="n">Task โปรเจกต์</th><th class="n">ครบกำหนดใน 7 วัน</th></tr></thead><tbody>
+${r.people.map((p) => `<tr><td><a href="#/owner?${qs({ owner: p.id })}" style="font-weight:600">${esc(p.name)}</a>${p.heavy ? ` <span class="chip c-r2">งานมาก</span>` : ""}<div class="hint">${p.teams.map((t) => esc((r.teams.find((x) => x.code === t) || {}).label || t)).join(", ")}${p.role === "manager" ? " · Manager" : ""}</div></td>
+<td><div class="wl-bar" style="width:${Math.max(4, Math.round((p.total / r.max) * 100))}%">${seg(p.cases.open, "w-case", "เคส")}${seg(p.sr.open, "w-sr", "คำขอบริการ")}${seg(p.tasks.open, "w-task", "Task โปรเจกต์")}</div><div class="hint"><b style="color:var(--ink)">${p.total}</b> งาน</div></td>
+${cell(p.cases, p.cases.pm ? `งาน PM ${p.cases.pm}` : "")}${cell(p.sr, p.sr.project ? `จากโปรเจกต์ ${p.sr.project}` : "")}${cell(p.tasks, p.tasks.open ? `${p.tasks.projects} โปรเจกต์ · เหลือ ${p.tasks.mdLeft} MD` : "")}
+<td class="n">${p.soon || "-"}</td></tr>`).join("") || `<tr><td colspan="6"><div class="empty">ไม่มีคนในทีมที่เลือก</div></td></tr>`}</tbody></table></div></section>
+<p class="hint"><span class="wl-key w-case"></span> เคส <span class="wl-key w-sr"></span> คำขอบริการที่ได้รับมอบหมาย <span class="wl-key w-task"></span> Task โปรเจกต์ที่ PM ทำเอง และถึงวันเริ่มภายใน 7 วัน · จำนวนงานไม่ได้บอกความยากของงาน ใช้เป็นจุดเริ่มคุยเรื่องการกระจายงาน</p>`;
+  }
+
+  // ------------------------------------------------------------ customer satisfaction report
+  async function viewCsat(params) {
+    setNav("csat");
+    const q0 = { from: params.from || "", to: params.to || "", team: params.team || "" };
+    const r = await api("/csat-report?" + qs(q0));
+    const s = r.summary;
+    const maxD = Math.max(1, ...s.dist);
+    const tbl = (title, first, rows) => `<section class="card"><div class="title"><h2>${title}</h2><span>${rows.length} รายการ</span></div>
+${rows.length ? `<div class="tablewrap"><table><thead><tr><th>${first}</th><th class="n">ส่งไป</th><th class="n">ตอบ</th><th class="n">เฉลี่ย</th><th class="n">4–5</th><th class="n">1–2</th></tr></thead><tbody>
+${rows.slice(0, 40).map((x) => `<tr><td style="font-weight:600">${esc(x.name)}</td><td class="n">${x.sent}</td><td class="n">${x.answered}</td><td class="n"><b>${x.avg == null ? "-" : x.avg.toFixed(2)}</b></td><td class="n">${x.high}</td><td class="n">${x.low ? `<span class="chip c-overdue">${x.low}</span>` : "0"}</td></tr>`).join("")}</tbody></table></div>${rows.length > 40 ? `<p class="hint">แสดง 40 รายการแรก ดูทั้งหมดใน Excel</p>` : ""}` : `<div class="empty">ไม่มีข้อมูลในช่วงนี้</div>`}</section>`;
+    $app.innerHTML = `<div class="pagehead"><div><h1>ความพึงพอใจลูกค้า</h1><p class="muted" style="margin:0">คะแนน 1–5 ที่ลูกค้าให้หลังปิดเคส · นับตามวันที่ส่งแบบสอบถาม</p></div>
+<a class="btn" href="api/csat-report.xlsx?${qs({ from: r.from, to: r.to, team: r.team })}">ดาวน์โหลด Excel</a></div>
+<form id="csatf" class="card" style="display:flex;flex-wrap:wrap;gap:12px;align-items:end"><label class="f">ตั้งแต่<input type="date" name="from" value="${r.from}" required></label><label class="f">ถึง<input type="date" name="to" value="${r.to}" required></label>
+${r.teams.length > 1 ? `<label class="f">ทีม<select name="team"><option value="">ทุกทีม</option>${r.teams.map((t) => `<option value="${esc(t.code)}" ${t.code === r.team ? "selected" : ""}>${esc(t.label)}</option>`).join("")}</select></label>` : ""}<button class="btn primary" type="submit">แสดง</button></form>
+<div class="kpis"><div class="kpi k-all"><span class="l">คะแนนเฉลี่ย</span><span class="v">${s.avg == null ? "-" : s.avg.toFixed(2)}</span><span class="s">จาก ${s.answered} คำตอบ</span></div>
+<div class="kpi k-normal"><span class="l">อัตราการตอบ</span><span class="v">${s.rate == null ? "-" : s.rate + "%"}</span><span class="s">ส่งแบบสอบถาม ${s.sent} · ตอบ ${s.answered}</span></div>
+<div class="kpi ${s.low ? "k-overdue" : "k-normal"}"><span class="l">คะแนน 1–2</span><span class="v">${s.low}</span><span class="s">คำตอบที่ควรติดตาม</span></div>
+<div class="kpi k-closed"><span class="l">การกระจายคะแนน</span><div class="csat-dist">${s.dist.map((n, i) => `<div title="${i + 1} คะแนน: ${n}"><i style="height:${Math.round((n / maxD) * 100)}%"></i><span>${i + 1}</span></div>`).join("")}</div></div></div>
+${tbl("ตามลูกค้า", "ลูกค้า", r.byCustomer)}${tbl("ตาม Product", "Product", r.byProduct)}${r.byOwner.length ? tbl("ตาม Engineer", "Engineer", r.byOwner) : ""}
+<section class="card"><div class="title"><h2>คำตอบล่าสุด</h2><span>${r.answers.length} คำตอบ</span></div>
+${r.answers.length ? `<div class="tablewrap"><table><thead><tr><th>เคส</th><th>ลูกค้า · Product</th><th class="n">คะแนน</th><th>ความเห็น</th><th>วันที่ตอบ</th></tr></thead><tbody>
+${r.answers.slice(0, 60).map((a) => `<tr><td><a class="mono" href="#/case/${a.caseId}">${esc(a.caseNo || "#" + a.caseId)}</a>${a.owner ? `<div class="hint">${esc(a.owner)}</div>` : ""}</td><td>${esc(a.site || "-")}<div class="hint">${esc(a.product || "")}</div></td><td class="n"><span class="chip ${a.rating <= 2 ? "c-overdue" : a.rating >= 4 ? "c-normal" : "c-r1"}">${a.rating}/5</span></td><td>${esc(a.comment || "-")}</td><td>${fdt(a.ratedAt)}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">ยังไม่มีคำตอบในช่วงนี้</div>`}</section>`;
+    const f = document.getElementById("csatf");
+    f.onsubmit = (e) => {
+      e.preventDefault();
+      location.hash = "#/csat?" + qs({ from: f.from.value, to: f.to.value, team: f.team ? f.team.value : "" });
+    };
+  }
+
   async function viewKpi(params) {
     setNav("kpi");
     const months = [];
@@ -5573,9 +5625,11 @@ ${changed.length ? `<div class="tablewrap" style="max-height:50vh"><table style=
   const MS_ST = { met: "c-ok", late: "c-overdue", missed: "c-overdue", risk: "c-r2", plan: "c-all" };
   const pjChip = (p) => `<span class="chip ${PJ_ST[p.status]}">${esc(p.statusLabel)}</span>`;
   function ptChip(t) {
-    if (t.sr && t.sr.ext) return `<span class="chip c-r1">ขอเลื่อนเป็น ${fd(t.sr.ext.target)}</span>`;
-    if (t.overdue) return `<span class="chip c-overdue">เลยกำหนด ${t.overdueDays} วันทำการ</span>`;
-    return `<span class="chip ${PT_ST[t.status]}">${esc(t.statusLabel)}${t.status === "done" && t.sr && t.sr.rating ? ` · ${t.sr.rating}/5` : ""}</span>`;
+    // Reached its start date while a predecessor (the plan's No.) is still open.
+    const wait = t.blocked ? ` <span class="chip c-r2" title="${esc((t.waitingFor || []).map((w) => `ลำดับ ${w.no} ${w.name}`).join(" · "))}">รองานก่อนหน้า ลำดับ ${(t.waitingFor || []).map((w) => w.no).join(", ")}</span>` : "";
+    if (t.sr && t.sr.ext) return `<span class="chip c-r1">ขอเลื่อนเป็น ${fd(t.sr.ext.target)}</span>${wait}`;
+    if (t.overdue) return `<span class="chip c-overdue">เลยกำหนด ${t.overdueDays} วันทำการ</span>${wait}`;
+    return `<span class="chip ${PT_ST[t.status]}">${esc(t.statusLabel)}${t.status === "done" && t.sr && t.sr.rating ? ` · ${t.sr.rating}/5` : ""}</span>${wait}`;
   }
   const ptDue = (t) => `${fd(t.due)}${t.base !== t.due ? `<div class="hint">แผนเดิม ${fd(t.base)}</div>` : ""}${t.daysLeft != null && t.daysLeft <= 3 ? `<div class="hint t-r1">อีก ${t.daysLeft} วันทำการ</div>` : ""}${t.doneAt ? `<div class="hint">${t.onTime ? "เสร็จทันกำหนด" : "เสร็จช้ากว่ากำหนด"} · ${fd(t.doneAt)}</div>` : ""}`;
   const ptWho = (t) => (t.kind === "own" ? (t.ownerText ? esc(t.ownerText) : `PM ทำเอง`) : `${esc(t.teamLabel)}<div class="hint">${t.assignee ? esc(t.assignee.name) : t.sr ? "รอ Manager มอบคน" : "ยังไม่ได้เปิด SR"}</div>`);
@@ -5724,11 +5778,12 @@ ${p ? "" : `<div class="banner" id="pj-tpl" hidden></div>`}
     const [m, d] = await Promise.all([pjMeta(), api("/projects/" + encodeURIComponent(id))]);
     const p = d.project;
     const s = d.summary;
-    const tab = ["tasks", "timeline", "docs", "md", "report"].includes(params.tab) && (params.tab !== "report" || d.can.edit) ? params.tab : "tasks";
-    const tabs = [["tasks", "Task"], ["timeline", "Timeline"], ["docs", "เอกสาร"], ...(d.full && ME.user.role !== "viewer" ? [["md", "Man-day"]] : []), ...(d.can.edit ? [["report", "รายงานลูกค้า"]] : [])];
+    const tab = ["tasks", "timeline", "docs", "md", "report", "reg"].includes(params.tab) && (params.tab !== "report" || d.can.edit) && (params.tab !== "reg" || d.full) ? params.tab : "tasks";
+    const regOpen = (d.logs || []).filter((x) => x.open).length;
+    const tabs = [["tasks", "Task"], ["timeline", "Timeline"], ...(d.full ? [["reg", `Risk / Issue / CR${regOpen ? ` <b>${regOpen}</b>` : ""}`]] : []), ["docs", "เอกสาร"], ...(d.full && ME.user.role !== "viewer" ? [["md", "Man-day"]] : []), ...(d.can.edit ? [["report", "รายงานลูกค้า"]] : [])];
     const pct = s.total ? Math.round((s.done / s.total) * 100) : 0;
     const left = Math.round((new Date(p.end + "T00:00:00") - new Date(m.today + "T00:00:00")) / 86400000);
-    const body = tab === "timeline" ? pjTimeline(d, m) : tab === "docs" ? pjDocs(d, m) : tab === "md" ? pjManday(d) : tab === "report" ? pjReport(d) : pjTasks(d);
+    const body = tab === "timeline" ? pjTimeline(d, m) : tab === "docs" ? pjDocs(d, m) : tab === "md" ? pjManday(d) : tab === "report" ? pjReport(d) : tab === "reg" ? pjRegister(d) : pjTasks(d);
     $app.innerHTML = `<div class="pagehead"><div><a href="#/projects" class="muted">← โปรเจกต์</a>
 <h1 style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">${esc(p.name)} ${pjChip(p)}</h1>
 <p class="muted" style="margin:0">${esc(p.customer || "ไม่ระบุลูกค้า")} · PM ${p.pm ? esc(p.pm.name) : "-"} · ${fd(p.start)} – ${fd(p.end, true)}${p.template ? ` · Template “${esc(p.template)}”` : ""}</p></div>
@@ -5749,6 +5804,12 @@ ${body}`;
         if (!e.target.closest("a")) openTask(Number(el.dataset.task), d, m);
       };
       el.onkeydown = (e) => e.key === "Enter" && openTask(Number(el.dataset.task), d, m);
+    });
+    $app.querySelectorAll("[data-lognew]").forEach((b) => (b.onclick = () => openPjLog(d, b.dataset.lognew)));
+    $app.querySelectorAll("[data-log]").forEach((el) => {
+      const open = () => openPjLog(d, null, d.logs.find((x) => x.id === Number(el.dataset.log)));
+      el.onclick = open;
+      el.onkeydown = (e) => e.key === "Enter" && open();
     });
     if ($("pj-edit")) $("pj-edit").onclick = () => openProjectForm(m, p);
     if ($("pj-ms")) $("pj-ms").onclick = () => openMilestone(p);
@@ -5773,7 +5834,7 @@ ${body}`;
 ${pjBar(x.done, x.total)}<div class="pjms-top"><span class="hint">${x.done}/${x.total} task · ต้อง meet ${fd(x.due)}</span><span class="chip ${MS_ST[x.state]}">${esc(x.stateLabel)}</span></div></div>`).join("")}</div>` : "";
     const groups = [...ms.map((x) => [x, d.tasks.filter((t) => t.milestoneId === x.id)]), [null, d.tasks.filter((t) => !t.milestoneId)]].filter(([, ts]) => ts.length);
     const rows = groups.map(([x, ts]) => `<tr class="pjmsrow"><td colspan="${full ? 5 : 4}"><strong>◆ ${x ? esc(x.name) : "ไม่อยู่ใน milestone"}</strong>${x ? ` <span class="hint">· ต้อง meet ${fd(x.due)}</span>` : ""}</td></tr>
-${ts.map((t) => `<tr class="click ${t.status === "cancelled" ? "pj-off" : ""}" data-task="${t.id}" tabindex="0"><td><span style="font-weight:600;color:var(--accent)">${esc(t.name)}</span><div class="hint">${t.kind === "own" ? `PM ทำเอง${t.pct > 0 && t.pct < 100 ? ` · ${t.pct}%` : ""}${t.pred ? ` · ต่อจาก task ลำดับ ${esc(t.pred)}` : ""}` : t.sr ? `<a class="mono" href="#/sr/${t.sr.id}">${esc(t.sr.no)}</a>` : t.srOpen === "auto" ? "เปิด SR อัตโนมัติก่อนเริ่ม 7 วันทำการ" : "ยังไม่ได้เปิด SR"}</div></td>
+${ts.map((t) => `<tr class="click ${t.status === "cancelled" ? "pj-off" : ""}" data-task="${t.id}" tabindex="0"><td><span style="font-weight:600;color:var(--accent)">${t.planNo ? `<span class="muted mono" style="font-weight:400">${t.planNo}.</span> ` : ""}${esc(t.name)}</span><div class="hint">${t.pred ? `ต่อจากลำดับ ${esc(t.pred)} · ` : ""}${t.kind === "own" ? `PM ทำเอง${t.pct > 0 && t.pct < 100 ? ` · ${t.pct}%` : ""}` : t.sr ? `<a class="mono" href="#/sr/${t.sr.id}">${esc(t.sr.no)}</a>` : t.srOpen === "auto" ? "เปิด SR อัตโนมัติก่อนเริ่ม 7 วันทำการ" : "ยังไม่ได้เปิด SR"}</div></td>
 <td>${ptWho(t)}</td><td>${ptDue(t)}</td><td>${ptChip(t)}</td>${full ? `<td class="n">${ME.user.role === "viewer" ? "" : `${t.noMd ? "-" : t.mdAct} / ${t.mdEst}`}</td>` : ""}</tr>`).join("")}`).join("");
     return `${cards}<section class="card"><div class="title"><h2>Task</h2><span>กดที่ task เพื่อดูรายละเอียด${full ? " · สถานะ task ที่มอบงานดึงจาก SR อัตโนมัติ" : ""}</span></div>
 <div class="tablewrap"><table><thead><tr><th>Task</th><th>ผู้รับผิดชอบ</th><th>กำหนดเสร็จ</th><th>สถานะ</th>${full ? `<th class="n">${ME.user.role === "viewer" ? "" : "Man-day ใช้ / ประมาณ"}</th>` : ""}</tr></thead><tbody>
@@ -5815,6 +5876,55 @@ ${rows || `<tr><td colspan="5"><div class="empty">${d.can.edit ? (ms.length ? "�
     return `<section class="card"><div class="title"><h2>Timeline</h2><span>เส้นแดง = วันนี้ · เส้นบางใต้แถบ = แผนเดิมก่อนเลื่อน · แก้วันที่ได้จากตาราง task</span></div>
 <div class="legend"><span><i class="lg done"></i>เสร็จ / ส่งงานแล้ว</span><span><i class="lg"></i>กำลังทำ</span><span><i class="lg wait"></i>รอรับงาน</span><span><i class="lg over"></i>เลยกำหนด</span><span><i class="lg todo"></i>ยังไม่เริ่ม</span><span>◆ Milestone</span></div>
 ${ts.length ? `<div class="gwrap"><div class="gantt" style="min-width:${Math.max(760, weeks.length * 70 + 240)}px"><div>${names}</div><div>${lanes}</div></div></div>` : `<div class="empty">ยังไม่มี task</div>`}</section>`;
+  }
+
+  // Register: risks, issues and change requests of the project.
+  const LOG_KINDS = [["risk", "Risk", "สิ่งที่อาจเกิดและกระทบแผน"], ["issue", "Issue", "ปัญหาที่เกิดแล้วและต้องแก้"], ["change", "Change request", "การขอเปลี่ยนขอบเขต วันส่งมอบ หรือ man-day"]];
+  const LOG_CHIP = { open: "c-r1", closed: "c-closed", proposed: "c-r1", approved: "c-normal", rejected: "c-closed", done: "c-closed" };
+  const LOG_LV = { low: "c-closed", medium: "c-r1", high: "c-overdue" };
+  function pjRegister(d) {
+    const logs = d.logs || [];
+    const cr = logs.filter((x) => x.kind === "change" && ["approved", "done"].includes(x.status));
+    const sum = `<div class="kpis">${LOG_KINDS.map(([k, l]) => {
+      const mine = logs.filter((x) => x.kind === k);
+      const open = mine.filter((x) => x.open);
+      return `<div class="kpi ${open.some((x) => x.level === "high" || x.overdue) ? "k-overdue" : open.length ? "k-r1" : "k-normal"}"><span class="l">${l}</span><span class="v">${open.length}</span><span class="s">ยังเปิดอยู่ จากทั้งหมด ${mine.length}${open.filter((x) => x.level === "high").length ? ` · ระดับสูง ${open.filter((x) => x.level === "high").length}` : ""}</span></div>`;
+    }).join("")}
+<div class="kpi k-closed"><span class="l">ผลจาก CR ที่อนุมัติ</span><span class="v">+${cr.reduce((a, x) => a + x.impactDays, 0)}<span style="font-size:16px;color:var(--muted)"> วัน</span></span><span class="s">+${Math.round(cr.reduce((a, x) => a + x.impactMd, 0) * 10) / 10} man-day จาก ${cr.length} รายการ</span></div></div>`;
+    const sect = ([k, l, hint]) => {
+      const rows = logs.filter((x) => x.kind === k);
+      return `<section class="card"><div class="title"><h2>${l}</h2><span>${hint}</span>${d.can.edit ? `<button class="btn" type="button" data-lognew="${k}">+ เพิ่ม ${l}</button>` : ""}</div>
+${rows.length ? `<div class="tablewrap"><table><thead><tr><th>รายการ</th><th>ระดับ</th><th>ผู้รับผิดชอบ</th><th>กำหนด</th>${k === "change" ? "<th>ผลกระทบ</th>" : ""}<th>สถานะ</th></tr></thead><tbody>
+${rows.map((x) => `<tr class="click ${x.open ? "" : "pj-off"}" data-log="${x.id}" tabindex="0"><td><span class="mono muted">${esc(x.code)}</span> <span style="font-weight:600;color:var(--accent)">${esc(x.title)}</span>${x.detail ? `<div class="hint">${esc(x.detail.slice(0, 140))}${x.detail.length > 140 ? "…" : ""}</div>` : ""}${x.resolution ? `<div class="hint">ผลสรุป: ${esc(x.resolution.slice(0, 140))}</div>` : ""}</td>
+<td><span class="chip ${LOG_LV[x.level]}">${esc(x.levelLabel)}</span></td><td>${esc(x.owner || "-")}</td><td>${x.due ? `${fd(x.due)}${x.overdue ? `<div class="hint" style="color:var(--bad,#C0283C)">เลยกำหนด</div>` : ""}` : "-"}</td>
+${k === "change" ? `<td>${x.impactDays || x.impactMd ? `+${x.impactDays} วัน · +${x.impactMd} MD` : "-"}</td>` : ""}<td><span class="chip ${LOG_CHIP[x.status]}">${esc(x.statusLabel)}</span></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">ยังไม่มี ${l}</div>`}</section>`;
+    };
+    return sum + LOG_KINDS.map(sect).join("");
+  }
+  function openPjLog(d, kind, x) {
+    kind = x ? x.kind : kind;
+    const [, label] = LOG_KINDS.find((k) => k[0] === kind);
+    const ro = !d.can.edit;
+    const sts = kind === "change" ? [["proposed", "รออนุมัติ"], ["approved", "อนุมัติแล้ว"], ["rejected", "ไม่อนุมัติ"], ["done", "ทำเสร็จแล้ว"]] : [["open", "เปิดอยู่"], ["closed", "ปิดแล้ว"]];
+    const dis = ro ? "disabled" : "";
+    const f = srDialog(x ? `${esc(x.code)} · ${label}` : `เพิ่ม ${label}`, `<label class="f">หัวข้อ<input name="title" required minlength="3" maxlength="200" value="${esc(x ? x.title : "")}" ${dis}></label>
+<label class="f">รายละเอียด${kind === "risk" ? " / ผลกระทบถ้าเกิด" : kind === "change" ? " / สิ่งที่ขอเปลี่ยนและเหตุผล" : ""}<textarea name="detail" rows="3" maxlength="5000" ${dis}>${esc(x ? x.detail : "")}</textarea></label>
+<div class="formgrid"><label class="f">ระดับ${kind === "risk" ? "ความเสี่ยง" : "ความสำคัญ"}<select name="level" ${dis}>${[["low", "ต่ำ"], ["medium", "กลาง"], ["high", "สูง"]].map(([k, l]) => `<option value="${k}" ${(x ? x.level : "medium") === k ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+<label class="f">ผู้รับผิดชอบ<input name="owner" maxlength="200" value="${esc(x ? x.owner : "")}" ${dis}></label>
+<label class="f">${kind === "change" ? "ต้องตัดสินใจภายใน" : "กำหนดแก้ไข / ทบทวน"}<input type="date" name="due" value="${x && x.due ? x.due : ""}" ${dis}></label></div>
+${kind === "change" ? `<div class="formgrid"><label class="f">กระทบวันส่งมอบ (วัน)<input type="number" name="days" min="0" max="999" step="1" value="${x ? x.impactDays : 0}" ${dis}></label><label class="f">กระทบ man-day<input type="number" name="md" min="0" step="0.5" value="${x ? x.impactMd : 0}" ${dis}></label></div>` : ""}
+<div class="formgrid"><label class="f">สถานะ<select name="status" ${dis}>${sts.map(([k, l]) => `<option value="${k}" ${(x ? x.status : sts[0][0]) === k ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>
+<label class="f">${kind === "change" ? "ผลการพิจารณา / สิ่งที่ทำ" : kind === "risk" ? "แผนรับมือ / ผลสรุป" : "วิธีแก้ / ผลสรุป"}<textarea name="resolution" rows="2" maxlength="3000" ${dis}>${esc(x ? x.resolution : "")}</textarea><span class="hint">ต้องกรอกเมื่อปิดรายการ${kind === "change" ? " · วันและ man-day ของ CR ที่อนุมัติไม่ได้เลื่อนแผนให้อัตโนมัติ ให้เลื่อนกำหนด task เอง" : ""}</span></label>
+${x ? `<p class="hint" style="margin:0">บันทึกโดย ${esc(x.by || "-")} · ${fdt(x.createdAt)}</p>` : ""}`,
+      async (f) => {
+        if (ro) return;
+        const body = { kind, title: f.title.value, detail: f.detail.value, level: f.level.value, owner: f.owner.value, due: f.due.value, status: f.status.value, resolution: f.resolution.value, ...(kind === "change" ? { impactDays: f.days.value, impactMd: f.md.value } : {}) };
+        if (x) await post(`/project-logs/${x.id}`, body, "PUT");
+        else await post(`/projects/${d.project.id}/logs`, body);
+        toast("บันทึกแล้ว");
+        route();
+      }, ro ? "ปิด" : "บันทึก");
+    return f;
   }
 
   function pjDocs(d, m) {
@@ -6182,6 +6292,8 @@ ${rows.slice(0, 12).map(([p, t]) => `<tr class="click" data-href="#/projects/${p
         case "intake-admin": return await viewIntakeAdmin();
         case "skills": return await viewSkills(params);
         case "kpi": return await viewKpi(params);
+        case "workload": return await viewWorkload(params);
+        case "csat": return await viewCsat(params);
         case "response": return await viewResponse(params);
         case "rank": return await viewRank(params);
         case "projects": return parts[1] ? await viewProject(parts[1], params) : await viewProjects(params);
