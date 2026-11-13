@@ -123,6 +123,13 @@ async function createLink(input, { apiKey = null, user = null, source = "api", i
   const contactName = clean(input.contactName, 120) || (lineUser && lineUser.contact_name) || "";
   const contactPhone = clean(input.contactPhone, 60) || (lineUser && lineUser.contact_phone) || "";
   const contactEmail = clean(input.contactEmail, 200) || (lineUser && lineUser.contact_email) || "";
+  // The chatbot may ask only for a name and an email: a company email domain registered for a customer names the customer.
+  let domainText = "";
+  if (!site && !customerText && contactEmail.includes("@")) {
+    const dom = contactEmail.split("@")[1].toLowerCase();
+    site = await mail().siteForDomain(dom).catch(() => null);
+    if (!site && !mail().PUBLIC_DOMAINS.includes(dom)) domainText = dom;
+  }
 
   const token = newToken();
   const expires = new Date(Date.now() + Number(minutes || s.linkMinutes || 60) * 60000);
@@ -130,7 +137,7 @@ async function createLink(input, { apiKey = null, user = null, source = "api", i
     `INSERT INTO intake_links (token_hash, api_key_id, created_by, source, is_test, site, customer_text, line_user_id,
        contact_name, contact_phone, contact_email, external_ref, expires_at)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
-    [sha(token), apiKey ? apiKey.id : null, user ? user.id : null, source, isTest, site, customerText || (lineUser && lineUser.customer_text) || null,
+    [sha(token), apiKey ? apiKey.id : null, user ? user.id : null, source, isTest, site, customerText || (lineUser && lineUser.customer_text) || domainText || null,
       lineUserId, contactName || null, contactPhone || null, contactEmail || null, clean(input.externalRef, 120) || null, expires]
   );
   if (lineUserId) {

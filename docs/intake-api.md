@@ -27,7 +27,7 @@
 
 ฝั่งแชทบอทต้องทำ
 
-1. เมนู (Rich menu) "แจ้งเคส" → เรียก `GET /intake/line-users/{lineUserId}` ถ้า `known = false` ถามชื่อบริษัท ชื่อผู้ติดต่อ เบอร์โทร
+1. เมนู (Rich menu) "รับแจ้งเคส" → เรียก `GET /intake/line-users/{lineUserId}` ถ้า `known = false` ถาม **ชื่อผู้ติดต่อ และ email** (email บริษัท) เท่านั้นก็พอ ระบบหาชื่อลูกค้าจากโดเมนของ email ให้เอง ถามชื่อบริษัทเพิ่มเฉพาะเมื่อ `POST /intake/links` ตอบ `customer.matched = false`
 2. เรียก `POST /intake/links` แล้วส่งลิงก์ให้ลูกค้า (แนะนำ Flex message ปุ่ม "กรอกฟอร์มแจ้งเคส")
 3. Endpoint รับ webhook: ตรวจลายเซ็น, ตอบ HTTP 2xx ภายใน 10 วินาที, กันประมวลผลซ้ำด้วย `id`
 4. เมื่อได้ webhook ส่ง push message ถึง `lineUserId` (ใช้ `message` สำเร็จรูปได้เลย หรือทำ Flex เอง)
@@ -84,7 +84,8 @@ Content-Type: application/json
 }
 ```
 
-- `customer.matched = false`: ชื่อไม่ตรงกับลูกค้าในระบบ ลิงก์ยังใช้ได้ เคสจะติดป้าย "ลูกค้าใหม่ รอ Admin ยืนยัน"
+- ระบบหาลูกค้าตามลำดับ: `customer` ที่ส่งมา → บริษัทที่จำไว้ของ `lineUserId` นี้ → โดเมนของ `contactEmail` (เช่น `@ktb.co.th` = KTB) ดังนั้นส่งแค่ `lineUserId`, `contactName`, `contactEmail` ก็ได้
+- `customer.matched = false`: ระบุลูกค้าไม่ได้ (ชื่อไม่ตรง หรือ email ส่วนตัว / โดเมนที่ยังไม่ผูก) ลิงก์ยังใช้ได้ เคสจะติดป้าย "ลูกค้าใหม่ รอ Admin ยืนยัน" · แชทบอทอาจถามชื่อบริษัทแล้วขอลิงก์ใหม่โดยส่ง `customer` มาด้วย
 - ข้อผิดพลาด: `401 NO_KEY / BAD_KEY`, `403 IP_NOT_ALLOWED`, `403 LINE_BLOCKED` (Admin บล็อกบัญชี LINE นี้), `429 RATE_LIMIT_LINE` (ขอเกิน 3 ครั้งต่อชั่วโมงต่อ LINE), `429 RATE_LIMIT_KEY`
 - ทุก error ตอบเป็น `{ "ok": false, "error": "English message you can show the customer", "code": "..." }`
 
