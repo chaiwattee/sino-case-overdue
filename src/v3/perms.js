@@ -45,11 +45,11 @@ const DEFAULTS = {
     audit_view: "all", users_manage: "none", settings_manage: "none", sr_create: "all", pm_manage: "none",
   },
   // Viewer: read-only on every team; exports cases (e.g. to send a customer their case list). No KPI.
-  // An admin can let them send service requests (sr_create), and let named users set up PM schedules (pm_manage).
+  // They set up PM schedules (pm_manage; other users can be given it one by one). Sending service requests (sr_create) is off until an admin ticks it.
   viewer: {
     view: "all", case_create: "none", case_edit: "none", case_close: "none", case_reassign: "none",
     case_edit_start: "none", case_delete: "none", export: "all", reports_manage: "none",
-    audit_view: "none", users_manage: "none", settings_manage: "none", sr_create: "none", pm_manage: "none",
+    audit_view: "none", users_manage: "none", settings_manage: "none", sr_create: "none", pm_manage: "all",
   },
 };
 
