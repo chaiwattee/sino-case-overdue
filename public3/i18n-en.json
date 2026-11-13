@@ -2435,5 +2435,11 @@
 "ไม่คิด KPI": "No KPI",
 "ไม่มีคะแนน ไม่อยู่ในอันดับ ไม่วัดรายคน · ส่งและรับคำขอบริการพร้อมแจ้งเตือนตามปกติ": "No scores, no ranking, nothing measured per person · service requests and their notifications work as usual",
 "ทีมนี้ไม่คิด KPI · ไม่มีคะแนน ไม่อยู่ในอันดับ และไม่วัดผลรายคน": "This team has no KPI: no scores, no ranking, nothing measured per person",
-"ทีมยังส่งและรับคำขอบริการ พร้อมการแจ้งเตือนตามปกติ": "The team still sends and receives service requests, with notifications as usual"
+"ทีมยังส่งและรับคำขอบริการ พร้อมการแจ้งเตือนตามปกติ": "The team still sends and receives service requests, with notifications as usual",
+"ยังไม่เสร็จ": "open",
+"จากทั้งหมด": "of",
+"คำขอที่ส่งถึงทีมของคุณ": "Requests sent to your team",
+"งานที่คุณเป็นผู้รับผิดชอบ": "Work you are responsible for",
+"คำขอที่คุณส่งไปให้ทีมอื่น": "Requests you sent to other teams",
+"ยังไม่มีคำขอ": "No requests yet"
 }

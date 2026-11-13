@@ -906,3 +906,15 @@ tr.pj-off td { opacity: .55; }
 .legend .lg { display: inline-block; width: 14px; height: 10px; border-radius: 3px; background: var(--accent); }
 .legend .lg.done { background: var(--normal); } .legend .lg.over { background: var(--over); } .legend .lg.todo { background: var(--closed); } .legend .lg.wait { background: var(--r1); }
 .linkbtn.danger { color: var(--over-fg); }
+
+/* Service requests: one card per list (to my team / assigned / I asked) with its numbers */
+.sr-scopes { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.sr-scope { display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); color: var(--ink); text-decoration: none; min-width: 0; }
+.sr-scope:hover { border-color: var(--accent); }
+.sr-scope.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--card)); }
+.sr-scope-l { font-weight: 700; font-size: 16px; }
+.sr-scope-h { font-size: 12.5px; color: var(--muted); }
+.sr-scope-n { margin-top: 6px; font-size: 14px; display: flex; align-items: baseline; gap: 5px; flex-wrap: wrap; }
+.sr-scope-p .chip { display: inline-flex; gap: 5px; }
+.sr-scope-n b { font-size: 30px; line-height: 1; font-weight: 700; margin-right: 4px; }
+.sr-scope-p { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; min-height: 24px; }

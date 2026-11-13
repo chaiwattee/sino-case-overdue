@@ -3761,7 +3761,20 @@ ${showAssignee ? `<td>${r.assignee ? esc(r.assignee.name) : "-"}</td>` : ""}
     const canAsk = ME.user.role === "requester" || lvl("sr_create") !== "none";
     const scopes = isReq ? [["mine", "คำขอของฉัน"]] : [...(m.canManage || ME.user.role === "observer" ? [["team", "คำขอถึงทีม"]] : []), ["assigned", "ได้รับมอบหมาย"], ["mine", "ที่ฉันขอ"]];
     const scope = scopes.some((x) => x[0] === params.scope) ? params.scope : scopes[0][0];
-    const { items: all } = await api("/sr?scope=" + scope);
+    // Every list is loaded so each tab shows its numbers without opening it.
+    const lists = Object.fromEntries(await Promise.all(scopes.map(async ([k]) => [k, (await api("/sr?scope=" + k)).items])));
+    const all = lists[scope];
+    const SC_HINT = { team: "คำขอที่ส่งถึงทีมของคุณ", assigned: "งานที่คุณเป็นผู้รับผิดชอบ", mine: "คำขอที่คุณส่งไปให้ทีมอื่น" };
+    const scopeCard = ([k, l]) => {
+      const L = lists[k];
+      const n = (f) => L.filter(f).length;
+      const open = n((r) => ["pending", "info", "in_progress", "overdue"].includes(r.status));
+      const parts = [["c-r1", "รออนุมัติ", n((r) => r.status === "pending")], ["c-r1", "ขอข้อมูลเพิ่ม", n((r) => r.status === "info")], ["c-normal", "กำลังดำเนินการ", n((r) => r.status === "in_progress")], ["c-overdue", "เลย Target", n((r) => r.status === "overdue")], ["c-closed", "เสร็จแล้ว", n((r) => r.status === "done")]];
+      return `<a class="sr-scope ${k === scope ? "on" : ""}" role="tab" aria-selected="${k === scope}" href="#/sr?${qs({ scope: k })}">
+<span class="sr-scope-l">${l}</span><span class="sr-scope-h">${SC_HINT[k] || ""}</span>
+<span class="sr-scope-n"><b>${open}</b><span>ยังไม่เสร็จ</span><span class="muted">จากทั้งหมด</span><span class="muted">${L.length}</span></span>
+<span class="sr-scope-p">${parts.filter((x) => x[2]).map(([c, t, v]) => `<span class="chip ${c}"><span>${t}</span><b>${v}</b></span>`).join("") || `<span class="muted">ยังไม่มีคำขอ</span>`}</span></a>`;
+    };
     // Team filter: shown when the list holds requests to more than one team.
     const teamCount = {};
     all.forEach((r) => (teamCount[r.team] = teamCount[r.team] || { label: r.teamLabel, n: 0 }) && teamCount[r.team].n++);
@@ -3783,7 +3796,7 @@ ${showAssignee ? `<td>${r.assignee ? esc(r.assignee.name) : "-"}</td>` : ""}
     $app.innerHTML = `<div class="pagehead"><div><h1>คำขอบริการ</h1><p class="muted" style="margin:0">ขอให้ทีม Engineer ช่วยทำงานภายใน เช่น ข้อมูล รายงาน ตั้งค่า · แยกจากเคสลูกค้า</p></div>
 ${canAsk ? `<a class="btn primary" href="#/sr/new">+ คำขอใหม่</a>` : ""}</div>
 ${canAsk && m.profileMissing.length ? `<div class="banner warn">กรอกหน่วยงาน ตำแหน่ง และเบอร์โทรของคุณก่อนส่งคำขอแรก <a href="#/profile">กรอกข้อมูล</a></div>` : ""}
-${scopes.length > 1 ? `<div class="fpills" role="tablist">${scopes.map(([k, l]) => `<a class="fpill ${k === scope ? "on" : ""}" role="tab" aria-selected="${k === scope}" href="#/sr?${qs({ scope: k })}">${l}</a>`).join("")}</div>` : ""}
+${scopes.length > 1 ? `<div class="sr-scopes" role="tablist">${scopes.map(scopeCard).join("")}</div>` : ""}
 ${teamOrder.length > 1 ? `<div class="fpills" style="margin-top:8px" aria-label="ทีม"><span class="hint" style="align-self:center;margin-right:2px">ทีม</span><a class="fpill ${team ? "" : "on"}" href="${link({ team: "", status: "" })}">ทุกทีม <b>${all.length}</b></a>${teamOrder.map((k) => `<a class="fpill ${k === team ? "on" : ""}" href="${link({ team: k, status: "" })}">${esc(teamCount[k].label)} <b>${teamCount[k].n}</b></a>`).join("")}</div>` : ""}
 <div class="fpills" style="margin-top:8px">${groups.map(([k, l, f]) => {
       const n = items.filter(f).length;
