@@ -19,7 +19,7 @@ function addMonths(iso, n) {
   x.setDate(Math.min(day, new Date(x.getFullYear(), x.getMonth() + 1, 0).getDate()));
   return d.toISODate(x);
 }
-/** May set up and edit PM schedules: the "pm_manage" permission (admin, manager and viewer by default). */
+/** May set up and edit PM schedules: the "pm_manage" permission (admin and manager by role; other users one by one). */
 const canManage = (user) => perms.can(user, "pm_manage");
 const DEFAULT_SLA = 14; // days a PM case has from its Start date (ordinary cases: SLA_DAYS)
 

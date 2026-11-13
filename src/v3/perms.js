@@ -16,7 +16,7 @@ const PERMS = [
   { key: "users_manage", label: "จัดการผู้ใช้และรีเซ็ตรหัสผ่าน", hint: "เพิ่ม ปิดใช้งาน กำหนดบทบาท" },
   { key: "settings_manage", label: "ตั้งค่าระบบ", hint: "รายการ dropdown, การเก็บข้อมูล, รายงานรายปี" },
   { key: "sr_create", label: "ส่งคำขอบริการ (Service Request)", hint: "ขอให้ทีมอื่นทำงานให้ และติดตามคำขอของตัวเอง", binary: true },
-  { key: "pm_manage", label: "ตั้งและแก้งาน PM ตามรอบ", hint: "เพิ่ม แก้ หยุด งาน PM, แบบฟอร์ม MA, เปิดเคสรอบนี้เลย", binary: true },
+  { key: "pm_manage", label: "ตั้งและแก้งาน PM ตามรอบ", hint: "เพิ่ม แก้ หยุด งาน PM, แบบฟอร์ม MA, เปิดเคสรอบนี้เลย", binary: true, perUser: true },
   { key: "hotline_edit", label: "แก้เบอร์ Hotline", hint: "เบอร์ใน email ตอบลูกค้าที่แจ้งเคสนอกเวลาทำการ", perUser: true },
 ];
 
@@ -45,11 +45,11 @@ const DEFAULTS = {
     audit_view: "all", users_manage: "none", settings_manage: "none", sr_create: "all", pm_manage: "none",
   },
   // Viewer: read-only on every team; exports cases (e.g. to send a customer their case list). No KPI.
-  // They set up PM schedules (pm_manage); an admin can also let them send service requests (sr_create).
+  // An admin can let them send service requests (sr_create), and let named users set up PM schedules (pm_manage).
   viewer: {
     view: "all", case_create: "none", case_edit: "none", case_close: "none", case_reassign: "none",
     case_edit_start: "none", case_delete: "none", export: "all", reports_manage: "none",
-    audit_view: "none", users_manage: "none", settings_manage: "none", sr_create: "none", pm_manage: "all",
+    audit_view: "none", users_manage: "none", settings_manage: "none", sr_create: "none", pm_manage: "none",
   },
 };
 
