@@ -1126,6 +1126,14 @@ ${actsHtml(data.activities)}</section>`}
     const f = document.getElementById("cf");
     bindCombo(f, "site", lk.site, { newLabel: (v) => `+ ใช้ชื่อใหม่ “${esc(v)}” (ต้องให้ Manager อนุมัติ)` });
     f.status.addEventListener("change", () => (document.getElementById("st-hint").textContent = statusHelp(f.status.value)));
+    // The owner list follows the team picked: members of that team (plus the current owner), keeping the choice when it still fits.
+    if (f.owner_id && !f.team.disabled)
+      f.team.addEventListener("change", () => {
+        const keep = Number(f.owner_id.value);
+        const list = usersRes.users.filter((u) => u.teams.includes(f.team.value) || u.id === c.ownerUserId);
+        const sel = list.some((u) => u.id === keep) ? keep : c.ownerUserId;
+        f.owner_id.innerHTML = list.map((u) => `<option value="${u.id}" ${u.id === sel ? "selected" : ""}>${esc(u.display_name)}</option>`).join("");
+      });
     if (!closed) bindSimilar(f, isNew ? null : c);
     f.onsubmit = async (e) => {
       e.preventDefault();
