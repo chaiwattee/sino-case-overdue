@@ -54,7 +54,7 @@ function mount(api, { wrap }) {
       total: { ...stats(cases, R), srOpen: srs.reduce((a, r) => a + r.n, 0) },
       teams: teams.map((t) => {
         const list = cases.filter((c) => c.team === t.code);
-        return { code: t.code, label: t.label, members: mem[t.code] || 0, srOpen: sr[t.code] || 0, ...stats(list, R), topCustomers: top(list.filter((c) => c.stage !== "closed").length ? list.filter((c) => c.stage !== "closed") : list) };
+        return { code: t.code, label: t.label, members: mem[t.code] || 0, active: new Set(list.filter((c) => c.owner_id && (c.stage !== "closed" || (c.endDate && c.endDate >= R.from && c.endDate <= R.to))).map((c) => c.owner_id)).size, srOpen: sr[t.code] || 0, ...stats(list, R), topCustomers: top(list.filter((c) => c.stage !== "closed").length ? list.filter((c) => c.stage !== "closed") : list) };
       }),
     });
   }));

@@ -604,6 +604,33 @@ function mount(api, { wrap, need }) {
       sel: sel ? { ...sel, ...scores.get(sel.id) } : null,
     });
   }));
+  // The short KPI summary shown beside a person's cases (the per-user page and "My cases"). Same rule as the KPI page:
+  // your own, or - for admin / manager / observer - someone in a team you see. Teams without KPI get no card.
+  api.get("/kpi/card/:id(\\d+)", wrap(async (req, res) => {
+    const id = Number(req.params.id);
+    const u = req.user;
+    if (["viewer", "requester"].includes(u.role)) return res.json({ card: null });
+    if (!canAll(u) && id !== u.id) return res.json({ card: null });
+    const mates = await require("./perms").teamMateIds(u);
+    if (mates && !mates.has(id)) return res.json({ card: null });
+    const r = await compute(req.query.month);
+    const o = r.owners.find((x) => x.id === id);
+    if (!o || o.profile === "none" || o.profile === "response") return res.json({ card: null });
+    const lines = String(o.summary || "").split("\n");
+    const pick = (head) => ((lines.find((l) => l.startsWith(head)) || "").slice(head.length).split(/ · (?![^(]*\))/).map((x) => x.trim()).filter(Boolean).slice(0, 4));
+    const m = o.metrics;
+    res.json({
+      card: {
+        userId: o.id, month: r.month, current: r.month === monthRange().ym, profile: o.profile, score: o.score, grade: o.grade, insufficient: !!o.insufficient,
+        teamAvg: r.team.avgScore, adjust: o.adjust ? o.adjust.points : 0,
+        parts: (o.partDefs || []).filter(([, , w]) => w > 0).map(([k, l, w]) => ({ key: k, label: l, max: w, value: o.parts[k] == null ? null : Math.round(o.parts[k]) })),
+        facts: o.profile === "service"
+          ? [["คำขอบริการเสร็จ", m.srDone], ["ทันกำหนด", m.srOnTimePct == null ? "-" : m.srOnTimePct + "%"], ["เลย Target ตอนนี้", m.srOverdueNow || 0], ["คะแนนจากผู้ขอ", m.ratingCount ? `${m.ratingAvg}/5` : "-"]]
+          : [["ดูแล / ปิด", `${o.handled} / ${m.closed}`], ["ปิดทัน SLA", m.slaPct == null ? "-" : m.slaPct + "%"], ["ตอบครั้งแรก", m.firstResponseHrs == null ? "-" : `${m.firstResponseHrs} ชม.`], ["คะแนนจากลูกค้า", m.csatCount ? `${m.csatAvg}/5` : "-"]],
+        good: pick("จุดเด่น: "), work: pick("ควรพัฒนา: "),
+      },
+    });
+  }));
   api.get("/kpi/trend/:id(\\d+)", wrap(async (req, res) => {
     const id = Number(req.params.id);
     if (!canAll(req.user) && id !== req.user.id) return res.status(403).json({ error: "ดูได้เฉพาะ KPI ของตัวเอง" });

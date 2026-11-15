@@ -876,6 +876,7 @@ ${soon.length ? `<div class="banner warn" role="status">${soon.map((c) => `<a hr
 <div class="kpi k-closed"><div class="l">ปิดทัน SLA (30 วัน)</div><div class="v">${sla}</div></div>
 ${srMine.length ? `<a class="kpi k-sr" href="#mine-sr"><div class="l">คำขอบริการค้าง</div><div class="v">${srMine.length}</div><div class="s">${srMine.filter((r) => r.status === "overdue").length ? `เลย Target ${srMine.filter((r) => r.status === "overdue").length}` : "ไม่มีที่เลย Target"}</div></a>` : ""}
 </div>
+<div id="mine-kpi"></div>
 ${srLate.length ? `<div class="banner warn" role="status">คำขอบริการ: ${srLate.map((r) => `<a href="#/sr/${r.id}">${esc(r.srNo)}</a> ${esc(r.title)} ${r.status === "overdue" ? `เลย Target ${r.overdueDays} วันทำการ` : r.daysLeft === 0 ? "ครบ Target วันนี้" : "ครบ Target วันทำการถัดไป"}`).join(" · ")}</div>` : ""}
 <section class="card">
 <div class="title"><div class="tabs2" role="tablist">
@@ -901,6 +902,7 @@ ${list.map((c) => `<tr class="click" data-href="#/case/${c.id}">
 ${srWorkTable(srMine)}</section>
 <p class="hint">เปลี่ยน Status ในตารางแล้วบันทึกทันที ถ้าเลือก Success, Resolved, Cancel หรือ N/A ระบบจะให้กรอก Resolution ก่อนปิด แล้วใส่ End date ให้และหยุดแจ้งเตือน เคสที่มี CS Number ต้องใส่ RCA จาก NICE ด้วย (ยกเว้น Cancel / N/A)</p>`;
     bindRowLinks();
+    loadKpiCard("mine-kpi", ME.user.id, "", { compact: true });
     bindIntakeActions($app, () => route());
     bindExtPending($app);
     bindTransferPending($app);
@@ -1358,6 +1360,30 @@ ${actsHtml(data.activities)}</section>`}
     document.addEventListener("click", (e) => !wrap.contains(e.target) && close());
   }
 
+  // KPI summary beside a person's cases. `compact` = one line (My cases); otherwise bars and the two lists (per-user page).
+  function kpiCardHtml(c, { compact } = {}) {
+    if (!c) return "";
+    const when = `${esc(ymLabel(c.month, true))}${c.current ? " · ถึงวันนี้" : ""}`;
+    const score = c.insufficient ? `<b class="kc-score">${c.score}</b><span class="muted">ข้อมูลยังไม่พอให้เกรด</span>` : `<b class="kc-score" style="color:${kpiColor(c.score, 100)}">${c.score}</b><span class="kc-grade">${esc(c.grade || "")}</span>`;
+    const facts = c.facts.map(([l, v]) => `<div><span>${esc(l)}</span><b>${esc(String(v))}</b></div>`).join("");
+    const link = `<a class="btn" href="#/kpi?${qs({ month: c.month, owner: c.userId })}">ดูรายละเอียด KPI</a>`;
+    if (compact)
+      return `<section class="card kc kc-compact"><div class="kc-head"><div><div class="kc-l">KPI ของฉัน · ${when}</div><div class="kc-s">${score}${c.teamAvg != null ? `<span class="muted">ค่าเฉลี่ยทีม ${c.teamAvg}</span>` : ""}</div></div><div class="kc-facts">${facts}</div>${link}</div>
+${c.work.length ? `<p class="kc-work"><b>ควรพัฒนา:</b> ${esc(c.work.join(" · "))}</p>` : ""}</section>`;
+    return `<section class="card kc"><div class="title"><h2>KPI · ${when}</h2><span>${c.current ? "คะแนนระหว่างเดือนยังเปลี่ยนได้จนสิ้นเดือน" : "คะแนนของเดือนที่เลือก"}</span>${link}</div>
+<div class="kc-body"><div class="kc-left"><div class="kc-s">${score}</div>${c.teamAvg != null ? `<div class="muted" style="font-size:13px">ค่าเฉลี่ยทีม ${c.teamAvg}${c.adjust ? ` · Manager ปรับ ${c.adjust > 0 ? "+" : ""}${c.adjust}` : ""}</div>` : ""}<div class="kc-facts">${facts}</div></div>
+<div class="kc-bars">${c.parts.map((p) => `<div class="kp-bar"><span>${esc(p.label)} (${p.max})</span><div class="t"><div style="width:${p.value == null ? 0 : Math.min(100, (p.value / p.max) * 100)}%;background:${kpiColor(p.value, p.max)}"></div></div><b>${p.value == null ? "-" : p.value} / ${p.max}</b></div>`).join("")}</div></div>
+${c.good.length || c.work.length ? `<div class="kc-notes">${c.good.length ? `<div class="kc-good"><b>จุดเด่น</b><ul>${c.good.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>` : ""}${c.work.length ? `<div class="kc-bad"><b>ควรพัฒนา</b><ul>${c.work.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>` : ""}</div>` : ""}</section>`;
+  }
+  /** Fills #id with the card once it arrives, so the page itself never waits for the KPI numbers. */
+  function loadKpiCard(elId, userId, month, opts) {
+    if (!userId || ["viewer", "requester"].includes(ME.user.role)) return;
+    api(`/kpi/card/${userId}?${qs({ month: month || "" })}`).then((r) => {
+      const el = document.getElementById(elId);
+      if (el && r.card) el.innerHTML = kpiCardHtml(r.card, opts);
+    }).catch(() => {});
+  }
+
   async function viewOwner(id, params = {}) {
     setNav("owner");
     if (!id) {
@@ -1408,6 +1434,7 @@ ${lvl("export") === "all" ? `<a class="btn" href="api/export?${qs({ from: daysAg
 <div class="kpi k-closed"><div class="l">ปิดทัน SLA · ${esc(mLabel(M.ym))}</div><div class="v">${M.slaPct === null ? "-" : M.slaPct + "%"}</div><div class="s">${M.onTime} จาก ${M.closed} เคส · เปิดใหม่ ${M.opened}</div></div>
 <div class="kpi k-sr"><div class="l">คำขอบริการค้าง</div><div class="v">${srOwner.length}</div><div class="s">เลย Target ${srOwner.filter((r) => r.status === "overdue").length}</div></div>
 </div>
+<div id="owner-kpi"></div>
 <section class="card"><div class="title"><h2>เคสที่ยังไม่ปิด</h2><span>เรียงจากเปิดนานสุด</span></div>${caseTable(open, { showOwner: false })}</section>
 <section class="card"><div class="title"><h2>คำขอบริการที่ยังไม่ปิด (${srOwner.length})</h2><span>งานภายในที่ได้รับมอบหมาย · เรียงตาม Target date</span></div>${srWorkTable(srOwner)}</section>
 <div class="grid2">
@@ -1425,6 +1452,7 @@ ${o.changes.length && lvl("audit_view") !== "none" ? `<section class="card"><h2>
     document.querySelectorAll("[data-month]").forEach((b) => (b.onclick = () => (location.hash = `#/owner/${encodeURIComponent(o.id)}?month=${b.dataset.month}`)));
     bindUserSearch(params.month);
     bindRowLinks();
+    loadKpiCard("owner-kpi", o.user && o.user.id, M.ym);
   }
 
 
@@ -3736,7 +3764,9 @@ ${teamKpis(r.total)}
         (t) => `<a class="tm-card" href="#/team/${encodeURIComponent(t.code)}?${qs({ month: params.month })}"><h3><span>${esc(t.label)}</span>${t.overdue ? `<span class="chip c-overdue">เกิน Due ${t.overdue}</span>` : `<span class="chip c-ok">ปกติ</span>`}</h3>
 <div class="tm-nums"><div>ยังไม่ปิด<b>${t.open}</b></div><div>ใกล้ Due<b>${t.soon}</b></div><div>ปิดในเดือน<b>${t.closed}</b></div><div>คำขอค้าง<b>${t.srOpen}</b></div></div>
 <div><div class="tm-foot"><span>ทัน SLA</span><b>${t.slaPct == null ? "-" : t.slaPct + "%"}</b></div><div class="tm-bar"><i style="width:${t.slaPct || 0}%;background:${slaColor(t.slaPct)}"></i></div></div>
-<div class="tm-foot"><span>${t.members} คน${t.members ? ` · งานเฉลี่ย ${(t.open / t.members).toFixed(1)} เคส/คน` : ""}</span><span>${t.topCustomers.length ? "ลูกค้าหลัก: " + esc(t.topCustomers.join(", ")) : ""}</span></div></a>`
+<div class="tm-foot2"><div><span>${t.members} คนในทีม</span>${t.active != null ? `<span>มีเคสเดือนนี้ <b>${t.active}</b> คน</span>` : ""}</div>
+${t.members ? `<div><span>ถืออยู่ตอนนี้เฉลี่ย <b>${(t.open / t.members).toFixed(1)}</b> เคส/คน</span><span>ปิดในเดือนเฉลี่ย <b>${(t.closed / t.members).toFixed(1)}</b> เคส/คน</span></div>` : ""}
+${t.topCustomers.length ? `<div><span>ลูกค้าหลัก: ${esc(t.topCustomers.join(", "))}</span></div>` : ""}</div></a>`
       )
       .join("") || `<div class="empty">ไม่มีทีม</div>`}</div>`;
     document.getElementById("tm-month").onchange = (e) => (location.hash = "#/team?" + qs({ month: e.target.value }));

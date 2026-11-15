@@ -2669,5 +2669,20 @@
 "เคสที่เปิดพร้อมกันเฉลี่ยต่อวัน · ตัวเล็ก = เคสเข้าใหม่ในเดือนนั้น · สีเข้ม = งานมาก": "Average cases open at once per day · small number = new cases that month · darker = busier",
 "ช่วงที่สีอ่อนซ้ำกันหลายปีคือช่วงที่เคสเข้าน้อย เหมาะกับการวางงาน PM การอบรม หรือการลา · เดือนที่ยังไม่ครบไม่ถูกนำมาเทียบสี": "Months that stay light across several years are when few cases come in: good for PM work, training or leave · months that are not complete are not shaded",
 "ยังมีข้อมูลไม่ถึง 2 วัน": "Less than 2 days of data",
-"ยังไม่ครบเดือน": "Month not complete"
+"ยังไม่ครบเดือน": "Month not complete",
+"มีเคสเดือนนี้": "with cases this month",
+"ถืออยู่ตอนนี้เฉลี่ย": "Holding now, average",
+"ปิดในเดือนเฉลี่ย": "Closed this month, average",
+"ลูกค้าหลัก:": "Main customers:",
+"KPI ของฉัน": "My KPI",
+"ข้อมูลยังไม่พอให้เกรด": "Not enough data for a grade",
+"ดูรายละเอียด KPI": "See KPI details",
+"ควรพัฒนา:": "To improve:",
+"คะแนนระหว่างเดือนยังเปลี่ยนได้จนสิ้นเดือน": "The score can still change until the end of the month",
+"คะแนนของเดือนที่เลือก": "Score of the selected month",
+"Manager ปรับ": "Manager adjustment",
+"คำขอบริการเสร็จ": "Requests done",
+"เลย Target ตอนนี้": "Past target now",
+"ตอบครั้งแรก": "First response",
+"คะแนนจากลูกค้า": "Customer rating"
 }
