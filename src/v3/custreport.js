@@ -286,15 +286,29 @@ async function sendAll() {
 
 function mount(api, { wrap, need, perms }) {
   const canSend = async (user) => (await perms.level(user, "reports_manage")) === "all";
+  // A manager works on the reports of customers their own teams serve: a case of that customer in the team, or a product the team looks after.
+  const siteAllowed = async (user, site) => {
+    const scope = perms.teamScope(user);
+    if (!scope) return true;
+    return !!(await one(
+      `SELECT 1 WHERE EXISTS (SELECT 1 FROM cases WHERE lower(site) = lower($1) AND team = ANY($2))
+                   OR EXISTS (SELECT 1 FROM customer_products WHERE lower(site) = lower($1) AND team = ANY($2))`,
+      [site, scope]
+    ));
+  };
+  const needSite = async (user, site) => {
+    if (!(await siteAllowed(user, site))) throw Object.assign(new Error("ลูกค้ารายนี้ไม่ได้อยู่ในความดูแลของทีมคุณ ให้ Manager ของทีมที่ดูแลหรือ Admin เป็นผู้ตั้งและส่งรายงาน"), { status: 403 });
+  };
   api.get("/customer/report", wrap(async (req, res) => {
     const site = String(req.query.site || "").trim();
     const s = await settingFor(site);
-    res.json({ setting: s, canEdit: await canSend(req.user), months: [0, 1, 2, 3, 4, 5].map((n) => { const t = d.today(); const x = new Date(t.getFullYear(), t.getMonth() - n, 1); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}`; }), defaultMonth: prevYm() });
+    res.json({ setting: s, canEdit: (await canSend(req.user)) && (await siteAllowed(req.user, site)), months: [0, 1, 2, 3, 4, 5].map((n) => { const t = d.today(); const x = new Date(t.getFullYear(), t.getMonth() - n, 1); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}`; }), defaultMonth: prevYm() });
   }));
   api.get("/customer/report.pdf", wrap(async (req, res) => {
     if ((await perms.level(req.user, "export")) !== "all" && !(await canSend(req.user))) throw Object.assign(new Error("ไม่มีสิทธิ์ดาวน์โหลด Report ลูกค้า"), { status: 403 });
     const site = String(req.query.site || "").trim();
     if (!site) throw Object.assign(new Error("ไม่ได้ระบุลูกค้า"), { status: 400 });
+    await needSite(req.user, site);
     const ym = /^\d{4}-\d{2}$/.test(req.query.month || "") ? req.query.month : prevYm();
     const { buffer, data: x } = await pdf(site, ym);
     await audit(req.user, "customer_report_download", x.site, { month: ym });
@@ -306,6 +320,7 @@ function mount(api, { wrap, need, perms }) {
     const b = req.body || {};
     const site = String(b.site || "").trim();
     if (!(await one("SELECT 1 FROM lookups WHERE kind = 'site' AND lower(value) = lower($1)", [site]))) throw Object.assign(new Error("ไม่พบลูกค้ารายนี้ในรายการ"), { status: 400 });
+    await needSite(req.user, site);
     const to = emails(b.recipients);
     if (b.enabled && !to.length) throw Object.assign(new Error("ใส่อีเมลผู้รับของลูกค้าอย่างน้อย 1 คนก่อนเปิดส่งอัตโนมัติ"), { status: 400 });
     await q(
@@ -319,6 +334,7 @@ function mount(api, { wrap, need, perms }) {
   api.post("/customer/report/send", need("reports_manage"), wrap(async (req, res) => {
     const b = req.body || {};
     const ym = /^\d{4}-\d{2}$/.test(b.month || "") ? b.month : prevYm();
+    await needSite(req.user, String(b.site || "").trim());
     res.json(await send(String(b.site || "").trim(), ym, { to: b.to, cc: b.cc, by: req.user }));
   }));
 }

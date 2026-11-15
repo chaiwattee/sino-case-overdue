@@ -1546,10 +1546,10 @@ ${srOwner.length ? `<h2 class="mt-sec">คำขอบริการภาย�
     const schedules = sch.schedules;
     const ownerOpts = ov.owners.map((o) => `<option value="${esc(o.id)}">${esc(o.owner)}</option>`).join("");
     $app.innerHTML = `
-<div class="head"><div><h1>Report &amp; Export</h1><p>${manage ? "ตั้งรอบส่ง report ให้ Manager ทาง email หรือ export เองตามช่วงวันที่ที่ต้องการ" : "Export เคสตามช่วงวันที่ที่ต้องการ"}</p></div></div>
+<div class="head"><div><h1>Report &amp; Export</h1><p>${manage ? "ตั้งรอบส่ง report ให้ Manager ทาง email หรือ export เองตามช่วงวันที่ที่ต้องการ" : "Export เคสตามช่วงวันที่ที่ต้องการ"}${manage && sch.allTeams === false ? ` · รอบส่งที่คุณตั้งมีเฉพาะเคสของทีมคุณ (${esc((sch.myScope || []).join(", ") || "-")}) และคุณเห็นเฉพาะรอบที่สร้างเอง` : ""}</p></div></div>
 ${manage ? `<section class="sched">
 ${schedules.map((s) => `<div class="card"><div class="title"><h2>${esc(s.name)}</h2>${s.enabled ? chip("ok", "เปิดใช้") : chip("closed", "ปิดอยู่")}</div>
-<div class="meta">${esc(s.description)} · ${esc(RANGE_TYPES[s.range_type] || s.range_type)}<br>ถึง: ${esc(s.recipients)}${s.cc ? `<br>CC: ${esc(s.cc)}` : ""}<br>แนบ: ${s.attach_excel === false ? "ไม่แนบไฟล์" : "Excel"}</div>
+<div class="meta">${esc(s.description)} · ${esc(RANGE_TYPES[s.range_type] || s.range_type)}<br>ข้อมูลในรายงาน: ${esc(s.scopeLabel)}${sch.allTeams && s.by_name ? ` · สร้างโดย ${esc(s.by_name)}` : ""}<br>ถึง: ${esc(s.recipients)}${s.cc ? `<br>CC: ${esc(s.cc)}` : ""}<br>แนบ: ${s.attach_excel === false ? "ไม่แนบไฟล์" : "Excel"}</div>
 <div class="muted" style="font-size:13px">ส่งล่าสุด: ${s.last_sent_at ? fdt(s.last_sent_at) : "ยังไม่เคยส่ง"} · รอบหน้าใช้ข้อมูล ${esc(s.nextRange)}</div>
 <div class="actions"><button class="btn" type="button" data-edit="${s.id}">แก้ไข</button><button class="btn" type="button" data-test="${s.id}">ส่งทดสอบ</button><button class="btn danger" type="button" data-del="${s.id}">ลบ</button></div></div>`).join("")}
 <button class="add" type="button" id="add-sched">เพิ่มรอบส่ง Report</button>

@@ -613,41 +613,63 @@ function cleanSchedule(b) {
   if (s.day_of_week !== undefined) s.day_of_week = Math.min(7, Math.max(1, Number(s.day_of_week) || 1));
   return s;
 }
+// An admin runs every schedule. Anyone else with "reports_manage" has only the schedules they made, and those cover
+// only their own teams (scope_teams), so a manager cannot add an address to a company-wide report or change someone else's.
+const allSchedules = (u) => u.role === "admin";
+const scopeFor = (u) => (allSchedules(u) ? null : [...(u.teams || [])]);
+async function scheduleFor(req) {
+  const s = await one("SELECT * FROM report_schedules WHERE id = $1", [Number(req.params.id)]);
+  if (!s) throw bad("ไม่พบรอบส่งนี้", 404);
+  if (!allSchedules(req.user) && s.created_by !== req.user.id) throw bad("แก้ได้เฉพาะรอบส่งที่คุณสร้างเอง รอบอื่นให้ Admin เป็นผู้แก้", 403);
+  return s;
+}
 api.get("/schedules", need("reports_manage"), wrap(async (req, res) => {
-  const rows = await all("SELECT * FROM report_schedules ORDER BY id");
+  const rows = allSchedules(req.user)
+    ? await all("SELECT s.*, u.display_name AS by_name FROM report_schedules s LEFT JOIN users u ON u.id = s.created_by ORDER BY s.id")
+    : await all("SELECT s.*, u.display_name AS by_name FROM report_schedules s LEFT JOIN users u ON u.id = s.created_by WHERE s.created_by = $1 ORDER BY s.id", [req.user.id]);
+  const labels = new Map((await teamsList()).map((t) => [t.key, t.label]));
   res.json({
+    allTeams: allSchedules(req.user),
+    myScope: (scopeFor(req.user) || []).map((c) => labels.get(c) || c),
     schedules: rows.map((s) => {
       const r = reports.resolveRange(s.range_type);
-      return { ...s, description: reports.describeSchedule(s), nextRange: reports.rangeLabel(r.from, r.to) };
+      return { ...s, description: reports.describeSchedule(s), nextRange: reports.rangeLabel(r.from, r.to), scopeLabel: s.scope_teams ? s.scope_teams.map((c) => labels.get(c) || c).join(", ") || "ไม่มีทีม" : "ทุกทีม" };
     }),
   });
 }));
 api.post("/schedules", need("reports_manage"), wrap(async (req, res) => {
   const s = cleanSchedule(req.body);
+  if (!allSchedules(req.user) && !(req.user.teams || []).length) throw bad("คุณยังไม่ได้อยู่ในทีมใด จึงตั้งรอบส่งรายงานไม่ได้", 403);
+  s.created_by = req.user.id;
+  s.scope_teams = scopeFor(req.user);
   const cols = Object.keys(s);
   const row = await one(`INSERT INTO report_schedules (${cols.join(",")}) VALUES (${cols.map((_, i) => "$" + (i + 1)).join(",")}) RETURNING *`, Object.values(s));
   await audit(req.user, "schedule_create", row.name, s);
   res.json({ schedule: row });
 }));
 api.put("/schedules/:id", need("reports_manage"), wrap(async (req, res) => {
+  const cur = await scheduleFor(req);
   const s = cleanSchedule(req.body);
+  if (!Object.keys(s).length) throw bad("ไม่มีข้อมูลที่จะแก้");
+  // A manager's schedule follows the teams that manager is in now; an admin's edit leaves the scope as it was.
+  if (!allSchedules(req.user)) s.scope_teams = scopeFor(req.user);
+  else if (cur.scope_teams) s.scope_teams = cur.scope_teams;
   const cols = Object.keys(s);
-  if (!cols.length) throw bad("ไม่มีข้อมูลที่จะแก้");
   const row = await one(`UPDATE report_schedules SET ${cols.map((c, i) => `${c}=$${i + 1}`).join(",")} WHERE id=$${cols.length + 1} RETURNING *`, [...Object.values(s), Number(req.params.id)]);
   await audit(req.user, "schedule_update", row?.name, s);
   res.json({ schedule: row });
 }));
 api.delete("/schedules/:id", need("reports_manage"), wrap(async (req, res) => {
+  await scheduleFor(req);
   const old = await one("DELETE FROM report_schedules WHERE id=$1 RETURNING name", [Number(req.params.id)]);
   await audit(req.user, "schedule_delete", old?.name);
   res.json({ ok: true });
 }));
 api.post("/schedules/:id/test", need("reports_manage"), wrap(async (req, res) => {
-  const s = await one("SELECT * FROM report_schedules WHERE id=$1", [Number(req.params.id)]);
-  if (!s) throw bad("ไม่พบรอบส่งนี้", 404);
+  const s = await scheduleFor(req);
   const { from, to } = reports.resolveRange(s.range_type);
   await audit(req.user, "schedule_test", s.name, { to: req.body?.to || s.recipients });
-  res.json(await jobs.sendReport({ title: `[ทดสอบ] ${s.name}`, recipients: req.body?.to || s.recipients, cc: req.body?.to ? "" : s.cc, from, to, attachExcel: s.attach_excel, scheduleId: s.id }));
+  res.json(await jobs.sendReport({ title: `[ทดสอบ] ${s.name}`, recipients: req.body?.to || s.recipients, cc: req.body?.to ? "" : s.cc, from, to, attachExcel: s.attach_excel, scheduleId: s.id, teams: s.scope_teams }));
 }));
 
 // ------------------------------------------------------------ users (admin)

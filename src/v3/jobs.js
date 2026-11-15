@@ -184,9 +184,12 @@ async function addCustomerSheet(buf, rep) {
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
-async function sendReport({ title, recipients, cc, from, to, owner, sites = [], attachExcel = true, scheduleId = null, user = null }) {
-  const cases = filterSites(await repo.loadCases(user), sites);
-  const changes = await listChanges({ from: from.toISOString(), limit: 5000, caseIds: sites.length ? cases.map((c) => c.id) : undefined });
+async function sendReport({ title, recipients, cc, from, to, owner, sites = [], attachExcel = true, scheduleId = null, user = null, teams = null }) {
+  // teams = a schedule's own scope (a manager's schedule covers that manager's teams only); otherwise what `user` may see.
+  const viewer = Array.isArray(teams) ? { role: "manager", teams } : user;
+  const scoped = !!viewer && !require("./perms").seesAllTeams(viewer);
+  const cases = filterSites(await repo.loadCases(viewer), sites);
+  const changes = await listChanges({ from: from.toISOString(), limit: 5000, caseIds: sites.length || scoped ? cases.map((c) => c.id) : undefined });
   const rep = await reports.buildReport({ from, to, owner, cases, changes });
   await require("./extensions").augmentReport(rep, { caseIds: scopeIds(rep) });
   title = (title || "รายงานสถานะเคส") + (sites.length ? ` · ลูกค้า ${sitesLabel(sites)}` : "");
@@ -232,7 +235,7 @@ async function runDueSchedules(now = new Date()) {
     if (s.last_period === todayIso || !scheduleMatchesNow(s, now)) continue;
     const { from, to } = reports.resolveRange(s.range_type, d.startOfDay(now));
     try {
-      await sendReport({ title: s.name, recipients: s.recipients, cc: s.cc, from, to, attachExcel: s.attach_excel, scheduleId: s.id });
+      await sendReport({ title: s.name, recipients: s.recipients, cc: s.cc, from, to, attachExcel: s.attach_excel, scheduleId: s.id, teams: s.scope_teams });
       out.push({ id: s.id, ok: true });
     } catch (e) {
       out.push({ id: s.id, ok: false, error: e.message });
