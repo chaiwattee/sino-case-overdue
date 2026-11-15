@@ -3344,20 +3344,98 @@ ${owners.map((o) => {
   }
 
   // ------------------------------------------------------------ workload: what each person has open right now
+  const WL_TABS = (view, team) => `<div class="fpills" role="tablist">${[["now", "ตอนนี้"], ["stat", "สถิติย้อนหลัง"]].map(([k, l]) => `<a class="fpill ${k === view ? "on" : ""}" role="tab" aria-selected="${k === view}" href="#/workload?${qs({ view: k === "now" ? "" : k, team })}">${l}</a>`).join("")}</div>`;
+  const WL_KIND = [["cases", "w-case", "เคส"], ["sr", "w-sr", "คำขอบริการ"], ["tasks", "w-task", "Task โปรเจกต์"]];
+  const WL_PAL = ["#2A78D6", "#9B59B6", "#1E9E6A", "#E08A00", "#D64561", "#16A3B8", "#7C8A1E", "#8E6BD9", "#C2571A", "#4F6B8A", "#B0489B"];
+  /** Stacked areas (series = [[class|color, label, values]]) or plain lines, one point per day, with month ticks and a hover read-out. */
+  function wlChart(days, series, { stacked }) {
+    const W = 1000, H = 280, L = 44, R = 12, T = 12, B = 28;
+    const n = days.length;
+    if (n < 2) return `<div class="empty">ยังมีข้อมูลไม่ถึง 2 วัน</div>`;
+    const tops = stacked ? days.map((_, i) => series.reduce((a, s) => a + s[2][i], 0)) : days.map((_, i) => Math.max(...series.map((s) => s[2][i])));
+    const raw = Math.max(1, ...tops);
+    const step = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000].find((x) => raw / x <= 5) || 2000;
+    const max = Math.ceil(raw / step) * step;
+    const x = (i) => L + (i / (n - 1)) * (W - L - R);
+    const y = (v) => T + (1 - v / max) * (H - T - B);
+    const grid = Array.from({ length: max / step + 1 }, (_, k) => k * step).map((v) => `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" class="wl-grid"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end" class="wl-ax">${v}</text>`).join("");
+    const every = n > 800 ? 6 : n > 400 ? 3 : n > 200 ? 2 : 1;
+    let mi = 0;
+    const ticks = days.map((d, i) => {
+      if (i && d.slice(8) !== "01") return "";
+      if (!i && d.slice(8) !== "01") return "";
+      const show = mi++ % every === 0;
+      return `<line x1="${x(i)}" x2="${x(i)}" y1="${T}" y2="${H - B}" class="wl-grid"/>${show ? `<text x="${x(i) + 3}" y="${H - 9}" class="wl-ax">${esc(ymLabel(d.slice(0, 7), true))}</text>` : ""}`;
+    }).join("");
+    const paint = (c) => (c.startsWith("#") ? `style="--c:${c}"` : `class="${c}"`);
+    let body = "";
+    if (stacked) {
+      let base = days.map(() => 0);
+      for (const s of series) {
+        const top = base.map((b, i) => b + s[2][i]);
+        body += `<path d="M${top.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("L")}L${base.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).reverse().join("L")}Z" ${paint(s[0])} data-area/>`;
+        base = top;
+      }
+    } else body = series.map((s) => `<path d="M${s[2].map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("L")}" ${paint(s[0])} data-line/>`).join("");
+    const bw = (W - L - R) / (n - 1);
+    const hover = days.map((d, i) => `<rect x="${(x(i) - bw / 2).toFixed(1)}" y="${T}" width="${bw.toFixed(1)}" height="${H - T - B}" class="wl-hit"><title>${fd(d, true)} · ${series.map((s) => `${s[1]} ${s[2][i]}`).join(" · ")}${stacked ? ` · รวม ${tops[i]}` : ""}</title></rect>`).join("");
+    return `<div class="wl-chart"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="กราฟงานที่เปิดพร้อมกันรายวัน">${grid}${ticks}${body}${hover}</svg>
+<div class="wl-legend">${series.map((s) => `<span><i ${paint(s[0])}></i>${esc(s[1])}</span>`).join("")}</div></div>`;
+  }
+  async function viewWorkloadStat(params) {
+    const range = ["3", "6", "12", "all"].includes(params.range) ? params.range : "6";
+    const r = await api("/workload/history?" + qs({ team: params.team || "", range }));
+    const s = r.summary;
+    const link = (o) => "#/workload?" + qs({ view: "stat", range, team: r.team, ...o });
+    const teamLabel = (c) => (r.teams.find((t) => t.code === c) || {}).label || c;
+    const teamSeries = Object.entries(r.byTeam).map(([c, v], i) => [WL_PAL[i % WL_PAL.length], teamLabel(c), v]);
+    const kinds = WL_KIND.map(([k, cls, l]) => [cls, l, r[k]]);
+    const mAvg = r.months.filter((x) => !x.partial).map((x) => x.avg);
+    const hi = mAvg.length ? Math.max(...mAvg) : 0;
+    const lo = mAvg.length ? Math.min(...mAvg) : 0;
+    const teamCols = r.team ? [] : Object.keys(r.byTeam);
+    // Year by year: the same month side by side, shaded by how many cases were open at once.
+    const sAll = r.season.flatMap((yy) => yy.months.filter((x) => x && !x.partial).map((x) => x.avgCases));
+    const sMax = Math.max(1, ...sAll);
+    const sMin = sAll.length ? Math.min(...sAll) : 0;
+    const MON = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+    $app.innerHTML = `<div class="pagehead"><div><h1>ภาระงาน</h1><p class="muted" style="margin:0">จำนวนงานที่เปิดอยู่พร้อมกันในแต่ละวัน คำนวณย้อนหลังจากวันที่ของเคส คำขอบริการ และ task โปรเจกต์ที่มีอยู่ในระบบ · ข้อมูลเริ่ม ${fd(r.dataFrom, true)}</p></div></div>
+${WL_TABS("stat", r.team)}
+<div class="fpills"><span class="hint" style="align-self:center">ช่วง</span>${[["3", "3 เดือน"], ["6", "6 เดือน"], ["12", "1 ปี"], ["all", "ทุกปี"]].map(([k, l]) => `<a class="fpill ${k === range ? "on" : ""}" href="${link({ range: k })}">${l}</a>`).join("")}</div>
+${r.teams.length > 1 ? `<div class="fpills"><span class="hint" style="align-self:center">ทีม</span><a class="fpill ${r.team ? "" : "on"}" href="${link({ team: "" })}">ทุกทีม</a>${r.teams.map((t) => `<a class="fpill ${t.code === r.team ? "on" : ""}" href="${link({ team: t.code })}">${esc(t.label)}</a>`).join("")}</div>` : ""}
+<div class="kpis"><div class="kpi k-all"><span class="l">เปิดพร้อมกันเฉลี่ยต่อวัน</span><span class="v">${s.avg}</span><span class="s">${fd(r.from, true)} ถึงวันนี้</span></div>
+<div class="kpi k-overdue"><span class="l">สูงสุดในช่วงนี้</span><span class="v">${s.peak}</span><span class="s">${s.peakDay ? fd(s.peakDay, true) : "-"}</span></div>
+<div class="kpi k-r2"><span class="l">เดือนที่งานมากที่สุด</span><span class="v" style="font-size:24px">${s.busiest ? esc(ymLabel(s.busiest.ym, true)) : "-"}</span><span class="s">${s.busiest ? `เฉลี่ย ${s.busiest.avg} งานต่อวัน` : "ยังไม่มีเดือนที่ครบ"}</span></div>
+<div class="kpi k-normal"><span class="l">เดือนที่งานน้อยที่สุด</span><span class="v" style="font-size:24px">${s.quietest ? esc(ymLabel(s.quietest.ym, true)) : "-"}</span><span class="s">${s.quietest ? `เฉลี่ย ${s.quietest.avg} งานต่อวัน` : "ยังไม่มีเดือนที่ครบ"}</span></div></div>
+<section class="card"><div class="title"><h2>งานที่เปิดพร้อมกัน รายวัน</h2><span>${r.team ? esc(teamLabel(r.team)) : "รวมทุกทีมที่เห็น"} · แยกตามประเภทงาน</span></div>${wlChart(r.days, kinds, { stacked: true })}</section>
+${teamSeries.length > 1 ? `<section class="card"><div class="title"><h2>งานที่เปิดพร้อมกัน แยกตามทีม</h2><span>เคส + คำขอบริการ + task โปรเจกต์ของแต่ละทีม</span></div>${wlChart(r.days, teamSeries, { stacked: false })}</section>` : ""}
+<section class="card"><div class="title"><h2>สรุปรายเดือน</h2><span>ค่าเฉลี่ย = งานที่เปิดพร้อมกันเฉลี่ยต่อวันในเดือนนั้น</span></div>
+<div class="tablewrap"><table><thead><tr><th>เดือน</th><th class="n">เฉลี่ยรวม</th><th class="n">เคส</th><th class="n">คำขอบริการ</th><th class="n">Task โปรเจกต์</th><th class="n">สูงสุด</th><th class="n">ต่ำสุด</th><th class="n">เคสเข้าใหม่</th><th class="n">เคสปิด</th>${teamCols.map((c) => `<th class="n">${esc(teamLabel(c))}</th>`).join("")}</tr></thead><tbody>
+${r.months.slice().reverse().slice(0, 24).map((x) => `<tr><td style="font-weight:600;white-space:nowrap">${esc(ymLabel(x.ym, true))}${x.partial ? ` <span class="muted" style="font-weight:400;font-size:12px">(ยังไม่ครบเดือน)</span>` : ""}</td>
+<td class="n"><b>${x.avg}</b>${!x.partial && mAvg.length > 1 && x.avg === hi ? ` <span class="chip c-r2">มากสุด</span>` : !x.partial && mAvg.length > 1 && x.avg === lo ? ` <span class="chip c-normal">น้อยสุด</span>` : ""}</td><td class="n">${x.avgCases}</td><td class="n">${x.avgSr}</td><td class="n">${x.avgTasks}</td>
+<td class="n">${x.peak}<div class="hint">${fd(x.peakDay)}</div></td><td class="n">${x.low}<div class="hint">${fd(x.lowDay)}</div></td><td class="n">${x.opened}</td><td class="n">${x.closed}</td>${teamCols.map((c) => `<td class="n">${x.byTeam[c] || 0}</td>`).join("")}</tr>`).join("")}</tbody></table></div>${r.months.length > 24 ? `<p class="hint">แสดง 24 เดือนล่าสุด เดือนก่อนหน้านั้นดูได้จากกราฟและตารางเทียบปีด้านล่าง</p>` : ""}</section>
+<section class="card"><div class="title"><h2>เทียบเดือนเดียวกันของแต่ละปี</h2><span>เคสที่เปิดพร้อมกันเฉลี่ยต่อวัน · ตัวเล็ก = เคสเข้าใหม่ในเดือนนั้น · สีเข้ม = งานมาก</span></div>
+<div class="tablewrap"><table class="wl-season"><thead><tr><th>ปี</th>${MON.map((mm) => `<th class="n">${mm}</th>`).join("")}</tr></thead><tbody>
+${r.season.slice().reverse().map((yy) => `<tr><td style="font-weight:600">${Number(yy.year) + 543}</td>${yy.months.map((x) => (x ? `<td class="n" style="--h:${x.partial ? 0 : Math.round(((x.avgCases - sMin) / Math.max(0.0001, sMax - sMin)) * 100)}%" title="${x.partial ? "ยังไม่ครบเดือน" : ""}"><b>${x.avgCases}</b><div class="hint">${x.opened}</div></td>` : `<td class="n muted">-</td>`)).join("")}</tr>`).join("")}</tbody></table></div>
+<p class="hint">ช่วงที่สีอ่อนซ้ำกันหลายปีคือช่วงที่เคสเข้าน้อย เหมาะกับการวางงาน PM การอบรม หรือการลา · เดือนที่ยังไม่ครบไม่ถูกนำมาเทียบสี</p></section>`;
+  }
+
   async function viewWorkload(params) {
     setNav("workload");
+    if (params.view === "stat") return viewWorkloadStat(params);
     const r = await api("/workload?" + qs({ team: params.team || "" }));
     const seg = (n, cls, label) => (n ? `<i class="${cls}" style="flex:${n}" title="${label} ${n}"></i>` : "");
     const cell = (x, extra) => `<td class="n"><b>${x.open}</b>${x.late ? ` <span class="chip c-overdue">เลย ${x.late}</span>` : ""}${extra ? `<div class="hint">${extra}</div>` : ""}</td>`;
     const heavy = r.people.filter((p) => p.heavy);
     $app.innerHTML = `<div class="pagehead"><div><h1>ภาระงาน</h1><p class="muted" style="margin:0">งานที่ยังเปิดอยู่ของแต่ละคน ณ วันนี้ รวมเคส คำขอบริการ และ task โปรเจกต์ที่ PM ทำเอง · “ใน 7 วัน” = ครบกำหนดถึง ${fd(r.soonUntil)}</p></div></div>
+${WL_TABS("now", r.team)}
 ${r.teams.length > 1 ? `<div class="fpills"><span class="hint" style="align-self:center">ทีม</span><a class="fpill ${r.team ? "" : "on"}" href="#/workload">ทุกทีม</a>${r.teams.map((t) => `<a class="fpill ${t.code === r.team ? "on" : ""}" href="#/workload?${qs({ team: t.code })}">${esc(t.label)}</a>`).join("")}</div>` : ""}
 <div class="kpis"><div class="kpi k-all"><span class="l">คน</span><span class="v">${r.people.length}</span><span class="s">Engineer และ Manager ในทีมที่เลือก</span></div>
 <div class="kpi k-normal"><span class="l">งานเปิดรวม</span><span class="v">${r.people.reduce((a, p) => a + p.total, 0)}</span><span class="s">ค่ากลางต่อคน ${r.median}</span></div>
 <div class="kpi ${r.people.some((p) => p.late) ? "k-overdue" : "k-normal"}"><span class="l">เลยกำหนด</span><span class="v">${r.people.reduce((a, p) => a + p.late, 0)}</span><span class="s">ทุกประเภทรวมกัน</span></div>
 <div class="kpi ${heavy.length ? "k-r2" : "k-normal"}"><span class="l">งานมากกว่าคนอื่นชัดเจน</span><span class="v">${heavy.length}</span><span class="s">ตั้งแต่ 5 งาน และ 1.5 เท่าของค่ากลาง</span></div></div>
 <section class="card" style="padding:0"><div class="tablewrap"><table><thead><tr><th>คน</th><th style="min-width:200px">งานเปิดรวม</th><th class="n">เคส</th><th class="n">คำขอบริการ</th><th class="n">Task โปรเจกต์</th><th class="n">ครบกำหนดใน 7 วัน</th></tr></thead><tbody>
-${r.people.map((p) => `<tr><td><a href="#/owner?${qs({ owner: p.id })}" style="font-weight:600">${esc(p.name)}</a>${p.heavy ? ` <span class="chip c-r2">งานมาก</span>` : ""}<div class="hint">${p.teams.map((t) => esc((r.teams.find((x) => x.code === t) || {}).label || t)).join(", ")}${p.role === "manager" ? " · Manager" : ""}</div></td>
+${r.people.map((p) => `<tr><td>${p.email ? `<a href="#/owner/${encodeURIComponent(p.email)}" style="font-weight:600">${esc(p.name)}</a>` : `<span style="font-weight:600">${esc(p.name)}</span>`}${p.heavy ? ` <span class="chip c-r2">งานมาก</span>` : ""}<div class="hint">${p.teams.map((t) => esc((r.teams.find((x) => x.code === t) || {}).label || t)).join(", ")}${p.role === "manager" ? " · Manager" : ""}</div></td>
 <td><div class="wl-bar" style="width:${Math.max(4, Math.round((p.total / r.max) * 100))}%">${seg(p.cases.open, "w-case", "เคส")}${seg(p.sr.open, "w-sr", "คำขอบริการ")}${seg(p.tasks.open, "w-task", "Task โปรเจกต์")}</div><div class="hint"><b style="color:var(--ink)">${p.total}</b> งาน</div></td>
 ${cell(p.cases, p.cases.pm ? `งาน PM ${p.cases.pm}` : "")}${cell(p.sr, p.sr.project ? `จากโปรเจกต์ ${p.sr.project}` : "")}${cell(p.tasks, p.tasks.open ? `${p.tasks.projects} โปรเจกต์ · เหลือ ${p.tasks.mdLeft} MD` : "")}
 <td class="n">${p.soon || "-"}</td></tr>`).join("") || `<tr><td colspan="6"><div class="empty">ไม่มีคนในทีมที่เลือก</div></td></tr>`}</tbody></table></div></section>

@@ -929,3 +929,18 @@ tr.pj-off td { opacity: .55; }
 .csat-dist div { flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 2px; }
 .csat-dist i { display: block; width: 100%; min-height: 2px; border-radius: 3px 3px 0 0; background: var(--accent); }
 .csat-dist span { font-size: 11px; color: var(--muted); }
+
+/* Workload history charts */
+.wl-chart svg { width: 100%; height: auto; display: block; }
+.wl-chart .wl-grid { stroke: var(--line); stroke-width: 1; }
+.wl-chart .wl-ax { font-size: 11px; fill: var(--muted); font-family: inherit; }
+.wl-chart path[data-area] { fill: var(--c); opacity: .85; stroke: none; }
+.wl-chart path[data-line] { fill: none; stroke: var(--c); stroke-width: 2; stroke-linejoin: round; }
+.wl-chart .w-case { --c: var(--accent); } .wl-chart .w-sr { --c: #9B59B6; } .wl-chart .w-task { --c: var(--normal); }
+.wl-chart path.w-case, .wl-chart path.w-sr, .wl-chart path.w-task { background: none; }
+.wl-chart .wl-hit { fill: transparent; }
+.wl-chart .wl-hit:hover { fill: color-mix(in srgb, var(--ink) 10%, transparent); }
+.wl-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 8px; font-size: 13px; color: var(--muted); }
+.wl-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; background: var(--c); }
+.wl-season td.n { background: color-mix(in srgb, var(--accent) calc(var(--h, 0%) * 0.45), transparent); }
+.wl-season td .hint { margin: 0; }
