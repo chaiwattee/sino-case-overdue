@@ -2706,5 +2706,18 @@
 "PM หลัก": "Lead PM",
 "มีความเสี่ยง": "At risk",
 "เลยวันส่งมอบ": "Past delivery date",
-"Man-day ตามโปรเจกต์ย่อย": "Man-days by sub-project"
+"Man-day ตามโปรเจกต์ย่อย": "Man-days by sub-project",
+"พอดีจอ": "Fit to screen",
+"บันทึกเป็นรูปภาพ": "Save as image",
+"ออก (Esc)": "Exit (Esc)",
+"Milestone + งาน": "Milestone + tasks",
+"โปรเจกต์ย่อยที่เสร็จ": "Sub-projects completed",
+"งานที่เสร็จ": "Work items completed",
+"Milestone ที่ผ่านแล้ว": "Milestones passed",
+"Milestone / งาน": "Milestone / work item",
+"โปรเจกต์ย่อย / Milestone": "Sub-project / Milestone",
+"เสร็จ / ผ่าน milestone": "Done / milestone passed",
+"ตามแผน / กำลังทำ": "On track / in progress",
+"งานมากเกินหนึ่งจอ: แสดงเป็นแถบต่อ Milestone กดที่ Milestone เพื่อดูงานข้างใน": "Too many items for one screen: one bar per milestone, click a milestone to see its items",
+"บันทึกรูปแล้ว (1920×1080) ใส่ในสไลด์ได้ทันที": "Image saved (1920×1080), ready for a slide"
 }

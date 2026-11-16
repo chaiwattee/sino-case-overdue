@@ -5959,6 +5959,7 @@ ${body}`;
     }, "บันทึก");
     $app.querySelectorAll("[data-ms]").forEach((b) => (b.onclick = () => openMilestone(p, d.milestones.find((x) => x.id === Number(b.dataset.ms)))));
     bindPjDocs(d, m);
+    bindTimelineTools(d, m);
     $app.querySelectorAll("[data-move]").forEach((b) => (b.onclick = async (e) => {
       e.stopPropagation();
       b.disabled = true;
@@ -5976,6 +5977,10 @@ ${body}`;
   }
 
   // ------------------------------------------------------------ large project (โปรเจกต์ใหญ่) = the sum of its sub-projects
+  // Timeline "fit to screen": columns shrink to the card and widen their step (1 / 2 / 4 weeks) as the plan gets longer.
+  const pjFit = () => { try { return localStorage.getItem("pj-fit") !== "0"; } catch (e) { return true; } };
+  const fitStep = (span) => (!pjFit() ? 7 : span > 200 ? 28 : span > 92 ? 14 : 7);
+  const fitTools = (pid) => `<div class="pj-tl-tools"><button class="btn ${pjFit() ? "on" : ""}" type="button" data-pjfit aria-pressed="${pjFit()}">${pjFit() ? "✓ " : ""}พอดีจอ</button><button class="btn primary" type="button" data-present="${pid}">Present</button></div>`;
   const PG_OPEN = new Set(); // sub-projects expanded on the combined timeline (kept while moving between tabs)
   const PG_ST = { met: "c-ok", missed: "c-overdue", risk: "c-r2", plan: "c-all" };
   async function viewProgram(d, m, params) {
@@ -6030,6 +6035,7 @@ ${body}`;
     }));
     bindPjDocs(d, m);
     bindPjReport(d);
+    bindTimelineTools(d, m);
     bindRowLinks();
   }
   function pgSubs(d) {
@@ -6078,7 +6084,7 @@ ${deps.map((x) => `<tr><td><a href="#/projects/${x.to.projectId}?task=${x.to.id}
     end.setDate(end.getDate() + 7);
     const span = Math.max(7, Math.round((end - new Date(from + "T00:00:00")) / 86400000));
     const x = (iso) => Math.max(0, Math.min(100, (Math.round((new Date(iso + "T00:00:00") - new Date(from + "T00:00:00")) / 86400000) / span) * 100));
-    const step = span > 200 ? 28 : span > 100 ? 14 : 7;
+    const step = pjFit() ? fitStep(span) : span > 200 ? 28 : span > 100 ? 14 : 7;
     const weeks = [];
     for (let i = 0; i < span; i += step) {
       const t = new Date(from + "T00:00:00");
@@ -6130,7 +6136,8 @@ ${deps.map((x) => `<tr><td><a href="#/projects/${x.to.projectId}?task=${x.to.id}
     }).join("");
     return `<section class="card"><div class="title"><h2>Timeline รวม</h2><span>เส้นแดง = วันนี้ · ◆ = milestone · เส้นส้ม = task ที่รอ task ในโปรเจกต์ย่อยอื่น · กด ▸ เพื่อดู task</span></div>
 <div class="legend"><span><i class="lg done"></i>เสร็จ</span><span><i class="lg"></i>ตามแผน / กำลังทำ</span><span><i class="lg wait"></i>มีความเสี่ยง</span><span><i class="lg over"></i>เลยกำหนด</span><span><i class="lg todo"></i>ยังไม่เริ่ม</span><span>◆ Milestone</span></div>
-<div class="gwrap"><div class="gantt" style="min-width:${Math.max(860, weeks.length * 64 + 300)}px;grid-template-columns:300px minmax(0,1fr)"><div>${names}</div><div style="position:relative"><div class="g-head">${weeks.map((w) => `<span>${fd(w)}</span>`).join("")}</div>${lanes}
+${fitTools(d.project.id)}
+<div class="gwrap"><div class="gantt" style="min-width:${pjFit() ? 640 : Math.max(860, weeks.length * 64 + 300)}px;grid-template-columns:${pjFit() ? 260 : 300}px minmax(0,1fr)"><div>${names}</div><div style="position:relative"><div class="g-head">${weeks.map((w) => `<span>${fd(w)}</span>`).join("")}</div>${lanes}
 ${lines ? `<svg class="g-links" style="top:36px;height:${H}px" viewBox="0 0 100 ${H}" preserveAspectRatio="none" aria-hidden="true">${lines}</svg>` : ""}</div></div></div></section>`;
   }
   async function openAttach(p) {
@@ -6145,6 +6152,338 @@ ${lines ? `<svg class="g-links" style="top:36px;height:${H}px" viewBox="0 0 100 
         route();
       }, "ย้ายเข้ามา");
     return f;
+  }
+
+  // ------------------------------------------------------------ Present view (full screen, for customer meetings) + save as image
+  // Drawn on a canvas so "save as image" gives exactly what is on screen, at 1920×1080 (a 16:9 slide).
+  // No staff names and no man-days: it is meant for the customer.
+  function bindTimelineTools(d, m) {
+    $app.querySelectorAll("[data-pjfit]").forEach((b) => (b.onclick = () => {
+      try { localStorage.setItem("pj-fit", pjFit() ? "0" : "1"); } catch (e) {}
+      route();
+    }));
+    $app.querySelectorAll("[data-present]").forEach((b) => (b.onclick = () => openPresent(d, m)));
+  }
+  const PV_C = { done: "#1F8A5B", plan: "#2563EB", risk: "#C98A00", late: "#C8283C", todo: "#9AA5B4", track: "#E3E8EF", ink: "#10203A", muted: "#566377", line: "#E6EAF0", band: "#F5F7FA" };
+  const pvT = (x) => (window.I18N ? I18N.t(x) : x);
+  const pvMsColor = (st) => ({ met: PV_C.done, late: PV_C.risk, missed: PV_C.late, risk: PV_C.risk, plan: PV_C.plan })[st] || PV_C.plan;
+  const pvSubColor = (st) => ({ met: PV_C.done, missed: PV_C.late, risk: PV_C.risk, plan: PV_C.plan })[st] || PV_C.plan;
+  const pvTaskColor = (t) => (["done", "submitted"].includes(t.status) ? PV_C.done : t.overdue ? PV_C.late : t.xrisk ? PV_C.risk : ["doing"].includes(t.status) ? PV_C.plan : t.status === "pending" ? PV_C.risk : PV_C.todo);
+  /** The pages of a presentation: one for a project; for a large project the overview and then each sub-project. */
+  function pvPages(d) {
+    if (!d.program) return [{ kind: "one", p: d.project, tasks: d.tasks, ms: d.milestones }];
+    return [{ kind: "all" }, ...d.program.subs.map((c, i) => ({ kind: "sub", i, c, p: c, tasks: d.tasks.filter((t) => t.projectId === c.id), ms: d.milestones.filter((x) => x.projectId === c.id) }))];
+  }
+  function pvRows(d, pg, level, openMs, maxRows) {
+    const live = (pg.tasks || []).filter((t) => t.status !== "cancelled");
+    if (pg.kind === "all") {
+      const rows = [];
+      d.program.subs.forEach((c, i) => {
+        rows.push({ k: "sub", c, i });
+        if (level === "task") d.milestones.filter((x) => x.projectId === c.id).forEach((x) => rows.push({ k: "ms", x }));
+      });
+      return { rows, folded: false };
+    }
+    const msRow = (x) => {
+      const ts = live.filter((t) => t.milestoneId === x.id);
+      const from = ts.map((t) => t.start).sort()[0] || x.due;
+      return { k: "msbar", x, from, to: x.due, done: x.done, total: x.total };
+    };
+    const groups = [...pg.ms.map((x) => [x, live.filter((t) => t.milestoneId === x.id)]), [null, live.filter((t) => !t.milestoneId)]].filter(([x, ts]) => x || ts.length);
+    const full = [];
+    for (const [x, ts] of groups) {
+      full.push(x ? msRow(x) : { k: "msbar", x: { name: "ไม่อยู่ใน milestone", due: null, state: "plan" }, from: ts.map((t) => t.start).sort()[0], to: ts.map((t) => t.due).sort().pop(), done: ts.filter((t) => ["done", "submitted"].includes(t.status)).length, total: ts.length });
+      if (level === "task") ts.forEach((t) => full.push({ k: "task", t }));
+    }
+    if (level !== "task" || full.length <= maxRows) return { rows: full, folded: false };
+    // Too many tasks for one screen: one bar per milestone, and the tasks of the milestone that was clicked.
+    const rows = [];
+    for (const [x, ts] of groups) {
+      rows.push({ ...msRow(x || { name: "ไม่อยู่ใน milestone", due: ts.map((t) => t.due).sort().pop(), id: 0, done: 0, total: ts.length }), click: true, open: openMs === (x ? x.id : 0) });
+      if (openMs === (x ? x.id : 0)) ts.slice(0, Math.max(3, maxRows - groups.length)).forEach((t) => rows.push({ k: "task", t }));
+    }
+    return { rows, folded: true };
+  }
+  /** Draws one page at W×H CSS pixels; returns the clickable milestone rows. */
+  function pvDraw(ctx, W, H, d, m, pg, level, openMs, reserve = 0) {
+    const F = (sz, w = 400) => `${w} ${sz}px Anuphan, "Noto Sans Thai", system-ui, sans-serif`;
+    const k = Math.min(W / 1920, H / 1080);
+    const S = (v) => Math.round(v * k);
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, W, H);
+    ctx.textBaseline = "middle";
+    const P = S(60);
+    const top = d.program && pg.kind !== "all" ? pg.p : d.project;
+    const sm = pg.kind === "all" ? d.summary : (() => {
+      const live = pg.tasks.filter((t) => t.status !== "cancelled");
+      const done = live.filter((t) => ["done", "submitted"].includes(t.status)).length;
+      return { total: live.length, done };
+    })();
+    const msList = pg.kind === "all" ? d.milestones : pg.ms;
+    // header
+    ctx.fillStyle = PV_C.ink;
+    ctx.font = F(S(44), 700);
+    let title = top.name;
+    while (ctx.measureText(title).width > W - 2 * P - S(360) && title.length > 4) title = title.slice(0, -2);
+    if (title !== top.name) title += "…";
+    ctx.fillText(title, P, S(70));
+    ctx.fillStyle = PV_C.muted;
+    ctx.font = F(S(22));
+    const sub = [d.project.customer, `${pvT(fd(top.start, true))} – ${pvT(fd(top.end, true))}`, pg.kind === "sub" ? `${pvT("โปรเจกต์ย่อย")} ${pg.i + 1}/${d.program.subs.length} · ${d.project.name}` : d.program ? `${d.program.subs.length} ${pvT("โปรเจกต์ย่อย")}` : ""].filter(Boolean).join(" · ");
+    ctx.fillText(sub, P, S(116));
+    ctx.textAlign = "right";
+    ctx.fillStyle = "#8A6D1F";
+    ctx.font = F(S(24), 700);
+    ctx.fillText("SINO S-TECH", W - P, S(70));
+    ctx.fillStyle = PV_C.muted;
+    ctx.font = F(S(17));
+    ctx.fillText(`${pvT("ข้อมูล ณ")} ${pvT(fd(m.today, true))}`, W - P, S(104));
+    ctx.textAlign = "left";
+    // tiles
+    const left = Math.round((new Date(top.end + "T00:00:00") - new Date(m.today + "T00:00:00")) / 86400000);
+    const passed = msList.filter((x) => x.state === "met" || x.state === "late").length;
+    const tiles = [
+      [pvT("ความคืบหน้า"), `${sm.total ? Math.round((sm.done / sm.total) * 100) : 0}%`],
+      pg.kind === "all" ? [pvT("โปรเจกต์ย่อยที่เสร็จ"), `${d.program.subs.filter((c) => c.state === "met").length} / ${d.program.subs.length}`] : [pvT("งานที่เสร็จ"), `${sm.done} / ${sm.total}`],
+      [pvT("Milestone ที่ผ่านแล้ว"), `${passed} / ${msList.length}`],
+      top.status === "delivered" ? [pvT("ส่งมอบแล้ว"), pvT(fd(top.deliveredAt, true))] : [pvT("ถึงวันส่งมอบ"), left >= 0 ? `${left} ${pvT("วัน")}` : `${pvT("เลย")} ${-left} ${pvT("วัน")}`],
+    ];
+    const tw = (W - 2 * P - S(16) * 3) / 4;
+    tiles.forEach(([l, v], i) => {
+      const x0 = P + i * (tw + S(16));
+      ctx.strokeStyle = "#D9E0EA";
+      ctx.lineWidth = Math.max(1, S(1.5));
+      ctx.beginPath();
+      ctx.roundRect(x0, S(150), tw, S(112), S(16));
+      ctx.stroke();
+      ctx.fillStyle = PV_C.muted;
+      ctx.font = F(S(18));
+      ctx.fillText(l, x0 + S(22), S(184));
+      ctx.fillStyle = PV_C.ink;
+      ctx.font = F(S(40), 700);
+      ctx.fillText(v, x0 + S(22), S(232));
+    });
+    // chart area
+    const gy = S(290), gb = H - reserve - S(70), gx = P, gw = W - 2 * P, nameW = S(440);
+    const headH = S(46);
+    const maxRows = Math.max(6, Math.floor((gb - gy - headH) / S(30)));
+    const { rows, folded } = pvRows(d, pg, level, openMs, maxRows);
+    const rh = Math.min(S(96), (gb - gy - headH) / Math.max(1, rows.length));
+    const dates = [top.start, top.end, m.today];
+    rows.forEach((r) => {
+      if (r.k === "sub") dates.push(r.c.from, r.c.to);
+      if (r.k === "ms" && r.x.due) dates.push(r.x.due);
+      if (r.k === "msbar") dates.push(r.from, r.to);
+      if (r.k === "task") dates.push(r.t.start, r.t.due);
+    });
+    const ds = dates.filter(Boolean).sort();
+    const a = new Date(ds[0].slice(0, 7) + "-01T00:00:00");
+    const e0 = new Date(ds[ds.length - 1] + "T00:00:00");
+    const b = new Date(e0.getFullYear(), e0.getMonth() + 1, 1);
+    const cx0 = gx + nameW, cw = gw - nameW;
+    const X = (iso) => cx0 + ((new Date(iso + "T00:00:00") - a) / (b - a)) * cw;
+    ctx.fillStyle = PV_C.band;
+    ctx.fillRect(gx, gy, gw, headH);
+    ctx.fillStyle = PV_C.muted;
+    ctx.font = F(S(17));
+    ctx.fillText(pvT(pg.kind === "all" ? "โปรเจกต์ย่อย / Milestone" : level === "task" ? "Milestone / งาน" : "Milestone"), gx + S(20), gy + headH / 2);
+    const months = [];
+    for (let mm = new Date(a); mm < b; mm.setMonth(mm.getMonth() + 1)) months.push(new Date(mm));
+    const every = Math.ceil(months.length / 14);
+    months.forEach((mm, i) => {
+      const iso = `${mm.getFullYear()}-${String(mm.getMonth() + 1).padStart(2, "0")}-01`;
+      const xx = X(iso);
+      ctx.strokeStyle = PV_C.line;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(xx, gy);
+      ctx.lineTo(xx, gy + headH + rows.length * rh);
+      ctx.stroke();
+      if (i % every === 0) {
+        ctx.fillStyle = PV_C.muted;
+        ctx.fillText(pvT(`${TH_MONTHS[mm.getMonth()]} ${String(mm.getFullYear() + 543).slice(2)}`), xx + S(8), gy + headH / 2);
+      }
+    });
+    const hits = [];
+    const diamond = (xx, yy, r, color) => {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(xx, yy - r);
+      ctx.lineTo(xx + r, yy);
+      ctx.lineTo(xx, yy + r);
+      ctx.lineTo(xx - r, yy);
+      ctx.closePath();
+      ctx.fill();
+    };
+    const clip = (txt, w) => {
+      let t = txt;
+      while (ctx.measureText(t).width > w && t.length > 3) t = t.slice(0, -2);
+      return t === txt ? t : t + "…";
+    };
+    const fs = Math.max(S(13), Math.min(S(21), rh * 0.42));
+    /** Writes a label right of `xa`, or left of `xb` when it would run past the chart's right edge. */
+    const label = (txt, xa, xb, yc) => {
+      const w = ctx.measureText(txt).width;
+      if (xa + w > gx + gw - S(10)) { ctx.textAlign = "right"; ctx.fillText(txt, xb, yc); ctx.textAlign = "left"; }
+      else ctx.fillText(txt, xa, yc);
+    };
+    rows.forEach((r, i) => {
+      const y0 = gy + headH + i * rh, yc = y0 + rh / 2;
+      const strong = r.k === "sub" || r.k === "msbar";
+      if (strong) {
+        ctx.fillStyle = PV_C.band;
+        ctx.fillRect(gx, y0, gw, rh);
+      }
+      ctx.strokeStyle = PV_C.line;
+      ctx.beginPath();
+      ctx.moveTo(gx, y0 + rh);
+      ctx.lineTo(gx + gw, y0 + rh);
+      ctx.stroke();
+      ctx.fillStyle = PV_C.ink;
+      ctx.font = F(fs, strong ? 700 : 400);
+      const bh = Math.max(S(8), rh * 0.42);
+      if (r.k === "sub") {
+        ctx.fillText(clip(`${r.i + 1}. ${r.c.name}`, nameW - S(30)), gx + S(20), yc);
+        const x1 = X(r.c.from), x2 = Math.max(x1 + S(6), X(r.c.to));
+        ctx.fillStyle = PV_C.track;
+        ctx.beginPath(); ctx.roundRect(x1, yc - bh / 2, x2 - x1, bh, S(8)); ctx.fill();
+        ctx.fillStyle = pvSubColor(r.c.state);
+        ctx.beginPath(); ctx.roundRect(x1, yc - bh / 2, Math.max(S(6), ((x2 - x1) * r.c.pct) / 100), bh, S(8)); ctx.fill();
+        ctx.fillStyle = PV_C.ink; ctx.font = F(Math.min(fs, S(18)), 700);
+        label(`${r.c.pct}%`, x2 + S(16), x1 - S(12), yc);
+        if (level !== "task") d.milestones.filter((x) => x.projectId === r.c.id).forEach((x) => diamond(X(x.due), yc, Math.max(S(6), bh * 0.42), pvMsColor(x.state)));
+      } else if (r.k === "ms") {
+        ctx.fillStyle = PV_C.ink;
+        ctx.fillText(clip(`◆ ${r.x.name}`, nameW - S(50)), gx + S(44), yc);
+        diamond(X(r.x.due), yc, Math.max(S(6), rh * 0.2), pvMsColor(r.x.state));
+        ctx.fillStyle = PV_C.muted; ctx.font = F(Math.min(fs, S(16)));
+        label(pvT(fd(r.x.due)), X(r.x.due) + S(16), X(r.x.due) - S(16), yc);
+      } else if (r.k === "msbar") {
+        ctx.fillText(clip(`${r.click ? (r.open ? "▾ " : "▸ ") : "◆ "}${pvT(r.x.name)}`, nameW - S(30)), gx + S(20), yc);
+        if (r.from && r.to) {
+          const x1 = X(r.from), x2 = Math.max(x1 + S(6), X(r.to));
+          ctx.fillStyle = PV_C.track;
+          ctx.beginPath(); ctx.roundRect(x1, yc - bh / 2, x2 - x1, bh, S(8)); ctx.fill();
+          if (r.done) { ctx.fillStyle = pvMsColor(r.x.state); ctx.beginPath(); ctx.roundRect(x1, yc - bh / 2, Math.max(S(6), ((x2 - x1) * r.done) / Math.max(1, r.total)), bh, S(8)); ctx.fill(); }
+          if (r.x.due) {
+            diamond(X(r.x.due), yc, Math.max(S(6), bh * 0.5), pvMsColor(r.x.state));
+            ctx.fillStyle = PV_C.muted; ctx.font = F(Math.min(fs, S(16)));
+            label(`${pvT(fd(r.x.due))} · ${r.done}/${r.total}`, X(r.x.due) + S(16), X(r.from) - S(12), yc);
+          }
+        }
+        if (r.click) hits.push({ y0, y1: y0 + rh, id: r.x.id || 0 });
+      } else {
+        const t = r.t;
+        const wait = (t.waitingFor || []).filter((w) => w.project);
+        ctx.fillText(clip(`${t.planNo ? t.planNo + ". " : ""}${t.name}`, nameW - S(60)), gx + S(44), yc);
+        const x1 = X(t.start), x2 = Math.max(x1 + S(6), X(t.due) + cw / ((b - a) / 86400000));
+        ctx.fillStyle = pvTaskColor(t);
+        ctx.beginPath(); ctx.roundRect(x1, yc - bh / 2, x2 - x1, bh, S(6)); ctx.fill();
+        if (wait.length) {
+          ctx.fillStyle = t.xrisk ? PV_C.late : PV_C.risk; ctx.font = F(Math.min(fs, S(15)), 700);
+          label(`← ${pvT("รอ")} ${wait.map((w) => w.project).join(", ")}`, x2 + S(10), x1 - S(10), yc);
+        }
+      }
+    });
+    // today
+    if (m.today >= ds[0] && m.today <= ds[ds.length - 1]) {
+      const tx = X(m.today);
+      ctx.fillStyle = "#D2402F";
+      ctx.fillRect(tx - S(1.5), gy, Math.max(2, S(3)), headH + rows.length * rh);
+      ctx.font = F(S(15), 700);
+      ctx.fillText(pvT("วันนี้"), tx + S(6), gy + S(12));
+    }
+    ctx.strokeStyle = "#D9E0EA";
+    ctx.lineWidth = Math.max(1, S(1.5));
+    ctx.beginPath(); ctx.roundRect(gx, gy, gw, headH + rows.length * rh, S(14)); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx0, gy); ctx.lineTo(cx0, gy + headH + rows.length * rh); ctx.stroke();
+    // legend
+    const ly = H - reserve - S(36);
+    let lx = P;
+    ctx.font = F(S(16));
+    for (const [c, l] of [[PV_C.done, "เสร็จ / ผ่าน milestone"], [PV_C.plan, "ตามแผน / กำลังทำ"], [PV_C.risk, "มีความเสี่ยง"], [PV_C.late, "เลยกำหนด"], [PV_C.todo, "ยังไม่เริ่ม"]]) {
+      ctx.fillStyle = c;
+      ctx.beginPath(); ctx.roundRect(lx, ly - S(6), S(18), S(12), S(3)); ctx.fill();
+      ctx.fillStyle = PV_C.muted;
+      const txt = pvT(l);
+      ctx.fillText(txt, lx + S(26), ly);
+      lx += S(26) + ctx.measureText(txt).width + S(28);
+    }
+    if (folded) {
+      ctx.textAlign = "right";
+      ctx.fillText(pvT("งานมากเกินหนึ่งจอ: แสดงเป็นแถบต่อ Milestone กดที่ Milestone เพื่อดูงานข้างใน"), W - P, ly);
+      ctx.textAlign = "left";
+    }
+    return hits;
+  }
+  async function openPresent(d, m) {
+    const pages = pvPages(d);
+    let page = 0, level = "ms", openMs = null, hits = [];
+    const box = document.body.appendChild(Object.assign(document.createElement("div"), { className: "pv-box", role: "dialog", ariaLabel: "Present" }));
+    box.innerHTML = `<canvas></canvas><div class="pv-tb" role="toolbar">
+<button type="button" data-lv="ms">Milestone</button><button type="button" data-lv="task">Milestone + งาน</button>
+${pages.length > 1 ? `<span class="pv-sep"></span><button type="button" data-go="-1" aria-label="หน้าก่อนหน้า">←</button><span class="pv-pg"></span><button type="button" data-go="1" aria-label="หน้าถัดไป">→</button>` : ""}
+<span class="pv-sep"></span><button type="button" class="pri" data-save>บันทึกเป็นรูปภาพ</button><button type="button" data-out>ออก (Esc)</button></div>`;
+    const cv = box.querySelector("canvas");
+    if (document.fonts) await document.fonts.ready.catch(() => {});
+    const draw = () => {
+      const r = devicePixelRatio || 1;
+      const W = innerWidth, H = innerHeight;
+      cv.width = W * r; cv.height = H * r;
+      cv.style.width = W + "px"; cv.style.height = H + "px";
+      const ctx = cv.getContext("2d");
+      ctx.setTransform(r, 0, 0, r, 0, 0);
+      hits = pvDraw(ctx, W, H, d, m, pages[page], level, openMs, 76);
+      box.querySelectorAll("[data-lv]").forEach((b) => b.classList.toggle("on", b.dataset.lv === level));
+      const pgl = box.querySelector(".pv-pg");
+      if (pgl) pgl.textContent = page === 0 && d.program ? pvT("ภาพรวม") : `${page}/${pages.length - 1}`;
+    };
+    const close = () => {
+      removeEventListener("resize", draw);
+      removeEventListener("keydown", key);
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+      box.remove();
+    };
+    const go = (n) => {
+      page = Math.max(0, Math.min(pages.length - 1, page + n));
+      openMs = null;
+      draw();
+    };
+    const key = (e) => {
+      if (e.key === "Escape") close();
+      else if (e.key === "ArrowRight" || e.key === "PageDown") go(1);
+      else if (e.key === "ArrowLeft" || e.key === "PageUp") go(-1);
+    };
+    addEventListener("resize", draw);
+    addEventListener("keydown", key);
+    box.querySelectorAll("[data-lv]").forEach((b) => (b.onclick = () => { level = b.dataset.lv; openMs = null; draw(); }));
+    box.querySelectorAll("[data-go]").forEach((b) => (b.onclick = () => go(Number(b.dataset.go))));
+    box.querySelector("[data-out]").onclick = close;
+    cv.onclick = (e) => {
+      const h = hits.find((x) => e.clientY >= x.y0 && e.clientY < x.y1);
+      if (h) { openMs = openMs === h.id ? null : h.id; draw(); }
+    };
+    box.querySelector("[data-save]").onclick = () => {
+      const c = document.createElement("canvas");
+      c.width = 1920; c.height = 1080;
+      pvDraw(c.getContext("2d"), 1920, 1080, d, m, pages[page], level, openMs);
+      // Latin letters and digits only: some browsers drop a download name with Thai characters.
+      const pp = pages[page].p || d.project;
+      const ascii = pp.name.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 70);
+      const name = ascii.length >= 3 ? ascii : `Project-${pp.id}`;
+      c.toBlob((blob) => {
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.setAttribute("download", `${name}_${m.today}.png`);
+        a.style.display = "none";
+        box.appendChild(a);
+        a.click();
+        setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+        toast("บันทึกรูปแล้ว (1920×1080) ใส่ในสไลด์ได้ทันที");
+      }, "image/png");
+    };
+    if (box.requestFullscreen) box.requestFullscreen().catch(() => {});
+    draw();
   }
 
   function pjTasks(d) {
@@ -6175,7 +6514,7 @@ ${rows || `<tr><td colspan="5"><div class="empty">${d.can.edit ? (ms.length ? "�
     const span = Math.max(7, Math.round((end - new Date(from + "T00:00:00")) / 86400000));
     const x = (iso) => Math.max(0, Math.min(100, (Math.round((new Date(iso + "T00:00:00") - new Date(from + "T00:00:00")) / 86400000) / span) * 100));
     const weeks = [];
-    for (let i = 0; i < span; i += 7) {
+    for (let i = 0; i < span; i += fitStep(span)) {
       const t = new Date(from + "T00:00:00");
       t.setDate(t.getDate() + i);
       weeks.push(isoDay(t));
@@ -6198,7 +6537,8 @@ ${rows || `<tr><td colspan="5"><div class="empty">${d.can.edit ? (ms.length ? "�
     }
     return `<section class="card"><div class="title"><h2>Timeline</h2><span>เส้นแดง = วันนี้ · เส้นบางใต้แถบ = แผนเดิมก่อนเลื่อน · แก้วันที่ได้จากตาราง task</span></div>
 <div class="legend"><span><i class="lg done"></i>เสร็จ / ส่งงานแล้ว</span><span><i class="lg"></i>กำลังทำ</span><span><i class="lg wait"></i>รอรับงาน</span><span><i class="lg over"></i>เลยกำหนด</span><span><i class="lg todo"></i>ยังไม่เริ่ม</span><span>◆ Milestone</span></div>
-${ts.length ? `<div class="gwrap"><div class="gantt" style="min-width:${Math.max(760, weeks.length * 70 + 240)}px"><div>${names}</div><div>${lanes}</div></div></div>` : `<div class="empty">ยังไม่มี task</div>`}</section>`;
+${fitTools(d.project.id)}
+${ts.length ? `<div class="gwrap"><div class="gantt" style="min-width:${pjFit() ? 640 : Math.max(760, weeks.length * 70 + 240)}px"><div>${names}</div><div>${lanes}</div></div></div>` : `<div class="empty">ยังไม่มี task</div>`}</section>`;
   }
 
   // Register: risks, issues and change requests of the project.
