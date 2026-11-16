@@ -2486,11 +2486,12 @@ ${forced ? "" : `<label class="f">รหัสผ่านปัจจุบั�
     const mgrTurn = e.stage === "manager" && e.approver_id === ME.user.id;
     if (admin && (e.stage === "admin" || e.approver_id === ME.user.id)) {
       const n = e.req_days || 3;
-      return `<div class="ext-adm" data-ext="${e.id}"><div class="formgrid" style="align-items:end;grid-template-columns:minmax(150px,200px) minmax(0,1fr) auto">
+      // Order of work: set the days, check the new Due, add a comment, then decide (buttons last, under the form).
+      return `<div class="ext-adm" data-ext="${e.id}"><div class="ext-adm-row">
 <label class="f">ขยายกี่วันทำการ<input type="number" min="1" max="30" step="1" value="${n}" data-days="${e.id}" required><span class="hint">ไม่นับเสาร์-อาทิตย์และวันหยุดบริษัท · สูงสุด 30</span></label>
-<div><div class="muted" style="font-size:13px">Due ใหม่</div><div class="ext-nd" data-nd="${e.id}" data-old="${e.old_due}">${fd(extAddWorkdays(e.old_due, n), true)}</div></div>
-<div class="actions" style="justify-content:flex-start"><button class="btn primary" type="button" data-extdec="1" data-id="${e.id}">อนุมัติ ขยาย <span data-dn="${e.id}">${n}</span> วันทำการ</button><button class="btn" type="button" data-extdec="0" data-id="${e.id}">ไม่อนุมัติ</button></div></div>
-<label class="f">ความเห็น (บังคับเมื่อไม่อนุมัติ)<input ${id ? `id="${id}"` : `data-note="${e.id}"`}></label></div>`;
+<div class="ext-adm-due"><div class="muted" style="font-size:13px">Due ใหม่</div><div class="ext-nd" data-nd="${e.id}" data-old="${e.old_due}">${fd(extAddWorkdays(e.old_due, n), true)}</div></div></div>
+<label class="f">ความเห็น (บังคับเมื่อไม่อนุมัติ)<input ${id ? `id="${id}"` : `data-note="${e.id}"`}></label>
+<div class="actions ext-adm-act"><button class="btn primary" type="button" data-extdec="1" data-id="${e.id}">อนุมัติ ขยาย <span data-dn="${e.id}">${n}</span> วันทำการ</button><button class="btn" type="button" data-extdec="0" data-id="${e.id}">ไม่อนุมัติ</button></div></div>`;
     }
     if (mgrTurn) return `<div class="formgrid" style="align-items:end"><label class="f">ความเห็นถึง Admin (บังคับเมื่อไม่อนุมัติ)<input ${id ? `id="${id}"` : `data-note="${e.id}"`} placeholder="เช่น เหตุผลสมควร ติดตาม Vendor ทุกวัน"></label>
 <div class="actions" style="justify-content:flex-start"><button class="btn primary" type="button" data-extfwd="${e.id}">ส่งขออนุมัติ Admin →</button><button class="btn" type="button" data-extdec="0" data-id="${e.id}">ไม่อนุมัติ</button></div></div>`;

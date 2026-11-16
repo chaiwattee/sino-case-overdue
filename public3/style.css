@@ -1021,3 +1021,9 @@ tr.pj-off td { opacity: .55; }
 /* Extension: admin step */
 .ext-adm { display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin-top: 8px; }
 .ext-nd { font-size: 20px; font-weight: 700; }
+.ext-adm-row { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
+.ext-adm > label.f { flex: none; } /* label.f's flex-basis would be read as a height in this column */
+.ext-adm-row .f { flex: 0 1 240px; min-width: 0; }
+@media (max-width: 560px) { .ext-adm-row { flex-direction: column; gap: 8px; } .ext-adm-row .f { flex: none; width: 100%; } .ext-adm-due { padding-top: 0; } }
+.ext-adm-due { padding-top: 26px; }
+.ext-adm .actions.ext-adm-act { justify-content: flex-start; margin: 0; }
