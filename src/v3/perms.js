@@ -33,7 +33,7 @@ const DEFAULTS = {
   manager: {
     view: "all", case_create: "all", case_edit: "all", case_close: "all", case_reassign: "all",
     case_edit_start: "none", case_delete: "none", export: "all", reports_manage: "all",
-    audit_view: "all", users_manage: "none", settings_manage: "none", hotline_edit: "all", sr_create: "all", pm_manage: "all", customer_edit: "all",
+    audit_view: "all", users_manage: "none", settings_manage: "none", hotline_edit: "all", sr_create: "all", pm_manage: "none", customer_edit: "all",
   },
   engineer: {
     view: "all", case_create: "all", case_edit: "own", case_close: "own", case_reassign: "none",

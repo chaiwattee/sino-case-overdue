@@ -362,7 +362,7 @@ ${edit || !csOf(c) ? "" : `<div class="rca-sec" id="rca-sec"></div>`}
       ["owner", "#/owner", "ราย User", true],
       ["customer", "#/customer", "ราย ลูกค้า", true],
       ["team", "#/team", "ราย ทีม", ["admin", "manager", "observer", "viewer"].includes(ME.user.role)],
-      ["pm", "#/pm", "งาน PM", ME.user.role !== "viewer" || lvl("pm_manage") !== "none"],
+      ["pm", "#/pm", "Preventive Maintenance job", lvl("pm_manage") !== "none"],
       ["skills", "#/skills", "Skill Map", ["admin", "manager", "observer"].includes(ME.user.role)],
       ["kpi", "#/kpi", "KPI (ทดลองใช้)", ME.user.role !== "viewer" && ME.user.role !== "requester" && (!["response", "none"].includes(ME.kpiProfile) || ["admin", "manager", "observer"].includes(ME.user.role))],
       ["response", "#/response", "การตอบกลับ", ME.kpiProfile === "response" || !!ME.responseTeams],
@@ -5932,6 +5932,19 @@ ${body}`;
     }, "บันทึก");
     $app.querySelectorAll("[data-ms]").forEach((b) => (b.onclick = () => openMilestone(p, d.milestones.find((x) => x.id === Number(b.dataset.ms)))));
     bindPjDocs(d, m);
+    $app.querySelectorAll("[data-move]").forEach((b) => (b.onclick = async (e) => {
+      e.stopPropagation();
+      b.disabled = true;
+      try {
+        await post(`/projects/${p.id}/move`, { kind: b.dataset.move, id: Number(b.dataset.id), dir: Number(b.dataset.dir) });
+        await route();
+        const again = $app.querySelector(`[data-move="${b.dataset.move}"][data-id="${b.dataset.id}"][data-dir="${b.dataset.dir}"]:not([disabled])`) || $app.querySelector(`[data-move="${b.dataset.move}"][data-id="${b.dataset.id}"]:not([disabled])`);
+        if (again) again.focus();
+      } catch (err) {
+        b.disabled = false;
+        toast(err.message);
+      }
+    }));
     if (params.task) openTask(Number(params.task), d, m);
   }
 
@@ -5970,14 +5983,17 @@ ${rows || `<tr><td colspan="5"><div class="empty">${d.can.edit ? (ms.length ? "�
     }
     const grid = `<div class="g-grid">${weeks.map(() => "<i></i>").join("")}</div><div class="g-today" style="left:${x(m.today)}%" title="วันนี้"></div>`;
     const cls = (t) => (["done", "submitted"].includes(t.status) ? "done" : t.overdue ? "over" : ["planned", "todo"].includes(t.status) ? "todo" : t.status === "pending" ? "wait" : "");
-    let names = `<div class="g-name g-hd">Task</div>`;
+    const edit = !!(d.can && d.can.edit);
+    const mover = (kind, id, name, first, last) => `<span class="g-mv">${[[-1, "↑", "เลื่อนขึ้น", first], [1, "↓", "เลื่อนลง", last]].map(([dir, a, l, off]) => `<button type="button" data-move="${kind}" data-id="${id}" data-dir="${dir}" ${off ? "disabled" : ""} aria-label="${l}: ${esc(name)}" title="${l}">${a}</button>`).join("")}</span>`;
+    let names = `<div class="g-name g-hd">Task${edit ? ` <span class="hint" style="font-weight:400">· ใช้ ↑ ↓ สลับลำดับ</span>` : ""}</div>`;
     let lanes = `<div class="g-head">${weeks.map((w) => `<span>${fd(w)}</span>`).join("")}</div>`;
     const groups = [...d.milestones.map((ms) => [ms, ts.filter((t) => t.milestoneId === ms.id)]), [null, ts.filter((t) => !t.milestoneId)]].filter(([, a]) => a.length);
     for (const [ms, list] of groups) {
-      names += `<div class="g-name ms">◆ ${ms ? esc(ms.name) : "ไม่อยู่ใน milestone"}</div>`;
+      const mi = ms ? d.milestones.findIndex((x) => x.id === ms.id) : -1;
+      names += `<div class="g-name ms"><span class="g-lbl">◆ ${ms ? esc(ms.name) : "ไม่อยู่ใน milestone"}</span>${ms && edit ? mover("milestone", ms.id, ms.name, mi === 0, mi === d.milestones.length - 1) : ""}</div>`;
       lanes += `<div class="g-lane ms">${grid}${ms ? `<span class="g-dia" style="left:${x(ms.due)}%" title="${esc(ms.name)} ต้อง meet ${fd(ms.due)}"></span>` : ""}</div>`;
-      for (const t of list) {
-        names += `<div class="g-name" data-task="${t.id}" tabindex="0">${esc(t.name)}</div>`;
+      for (const [ti, t] of list.entries()) {
+        names += `<div class="g-name"><span class="g-lbl" data-task="${t.id}" tabindex="0">${esc(t.name)}</span>${edit ? mover("task", t.id, t.name, ti === 0, ti === list.length - 1) : ""}</div>`;
         lanes += `<div class="g-lane">${grid}<span class="g-bar ${cls(t)}" data-task="${t.id}" style="left:${x(t.start)}%;width:${Math.max(0.8, x(t.due) - x(t.start) + 100 / span)}%" title="${esc(t.name)} · ${fd(t.start)}–${fd(t.due)} · ${esc(t.statusLabel)}"></span>${t.base !== t.due ? `<span class="g-base" style="left:${x(t.start)}%;width:${Math.max(0.5, x(t.base) - x(t.start) + 100 / span)}%" title="แผนเดิม ${fd(t.base)}"></span>` : ""}</div>`;
       }
     }

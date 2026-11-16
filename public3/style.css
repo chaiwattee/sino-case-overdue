@@ -891,6 +891,12 @@ tr.pj-off td { opacity: .55; }
 .gantt { display: grid; grid-template-columns: 240px minmax(0, 1fr); font-size: 13px; }
 .g-name { height: 36px; padding: 8px 12px; border-bottom: 1px solid var(--row); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: var(--surface); position: sticky; left: 0; z-index: 1; cursor: pointer; }
 .g-name.ms, .g-name.g-hd { font-weight: 600; background: var(--surface-2); cursor: default; }
+.g-name:has(.g-mv) { display: flex; align-items: center; gap: 6px; padding-right: 6px; }
+.g-lbl { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.g-mv { display: inline-flex; gap: 2px; flex: none; }
+.g-mv button { font: inherit; font-size: 13px; width: 26px; height: 24px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink, inherit); cursor: pointer; padding: 0; }
+.g-mv button:hover:not([disabled]) { border-color: var(--accent); color: var(--accent); }
+.g-mv button[disabled] { opacity: .3; cursor: default; }
 .g-name.g-hd { color: var(--muted); font-weight: 500; border-bottom-color: var(--line); }
 .g-head { display: flex; height: 36px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
 .g-head span { flex: 1 1 0; padding: 9px 0 0 6px; color: var(--muted); font-size: 12px; border-left: 1px solid var(--row); white-space: nowrap; overflow: hidden; }

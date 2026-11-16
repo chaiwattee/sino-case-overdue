@@ -1227,6 +1227,40 @@ function mount(api, { wrap }) {
     await addMilestone(req.user, p, req.body || {});
     res.json({ ok: true });
   }));
+  // Move a milestone, or a task inside its milestone, one place up or down (order shown on Task, Timeline and the plan export).
+  api.post("/projects/:id/move", wrap(async (req, res) => {
+    const { p } = await projectFor(req.user, req.params.id, { edit: true });
+    const b = req.body || {};
+    const dir = Number(b.dir) < 0 ? -1 : 1;
+    const id = Number(b.id);
+    let rows, table;
+    if (b.kind === "milestone") {
+      table = "project_milestones";
+      rows = await all("SELECT id, false AS off FROM project_milestones WHERE project_id = $1 ORDER BY sort, due_date, id", [p.id]);
+    } else {
+      const t = await one("SELECT milestone_id FROM project_tasks WHERE id = $1 AND project_id = $2", [id, p.id]);
+      if (!t) throw bad("ไม่พบ task", 404);
+      table = "project_tasks";
+      rows = await all(
+        "SELECT id, status = 'cancelled' AS off FROM project_tasks WHERE project_id = $1 AND milestone_id IS NOT DISTINCT FROM $2 ORDER BY sort, start_date, id",
+        [p.id, t.milestone_id]
+      );
+    }
+    const ids = rows.map((r) => r.id);
+    const at = ids.indexOf(id);
+    if (at < 0) throw bad("ไม่พบรายการ", 404);
+    // Step over cancelled tasks (they are not on the timeline) to the next visible neighbour.
+    let n = at + dir;
+    while (n >= 0 && n < rows.length && rows[n].off) n += dir;
+    if (n < 0 || n >= rows.length) return res.json({ ok: true, moved: false });
+    ids.splice(at, 1);
+    ids.splice(ids.indexOf(rows[n].id) + (dir > 0 ? 1 : 0), 0, id);
+    await tx(async (c) => {
+      for (let i = 0; i < ids.length; i++) await c.query(`UPDATE ${table} SET sort = $1 WHERE id = $2`, [i, ids[i]]);
+    });
+    await audit(req.user, "project_reorder", p.name, { id: p.id, kind: b.kind === "milestone" ? "milestone" : "task", item: id, dir });
+    res.json({ ok: true, moved: true });
+  }));
   api.put("/project-milestones/:mid", wrap(async (req, res) => {
     await updateMilestone(req.user, req.params.mid, req.body || {});
     res.json({ ok: true });
