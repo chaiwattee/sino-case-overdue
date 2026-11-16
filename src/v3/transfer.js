@@ -72,6 +72,18 @@ function view(user, t) {
   };
 }
 
+/** Where the case moved to stands now (status, owner, SLA stage, last update), so the team that handed it over can follow it. */
+const day = (v) => (!v ? null : v instanceof Date ? d.toISODate(v) : String(v).slice(0, 10));
+async function progressOf(id) {
+  const n = await repo.getCase(id);
+  if (!n) return null;
+  const last = await one("SELECT max(created_at) AS at FROM case_activities WHERE case_id = $1", [id]);
+  return {
+    status: n.status, owner: n.owner || null, stage: n.stage, closed: n.stage === "closed", dueDate: day(n.dueDate || n.targetDate),
+    daysLeft: n.daysLeft ?? null, daysOverdue: n.daysOverdue ?? null, endDate: day(n.endDate), lastUpdate: last && last.at ? last.at : null,
+  };
+}
+
 /** Everything the case page needs: open request, history, links to the case it came from / went to. */
 async function forCaseView(user, c) {
   const rows = await all(`${SEL} WHERE t.case_id = $1 OR t.new_case_id = $1 ORDER BY t.requested_at DESC`, [c.id]);
@@ -82,7 +94,7 @@ async function forCaseView(user, c) {
     pending: pending ? view(user, pending) : null,
     history: rows.filter((r) => !OPEN.includes(r.status)).map((r) => view(user, r)),
     from: await link(c.transferredFrom),
-    to: await link(c.transferredTo),
+    to: c.transferredTo ? { ...(await link(c.transferredTo)), ...(await progressOf(c.transferredTo)) } : null,
     canRequest: !pending && canRequest(user, c),
   };
   if (pending && pending.status === "target" && manages(user, pending.to_team)) out.pending.owners = await candidates(pending.to_team);
@@ -391,6 +403,17 @@ function mount(api, { wrap, loadVisible }) {
   api.post("/transfers/:id(\\d+)/reject", wrap(async (req, res) => res.json(await reject(req.user, Number(req.params.id), req.body || {}))));
   api.post("/transfers/:id(\\d+)/cancel", wrap(async (req, res) => res.json(await cancel(req.user, Number(req.params.id)))));
   // Requests waiting for me (I manage the team that has to act) and my own requests still waiting.
+  // Cases the signed-in person handed to another team (owner of the old case, or the one who asked) whose new case is still open.
+  api.get("/transfers/following", wrap(async (req, res) => {
+    const u = req.user;
+    const rows = await all(
+      `${SEL} JOIN cases n ON n.id = t.new_case_id WHERE t.status = 'accepted' AND (c.owner_id = $1 OR t.requested_by = $1) AND n.closed_at IS NULL ORDER BY t.target_at DESC`,
+      [u.id]
+    );
+    const items = [];
+    for (const t of rows) items.push({ id: t.id, oldCaseId: t.case_id, oldCaseNo: t.case_no, site: t.site, task: t.task, toLabel: t.to_label, newCaseId: t.new_case_id, newCaseNo: t.new_case_no, movedAt: t.target_at, ...(await progressOf(t.new_case_id)) });
+    res.json({ items: items.filter((x) => !x.closed) });
+  }));
   api.get("/transfers/pending", wrap(async (req, res) => {
     const u = req.user;
     const rows = await all(`${SEL} WHERE t.status = ANY($1) ORDER BY t.requested_at`, [OPEN]);

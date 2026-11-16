@@ -833,7 +833,7 @@ ${caseTable(cases, { missingRes: showRes, empty: "ไม่พบเคสตา
 
   async function viewMine(params) {
     setNav("mine");
-    const [{ cases }, lk, ikHtml, extHtml, srAll, pjHtml] = await Promise.all([api("/cases?mine=1"), lookups(), intakeSection(), Promise.all([extPendingSection(), transferPendingSection()]).then((a) => a.join("")), srList("assigned"), pjMyTasksSection().catch(() => "")]);
+    const [{ cases }, lk, ikHtml, extHtml, srAll, pjHtml] = await Promise.all([api("/cases?mine=1"), lookups(), intakeSection(), Promise.all([extPendingSection(), transferPendingSection(), transferFollowSection()]).then((a) => a.join("")), srList("assigned"), pjMyTasksSection().catch(() => "")]);
     const srMine = srAll.filter(srOpen).sort(srByTarget);
     const srLate = srMine.filter((r) => r.status === "overdue" || r.daysLeft === 0 || r.daysLeft === 1);
     const tab = params.tab || "open";
@@ -2580,9 +2580,21 @@ ${live.map((e) => `<tr><td><a class="mono" href="#/case/${e.case_id}">${esc(e.ca
 
   // ------------------------------------------------------------ cross-team transfer (โอนเคสข้ามทีม)
   const TR_ST = { source: ["r1", "รอ Manager ทีมเดิม"], target: ["r1", "รอทีมใหม่รับเคส"], accepted: ["ok", "โอนสำเร็จ"], rejected: ["fail", "ไม่อนุมัติ"], cancelled: ["closed", "ยกเลิก"] };
+  // Status of the case on the new team, for the team that handed it over (shown until it closes, then "ปิดแล้ว").
+  const trSla = (x) => (x.closed ? chip("closed", `ปิดแล้ว ${fd(x.endDate)}`) : x.stage === "overdue" ? chip("overdue", `เกิน Due ${x.daysOverdue} วัน`) : chip(x.stage, x.daysLeft === 0 ? "ครบ Due วันนี้" : x.daysLeft != null ? `เหลือ ${x.daysLeft} วัน` : STAGE[x.stage]));
+  const trProgress = (x) => (x && x.status ? `<div class="tr-prog">สถานะเคสใหม่: <strong>${esc(x.status)}</strong> ${trSla(x)} · User ${esc(x.owner || "-")}${x.dueDate && !x.closed ? ` · Due ${fd(x.dueDate)}` : ""}${x.lastUpdate ? ` · อัปเดตล่าสุด ${fdt(x.lastUpdate)}` : ""}</div>` : "");
+  async function transferFollowSection() {
+    const r = await api("/transfers/following").catch(() => ({ items: [] }));
+    if (!r.items.length) return "";
+    return `<section class="card" id="mine-trf"><div class="title"><h2>เคสที่โอนไปทีมอื่น ติดตามจนกว่าจะปิด (${r.items.length})</h2><span>ดูอย่างเดียว ทีมใหม่เป็นผู้ดูแลเคส · หายจากรายการเมื่อเคสใหม่ปิด</span></div>
+<div class="tablewrap"><table><thead><tr><th>เคสเดิม → เคสใหม่</th><th>ลูกค้า / งาน</th><th>ทีมที่รับ / User</th><th>Status</th><th>SLA ทีมใหม่</th><th>อัปเดตล่าสุด</th></tr></thead><tbody>
+${r.items.map((x) => `<tr class="click" data-href="#/case/${x.oldCaseId}"><td><a class="mono" href="#/case/${x.oldCaseId}">${esc(x.oldCaseNo)}</a> → <span class="mono">${esc(x.newCaseNo || "")}</span><div class="hint">โอนเมื่อ ${fdt(x.movedAt)}</div></td>
+<td><strong>${esc(x.site || "-")}</strong><div class="hint">${esc(x.task || "")}</div></td><td>${esc(x.toLabel)}<div class="hint">${esc(x.owner || "-")}</div></td>
+<td>${esc(x.status || "-")}</td><td>${trSla(x)}${x.dueDate ? `<div class="hint">Due ${fd(x.dueDate)}</div>` : ""}</td><td class="muted" style="font-size:13px">${x.lastUpdate ? fdt(x.lastUpdate) : "-"}</td></tr>`).join("")}</tbody></table></div></section>`;
+  }
   function transferBanner(c, t) {
     if (!t) return "";
-    if (t.to) return `<div class="banner info tr-banner"><strong>เคสนี้โอนไปทีมอื่นแล้ว: ${esc(t.to.teamLabel)}</strong> · ทำงานต่อที่เคสใหม่ <a class="mono" href="#/case/${t.to.id}">${esc(t.to.caseNo)}</a><br><span style="font-size:13px">เคสนี้ปิดด้วยสถานะ Transferred เก็บไว้เป็นประวัติ SLA ของทีมเดิมนับตาม Due เดิม</span></div>`;
+    if (t.to) return `<div class="banner info tr-banner"><strong>เคสนี้โอนไปทีมอื่นแล้ว: ${esc(t.to.teamLabel)}</strong> · ทำงานต่อที่เคสใหม่ <a class="mono" href="#/case/${t.to.id}">${esc(t.to.caseNo)}</a>${trProgress(t.to) || "<br>"}<span style="font-size:13px">เคสนี้ปิดด้วยสถานะ Transferred เก็บไว้เป็นประวัติ SLA ของทีมเดิมนับตาม Due เดิม</span></div>`;
     const p = t.pending;
     const top = p ? `<div class="banner warn tr-banner"><strong>มีคำขอโอนเคสไปทีม ${esc(p.toLabel)}</strong> · ${TR_ST[p.status][1]}${p.can.act ? ` · <a href="#tr-card" data-trjump>รอคุณ${p.status === "source" ? "อนุมัติ" : "รับเคส"}</a>` : ""}</div>` : "";
     if (t.from) return top + `<div class="banner info tr-banner"><strong>รับโอนจากทีม ${esc(t.from.teamLabel)}</strong> · เคสเดิม <a class="mono" href="#/case/${t.from.id}">${esc(t.from.caseNo)}</a> (ดูประวัติงานเดิมได้ที่เคสเดิม) · SLA ของเคสนี้นับจากวันที่รับโอน</div>`;

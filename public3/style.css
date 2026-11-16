@@ -975,3 +975,5 @@ tr.pj-off td { opacity: .55; }
 .kc-compact .kc-facts { grid-template-columns: repeat(4, auto); margin: 0 auto 0 0; gap: 4px 24px; }
 .kc-compact .kc-work { margin: 10px 0 0; font-size: 13.5px; color: var(--muted); }
 @media (max-width: 760px) { .kc-body { grid-template-columns: 1fr; } .kc-compact .kc-facts { grid-template-columns: repeat(2, auto); } }
+
+.tr-prog { margin-top: 6px; font-size: 14px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
