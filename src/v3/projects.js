@@ -54,12 +54,16 @@ async function canEdit(user, p) {
   if (!user || !p) return false;
   if (user.role === "admin") return true;
   if (p.pm_id === user.id && (await isPm(user))) return true;
+  // The PM of a large project runs every sub-project under it.
+  if (p.parent_id && (await isPm(user)) && (await one("SELECT 1 FROM projects WHERE id = $1 AND pm_id = $2", [p.parent_id, user.id]))) return true;
   return isPmLead(user);
 }
 /** Full view of a project (every task, costs for PM / managers / admin). */
 async function seesAll(user, p) {
   if (["admin", "observer", "viewer"].includes(user.role)) return true;
-  return canEdit(user, p);
+  if (await canEdit(user, p)) return true;
+  // The PM of a sub-project reads the large project it belongs to.
+  return !!(await isPm(user)) && !!(await one("SELECT 1 FROM projects WHERE parent_id = $1 AND pm_id = $2", [p.id, user.id]));
 }
 /** Costs (baht) are for the PM, managers and admins only. */
 const costVisible = async (user, p) => user.role === "admin" || user.role === "manager" || (p ? await canEdit(user, p) : await isPm(user));
@@ -125,7 +129,7 @@ function serTask(t, hol, noKpi) {
     sr: t.sr_id ? { id: t.sr_id, no: t.sr_no, status: t.sr_status, rating: t.sr_rating, ext: t.sr_ext_target ? { target: isoDay(t.sr_ext_target), reason: t.sr_ext_reason, by: t.sr_ext_by } : null } : null,
     assignee: t.assignee_id || t.assignee_name ? { id: t.assignee_id, name: t.assignee_name } : null,
     mdEst: num(t.md_est), mdAct: num(t.md_act), sort: t.sort,
-    ownerText: t.owner_text || "", planNo: t.plan_no || null, pred: t.pred || "", pct: ["done", "submitted"].includes(st.status) ? 100 : t.kind === "own" ? t.pct || 0 : 0,
+    ownerText: t.owner_text || "", planNo: t.plan_no || null, pred: t.pred || "", xpred: (t.xpred || []).map(Number), pct: ["done", "submitted"].includes(st.status) ? 100 : t.kind === "own" ? t.pct || 0 : 0,
     noMd: !!(noKpi && t.kind === "sr" && noKpi.has(t.team)), // a team without KPI is not asked for man-days
   };
 }
@@ -135,8 +139,12 @@ async function loadProject(id) {
 const serProject = (p) => ({
   id: p.id, name: p.name, customer: p.customer || "", template: p.template || "", pm: p.pm_id ? { id: p.pm_id, name: p.pm_name } : null,
   start: isoDay(p.start_date), end: isoDay(p.end_date), status: p.status, statusLabel: STATUS[p.status], description: p.description || "", deliveredAt: isoDay(p.delivered_at),
-  report: { to: p.report_to || "", cc: p.report_cc || "", freq: p.report_freq || "off", note: p.report_note || "", last: isoDay(p.report_last) },
+  report: { to: p.report_to || "", cc: p.report_cc || "", freq: p.report_freq || "off", note: p.report_note || "", last: isoDay(p.report_last), sections: sectionsOf(p) },
+  parentId: p.parent_id || null,
 });
+// What a combined (large project) customer report shows.
+const SECTIONS = { subs: true, timeline: true, work: true, risks: false, manday: false };
+const sectionsOf = (p) => ({ ...SECTIONS, ...(p.report_sections || {}) });
 async function tasksOf(projectId, hol) {
   hol = hol || (await sr.holidays());
   const noKpi = await require("./kpiprofiles").noKpiTeams();
@@ -146,9 +154,21 @@ async function tasksOf(projectId, hol) {
   list.forEach((t) => t.planNo && t.status !== "cancelled" && !byNo.has(t.planNo) && byNo.set(t.planNo, t));
   const t0 = todayIso();
   const closed = (t) => ["done", "submitted", "cancelled"].includes(t.status);
+  // Tasks of sibling sub-projects this project waits for (xpred), read with their own status.
+  const xids = [...new Set(list.flatMap((t) => t.xpred))];
+  const ext = new Map();
+  if (xids.length) {
+    const rows = await all(`${TASK_SQL.replace("FROM project_tasks t", "FROM project_tasks t JOIN projects xp ON xp.id = t.project_id").replace("SELECT t.*,", "SELECT t.*, xp.name AS project_name,")} WHERE t.id = ANY($1)`, [xids]);
+    rows.forEach((r) => ext.set(r.id, { ...serTask(r, hol, noKpi), projectName: r.project_name }));
+  }
   for (const t of list) {
-    t.waitingFor = closed(t) ? [] : String(t.pred || "").split(",").map((n) => byNo.get(Number(n))).filter((x) => x && x.id !== t.id && !closed(x)).map((x) => ({ id: x.id, no: x.planNo, name: x.name, due: x.due }));
+    const inside = String(t.pred || "").split(",").map((n) => byNo.get(Number(n))).filter((x) => x && x.id !== t.id && !closed(x)).map((x) => ({ id: x.id, no: x.planNo, name: x.name, due: x.due }));
+    const outside = t.xpred.map((id) => ext.get(id)).filter((x) => x && x.projectId !== t.projectId && !closed(x))
+      .map((x) => ({ id: x.id, no: x.planNo, name: x.name, due: x.due, overdue: x.overdue, projectId: x.projectId, project: x.projectName }));
+    t.waitingFor = closed(t) ? [] : [...inside, ...outside];
     t.blocked = t.waitingFor.length > 0 && t.start <= t0;
+    // A sibling task that is late, or planned to finish on or after this task starts, puts the start at risk.
+    t.xrisk = !closed(t) && outside.some((x) => x.overdue || x.due >= t.start);
   }
   return list;
 }
@@ -173,6 +193,68 @@ function milestoneState(m, tasks) {
   return ["plan", "ตามแผน"];
 }
 
+// ------------------------------------------------------------ large project (program) = the sum of its sub-projects
+const childrenOf = (id) => all(`SELECT p.*, u.display_name AS pm_name, u.email AS pm_email FROM projects p LEFT JOIN users u ON u.id = p.pm_id WHERE p.parent_id = $1 ORDER BY p.start_date, p.id`, [id]);
+function subState(sm, c) {
+  if (c.status === "delivered") return ["met", "ส่งมอบแล้ว"];
+  if (sm.total && sm.done === sm.total) return ["met", "เสร็จครบ"];
+  if (isoDay(c.end_date) < todayIso()) return ["missed", "เลยวันส่งมอบ"];
+  if (sm.overdue) return ["risk", "มีความเสี่ยง"];
+  return ["plan", c.status === "plan" ? "วางแผน" : "ตามแผน"];
+}
+/** Everything a large project shows: its sub-projects, all their tasks and milestones, and links between sub-projects. */
+async function programOf(p, hol) {
+  const kids = await childrenOf(p.id);
+  if (!kids.length) return null;
+  hol = hol || (await sr.holidays());
+  const subs = [];
+  let tasks = [];
+  let milestones = [];
+  for (const c of kids) {
+    const ts = await tasksOf(c.id, hol);
+    const ms = await all("SELECT * FROM project_milestones WHERE project_id = $1 ORDER BY sort, due_date, id", [c.id]);
+    const sm = summary(ts);
+    const live = ts.filter((t) => t.status !== "cancelled");
+    const [state, stateLabel] = subState(sm, c);
+    subs.push({
+      ...serProject(c), summary: sm, state, stateLabel, pct: sm.total ? Math.round((sm.done / sm.total) * 100) : 0,
+      from: [isoDay(c.start_date), ...live.map((t) => t.start)].sort()[0], to: [isoDay(c.end_date), ...live.map((t) => t.due)].sort().pop(),
+    });
+    tasks = tasks.concat(ts.map((t) => ({ ...t, projectName: c.name })));
+    milestones = milestones.concat(ms.map((m) => {
+      const [st, label] = milestoneState(m, ts);
+      return { id: m.id, projectId: c.id, projectName: c.name, name: m.name, due: isoDay(m.due_date), state: st, stateLabel: label,
+        total: ts.filter((t) => t.milestoneId === m.id && t.status !== "cancelled").length, done: ts.filter((t) => t.milestoneId === m.id && ["done", "submitted"].includes(t.status)).length };
+    }));
+  }
+  // Links between sub-projects: the waiting task, the task it waits for, and whether the start is at risk.
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const deps = [];
+  for (const t of tasks) for (const id of t.xpred) {
+    const src = byId.get(id);
+    if (!src || src.projectId === t.projectId || t.status === "cancelled") continue;
+    const fin = (x) => ["done", "submitted", "cancelled"].includes(x.status);
+    deps.push({
+      from: { id: src.id, name: src.name, no: src.planNo, projectId: src.projectId, project: src.projectName, due: src.due, overdue: src.overdue, overdueDays: src.overdueDays, done: fin(src) },
+      to: { id: t.id, name: t.name, no: t.planNo, projectId: t.projectId, project: t.projectName, start: t.start, done: fin(t) },
+      risk: !fin(t) && !fin(src) && (src.overdue || src.due >= t.start),
+      open: !fin(t) && !fin(src),
+    });
+  }
+  return { subs, tasks, milestones, deps };
+}
+/** Tasks of the other sub-projects of the same large project, for the "waits for" picker. */
+async function siblingTasks(p) {
+  if (!p.parent_id) return [];
+  const sibs = await all("SELECT id, name FROM projects WHERE parent_id = $1 AND id <> $2 ORDER BY start_date, id", [p.parent_id, p.id]);
+  const out = [];
+  for (const x of sibs) {
+    const ts = await all("SELECT id, name, plan_no FROM project_tasks WHERE project_id = $1 AND status <> 'cancelled' ORDER BY sort, start_date, id", [x.id]);
+    out.push({ projectId: x.id, project: x.name, tasks: ts.map((t) => ({ id: t.id, no: t.plan_no, name: t.name })) });
+  }
+  return out;
+}
+
 async function visibleProjects(user) {
   const s = await settings();
   if (["admin", "observer", "viewer"].includes(user.role) || (await isPmLead(user))) return all("SELECT id FROM projects ORDER BY id DESC");
@@ -181,7 +263,8 @@ async function visibleProjects(user) {
     `SELECT DISTINCT p.id FROM projects p
        LEFT JOIN project_tasks t ON t.project_id = p.id AND t.kind = 'sr'
        LEFT JOIN service_requests x ON x.project_task_id = t.id AND x.status NOT IN ('rejected','cancelled')
-      WHERE ($2 AND p.pm_id = $1) OR x.assignee_id = $1 OR ($3 AND t.team = ANY($4) AND x.id IS NOT NULL)
+      WHERE ($2 AND (p.pm_id = $1 OR p.parent_id IN (SELECT id FROM projects WHERE pm_id = $1) OR p.id IN (SELECT parent_id FROM projects WHERE pm_id = $1 AND parent_id IS NOT NULL)))
+         OR x.assignee_id = $1 OR ($3 AND t.team = ANY($4) AND x.id IS NOT NULL)
       ORDER BY p.id DESC`,
     [user.id, pm, user.role === "manager", (user.teams || []).filter((t) => !s.teams.includes(t))]
   );
@@ -225,8 +308,15 @@ async function createProject(user, b) {
   const end = validDate(b.end, "วันส่งมอบ");
   if (end < start) throw bad("วันส่งมอบต้องไม่ก่อนวันเริ่ม");
   let pmId = Number(b.pmId) || user.id;
+  const parent = b.parentId ? await loadProject(b.parentId) : null;
+  if (b.parentId) {
+    if (!parent) throw bad("ไม่พบโปรเจกต์ใหญ่", 404);
+    if (parent.parent_id) throw bad("โปรเจกต์ย่อยซ้อนได้ชั้นเดียว");
+    if (!(await canEdit(user, parent))) throw bad("เพิ่มโปรเจกต์ย่อยได้เฉพาะ PM ของโปรเจกต์ใหญ่ หรือ Manager ทีม PM", 403);
+    if (await one("SELECT 1 FROM project_tasks WHERE project_id = $1", [parent.id])) throw bad("โปรเจกต์นี้มี task อยู่แล้ว จึงเป็นโปรเจกต์ใหญ่ไม่ได้ ย้าย task ไปไว้ในโปรเจกต์ย่อยก่อน");
+  }
   if (pmId !== user.id) {
-    if (!(await isPmLead(user))) throw bad("เลือก PM คนอื่นได้เฉพาะ Manager ทีม PM", 403);
+    if (!(await isPmLead(user)) && !parent) throw bad("เลือก PM คนอื่นได้เฉพาะ Manager ทีม PM", 403);
     if (!(await pmPeople()).some((u) => u.id === pmId)) throw bad("เลือก PM จากทีม Project Manager");
   }
   const tpl = b.templateId ? await one("SELECT * FROM project_templates WHERE id = $1", [Number(b.templateId)]) : null;
@@ -234,8 +324,8 @@ async function createProject(user, b) {
   const teams = new Set((await all("SELECT code FROM teams")).map((t) => t.code));
   const id = await tx(async (c) => {
     const r = await c.query(
-      "INSERT INTO projects (name, customer, template, pm_id, start_date, end_date, description, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id",
-      [name, clean(b.customer, 200) || null, tpl ? tpl.name : null, pmId, start, end, clean(b.description, 3000) || null, user.id]
+      "INSERT INTO projects (name, customer, template, pm_id, start_date, end_date, description, created_by, parent_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id",
+      [name, clean(b.customer, 200) || (parent && parent.customer) || null, tpl ? tpl.name : null, pmId, start, end, clean(b.description, 3000) || null, user.id, parent ? parent.id : null]
     );
     const pid = r.rows[0].id;
     // A template's days are working days from the project start; a start on a holiday counts from the next working day.
@@ -315,9 +405,20 @@ async function updateMilestone(user, mid, b) {
   return p;
 }
 
+/** Ids of tasks in sibling sub-projects (same large project, another sub-project) that this task may wait for. */
+async function xpredOf(p, v) {
+  const ids = [...new Set((Array.isArray(v) ? v : String(v || "").split(",")).map(Number).filter(Boolean))].slice(0, 10);
+  if (!ids.length) return [];
+  if (!p.parent_id) throw bad("รองานข้ามโปรเจกต์ได้เฉพาะโปรเจกต์ย่อย");
+  const ok = await all("SELECT t.id FROM project_tasks t JOIN projects x ON x.id = t.project_id WHERE t.id = ANY($1) AND x.parent_id = $2 AND x.id <> $3", [ids, p.parent_id, p.id]);
+  if (ok.length !== ids.length) throw bad("เลือก task จากโปรเจกต์ย่อยอื่นในโปรเจกต์ใหญ่เดียวกัน");
+  return ids;
+}
 const predOf = (v) => clean(String(v == null ? "" : v).replace(/[^0-9,;\s]/g, "").replace(/[;\s]+/g, ",").replace(/,+/g, ",").replace(/^,|,$/g, ""), 100) || null;
 const pctOf = (v) => Math.max(0, Math.min(100, Math.round(Number(v) || 0)));
 async function addTask(user, p, b) {
+  if (await one("SELECT 1 FROM projects WHERE parent_id = $1", [p.id])) throw bad("โปรเจกต์ใหญ่ไม่มี task ของตัวเอง เพิ่ม task ในโปรเจกต์ย่อย");
+  const xpred = await xpredOf(p, b.xpred);
   const name = clean(b.name, 200);
   if (name.length < 3) throw bad("ใส่ชื่องาน");
   const ms = await one("SELECT id FROM project_milestones WHERE id = $1 AND project_id = $2", [Number(b.milestoneId), p.id]);
@@ -342,6 +443,7 @@ async function addTask(user, p, b) {
       [p.id, ms.id, name, clean(b.detail, 5000) || null, kind, team, b.severity && sr.SEV[b.severity] ? b.severity : "normal", start, due, srOpen, md, user.id, kind === "own" ? clean(b.ownerText, 200) || null : null, predOf(b.pred), kind === "own" ? pctOf(b.pct) : 0]
     );
     await addEvent(c, r.rows[0].id, "created", null, null, user.id);
+    if (xpred.length) await c.query("UPDATE project_tasks SET xpred = $2 WHERE id = $1", [r.rows[0].id, xpred]);
     return r.rows[0].id;
   });
   let srNo = null;
@@ -371,6 +473,7 @@ async function updateTask(user, t, p, b) {
     [t.id, name, clean(b.detail ?? t.detail, 5000) || null, mid, start, Math.max(0, num(b.mdEst ?? t.md_est)), team, b.severity && sr.SEV[b.severity] ? b.severity : t.severity, b.srOpen === "auto" || b.srOpen === "now" ? b.srOpen : t.sr_open,
       t.kind === "own" ? (b.ownerText === undefined ? t.owner_text : clean(b.ownerText, 200) || null) : null, b.pred === undefined ? t.pred : predOf(b.pred), t.kind === "own" ? (b.pct === undefined ? t.pct : pctOf(b.pct)) : 0]
   );
+  if (b.xpred !== undefined) await q("UPDATE project_tasks SET xpred = $2 WHERE id = $1", [t.id, await xpredOf(p, b.xpred)]);
 }
 
 /** The project as the Sinostech standard plan sheet. Predecessors keep pointing at the right line after tasks move. */
@@ -387,9 +490,45 @@ async function planExport(p, tasks) {
       name,
       tasks: numbered.filter((x) => (x.t.milestone || "ไม่อยู่ใน milestone") === name).map(({ t, no }) => ({
         no, name: t.detail ? `${t.name}\n${t.detail}` : t.name, owner: t.kind === "own" ? t.ownerText || p.pm_name || "PM" : [t.teamLabel, t.assignee && t.assignee.name].filter(Boolean).join(" · "),
-        md: t.mdEst || null, pred: String(t.pred || "").split(",").filter(Boolean).map((x) => seqOf.get(Number(x)) || x).join(","), start: t.start, finish: t.due, pct: t.pct, status: stOf(t),
+        md: t.mdEst || null, pred: [...String(t.pred || "").split(",").filter(Boolean).map((x) => seqOf.get(Number(x)) || x), ...(t.waitingFor || []).filter((w) => w.project).map((w) => `${w.project}: ${w.no || w.name}`)].join(", "),
+        start: t.start, finish: t.due, pct: t.pct, status: stOf(t),
       })),
     })),
+  });
+}
+/** A large project as one plan sheet: each sub-project's milestones in turn, numbered straight through,
+ *  so a link to another sub-project is simply that line's number. */
+async function programExport(p, program) {
+  const stOf = (t) => (["done", "submitted"].includes(t.status) ? "Completed" : t.overdue ? "Delayed" : ["doing", "pending"].includes(t.status) || t.pct > 0 ? "In Progress" : "Not Started");
+  const live = program.tasks.filter((t) => t.status !== "cancelled");
+  const seq = new Map();
+  let n = 0;
+  const groups = [];
+  for (const c of program.subs) {
+    const mine = live.filter((t) => t.projectId === c.id);
+    const names = [...new Set(mine.map((t) => t.milestone || "ไม่อยู่ใน milestone"))];
+    for (const name of names) {
+      const ts = mine.filter((t) => (t.milestone || "ไม่อยู่ใน milestone") === name);
+      ts.forEach((t) => seq.set(t.id, ++n));
+      groups.push({ name: `${c.name} · ${name}`, project: c, tasks: ts });
+    }
+  }
+  return PLAN.planWorkbook({
+    milestones: groups.map((g) => {
+      const byNo = new Map(g.tasks.filter((t) => t.planNo).map((t) => [t.planNo, t.id]));
+      const sameProject = live.filter((t) => t.projectId === g.project.id);
+      sameProject.forEach((t) => t.planNo && !byNo.has(t.planNo) && byNo.set(t.planNo, t.id));
+      return {
+        name: g.name,
+        tasks: g.tasks.map((t) => ({
+          no: seq.get(t.id), name: t.detail ? `${t.name}\n${t.detail}` : t.name,
+          owner: t.kind === "own" ? t.ownerText || g.project.pm?.name || "PM" : [t.teamLabel, t.assignee && t.assignee.name].filter(Boolean).join(" · "),
+          md: t.mdEst || null,
+          pred: [...String(t.pred || "").split(",").filter(Boolean).map((x) => seq.get(byNo.get(Number(x))) || x), ...t.xpred.map((id) => seq.get(id)).filter(Boolean)].join(","),
+          start: t.start, finish: t.due, pct: t.pct, status: stOf(t),
+        })),
+      };
+    }),
   });
 }
 
@@ -857,6 +996,8 @@ const emailsOf = (x) => String(x || "").split(/[,;\s]+/).map((v) => v.trim().toL
 const REPORT_FREQ = { off: "ไม่ส่งอัตโนมัติ", monthly: "วันทำการแรกของเดือน", biweekly: "ทุก 2 สัปดาห์" };
 async function reportData(p) {
   const hol = await sr.holidays();
+  const program = await programOf(p, hol);
+  if (program) return programReportData(p, program);
   const tasks = (await tasksOf(p.id, hol)).filter((t) => t.status !== "cancelled");
   const ms = await all("SELECT * FROM project_milestones WHERE project_id = $1 ORDER BY sort, due_date, id", [p.id]);
   const t0 = todayIso();
@@ -874,6 +1015,35 @@ async function reportData(p) {
     }),
     finished: done.filter((t) => t.doneAt && t.doneAt > since).sort((a, b) => a.doneAt.localeCompare(b.doneAt)).slice(0, 40),
     next: tasks.filter((t) => !fin(t)).sort((a, b) => a.due.localeCompare(b.due)).slice(0, 12),
+    since, today: t0, note: p.report_note || "",
+  };
+}
+/** The combined report of a large project: only the parts the PM ticked (sub-projects, timeline, work, risks, man-days). */
+async function programReportData(p, program) {
+  const t0 = todayIso();
+  const since = isoDay(p.report_last) || d.toISODate(d.addDays(d.today(), -31));
+  const fin = (t) => ["done", "submitted"].includes(t.status);
+  const tasks = program.tasks.filter((t) => t.status !== "cancelled");
+  const done = tasks.filter(fin);
+  const STATE = { met: "Completed", late: "Completed late", missed: "Behind schedule", risk: "Needs attention", plan: "On track" };
+  const MS_STATE = { met: "Completed on schedule", late: "Completed late", missed: "Behind schedule", risk: "Needs attention", plan: "On track" };
+  const sections = sectionsOf(p);
+  let risks = [];
+  if (sections.risks) {
+    risks = (await logsOf(p.id)).filter((l) => l.open).map((l) => ({ ...l, project: "" }));
+    for (const c of program.subs) risks = risks.concat((await logsOf(c.id)).filter((l) => l.open).map((l) => ({ ...l, project: c.name })));
+  }
+  const KIND_EN = { risk: "Risk", issue: "Issue", change: "Change request" };
+  return {
+    name: p.name, customer: p.customer || "", pm: p.pm_name || "", start: isoDay(p.start_date), end: isoDay(p.end_date), status: p.status, deliveredAt: isoDay(p.delivered_at),
+    total: tasks.length, done: done.length, pct: tasks.length ? Math.round((done.length / tasks.length) * 100) : 0,
+    program: true, sections,
+    subs: program.subs.map((c) => ({ name: c.name, from: c.from, to: c.to, end: c.end, total: c.summary.total, done: c.summary.done, pct: c.pct, state: c.state, stateLabel: STATE[c.state], mdEst: c.summary.mdEst, mdAct: c.summary.mdAct,
+      milestones: program.milestones.filter((m) => m.projectId === c.id).map((m) => ({ name: m.name, due: m.due, state: m.state, stateLabel: MS_STATE[m.state] })) })),
+    milestones: program.milestones.map((m) => ({ name: `${m.projectName} · ${m.name}`, due: m.due, total: m.total, done: m.done, state: m.state, stateLabel: MS_STATE[m.state] })),
+    finished: done.filter((t) => t.doneAt && t.doneAt > since).sort((a, b) => a.doneAt.localeCompare(b.doneAt)).slice(0, 40).map((t) => ({ ...t, name: `${t.projectName} · ${t.name}` })),
+    next: tasks.filter((t) => !fin(t)).sort((a, b) => a.due.localeCompare(b.due)).slice(0, 12).map((t) => ({ ...t, name: `${t.projectName} · ${t.name}` })),
+    risks: risks.map((l) => ({ code: l.code, kind: KIND_EN[l.kind], title: l.title, project: l.project, due: l.due })),
     since, today: t0, note: p.report_note || "",
   };
 }
@@ -924,7 +1094,9 @@ async function reportPdf(p) {
 
   // Summary tiles
   const metMs = x.milestones.filter((m) => m.state === "met" || m.state === "late").length;
-  const tiles = [["Overall progress", `${x.pct}%`], ["Work items completed", `${x.done} / ${x.total}`], ["Milestones completed", `${metMs} / ${x.milestones.length}`], [x.deliveredAt ? "Delivered" : "Planned delivery", day(x.deliveredAt || x.end)]];
+  const tiles = [["Overall progress", `${x.pct}%`], ["Work items completed", `${x.done} / ${x.total}`],
+    x.program ? ["Sub-projects completed", `${x.subs.filter((c) => c.state === "met").length} / ${x.subs.length}`] : ["Milestones completed", `${metMs} / ${x.milestones.length}`],
+    [x.deliveredAt ? "Delivered" : "Planned delivery", day(x.deliveredAt || x.end)]];
   const ty = doc.y + 12;
   const tw = (W - 3 * 8) / 4;
   tiles.forEach(([l, v], i) => {
@@ -942,10 +1114,93 @@ async function reportPdf(p) {
     doc.font("B").fontSize(12).fillColor(C.ink).text(t, L, doc.y + 6, { width: W });
     doc.moveDown(0.3);
   };
+  if (x.program) {
+    // Sub-projects table
+    if (x.sections.subs) {
+      heading("Sub-projects");
+      const sc = [[0, W * 0.38, "Sub-project"], [W * 0.38, W * 0.26, "Period"], [W * 0.64, W * 0.18, "Progress"], [W * 0.82, W * 0.18, "Status"]];
+      let yy = doc.y;
+      doc.rect(L, yy, W, 20).fillColor(C.row).fill();
+      sc.forEach(([cx, cw, label]) => doc.font("B").fontSize(9).fillColor(C.muted).text(label, L + cx + 6, yy + 5, { width: cw - 12 }));
+      yy += 20;
+      for (const c of x.subs) {
+        doc.font("R").fontSize(10);
+        const nm = fit(c.name, sc[0][1] - 12);
+        const h = Math.max(22, doc.heightOfString(nm, { width: sc[0][1] - 12 }) + 10);
+        if (yy + h > doc.page.height - 60) { doc.addPage(); yy = 40; }
+        doc.fillColor(C.ink).text(nm, L + 6, yy + 5, { width: sc[0][1] - 12 });
+        doc.fontSize(9.5).text(`${day(c.from)} – ${day(c.to)}`, L + sc[1][0] + 6, yy + 6, { width: sc[1][1] - 12 });
+        const bw = sc[2][1] - 50;
+        doc.roundedRect(L + sc[2][0] + 6, yy + 9, bw, 6, 3).fillColor(C.line).fill();
+        if (c.pct) doc.roundedRect(L + sc[2][0] + 6, yy + 9, Math.max(6, (bw * c.pct) / 100), 6, 3).fillColor(C.green).fill();
+        doc.fillColor(C.muted).fontSize(9).text(`${c.pct}%`, L + sc[2][0] + bw + 12, yy + 6, { width: 36 });
+        doc.font("B").fontSize(9.5).fillColor({ met: C.green, missed: C.red, risk: C.amber, plan: C.blue }[c.state] || C.blue).text(c.stateLabel, L + sc[3][0] + 6, yy + 6, { width: sc[3][1] - 12 });
+        doc.moveTo(L, yy + h).lineTo(L + W, yy + h).lineWidth(0.5).strokeColor(C.line).stroke();
+        yy += h;
+      }
+      doc.y = yy + 6;
+    }
+    // Timeline: one bar per sub-project, milestones as diamonds
+    if (x.sections.timeline && x.subs.length) {
+      heading("Timeline");
+      const all0 = x.subs.flatMap((c) => [c.from, c.to, ...c.milestones.map((m) => m.due)]).filter(Boolean).sort();
+      const a = d.fromISODate(all0[0]).getTime();
+      const b = Math.max(a + 86400000, d.fromISODate(all0[all0.length - 1]).getTime());
+      const NW = W * 0.3;
+      const GW = W - NW;
+      const xo = (iso) => L + NW + ((d.fromISODate(iso).getTime() - a) / (b - a)) * GW;
+      let yy = doc.y + 4;
+      // month ticks
+      doc.font("R").fontSize(8).fillColor(C.muted);
+      const m0 = new Date(d.fromISODate(all0[0]).getFullYear(), d.fromISODate(all0[0]).getMonth(), 1);
+      for (let m = new Date(m0); m.getTime() <= b; m.setMonth(m.getMonth() + 1)) {
+        if (m.getTime() < a) continue;
+        const xx = L + NW + ((m.getTime() - a) / (b - a)) * GW;
+        doc.moveTo(xx, yy + 12).lineTo(xx, yy + 14 + x.subs.length * 26).lineWidth(0.4).strokeColor(C.line).stroke();
+        doc.text(`${MON[m.getMonth()]} ${String(m.getFullYear()).slice(2)}`, xx + 2, yy, { width: 40, lineBreak: false });
+      }
+      yy += 14;
+      const gridTop = yy;
+      const today = x.today;
+      for (const c of x.subs) {
+        if (yy + 26 > doc.page.height - 60) { doc.addPage(); yy = 40; }
+        doc.font("R").fontSize(9.5).fillColor(C.ink).text(c.name, L, yy + 7, { width: NW - 8, height: 14, ellipsis: true, lineBreak: false });
+        const x1 = xo(c.from);
+        const x2 = Math.max(x1 + 4, xo(c.to));
+        doc.roundedRect(x1, yy + 8, x2 - x1, 10, 4).fillColor(C.line).fill();
+        if (c.pct) doc.roundedRect(x1, yy + 8, Math.max(4, ((x2 - x1) * c.pct) / 100), 10, 4).fillColor({ missed: C.red, risk: C.amber }[c.state] || C.green).fill();
+        for (const m of c.milestones) {
+          const mx = xo(m.due);
+          doc.save().translate(mx, yy + 13).rotate(45).rect(-4, -4, 8, 8).fillColor(C.ink).fill().restore();
+        }
+        yy += 26;
+      }
+      if (today >= all0[0] && today <= all0[all0.length - 1]) {
+        const tx1 = xo(today);
+        doc.moveTo(tx1, gridTop).lineTo(tx1, yy).lineWidth(1).strokeColor(C.red).stroke();
+      }
+      doc.font("R").fontSize(8.5).fillColor(C.muted).text("Bar = planned period, filled part = progress · diamond = milestone · red line = today", L, yy + 4, { width: W });
+      doc.y = yy + 20;
+      // milestone list
+      heading("Milestones");
+      for (const c of x.subs) for (const m of c.milestones) {
+        doc.font("R").fontSize(10);
+        const txt = fit(`${c.name} · ${m.name}`, W - 230);
+        const h = doc.heightOfString(txt, { width: W - 230 }) + 4;
+        room(h);
+        const yy2 = doc.y;
+        doc.fillColor(C.ink).text(txt, L, yy2, { width: W - 230 });
+        doc.fillColor(C.muted).text(day(m.due), L + W - 220, yy2, { width: 90 });
+        doc.font("B").fontSize(9.5).fillColor({ met: C.green, late: C.amber, missed: C.red, risk: C.amber, plan: C.blue }[m.state]).text(m.stateLabel, L + W - 125, yy2, { width: 125, align: "right" });
+        doc.y = yy2 + h;
+      }
+    }
+  }
   // Milestones
-  heading("Milestones");
+  if (!x.program) heading("Milestones");
   const cols = [[0, W * 0.4, "Milestone"], [W * 0.4, W * 0.18, "Target date"], [W * 0.58, W * 0.2, "Progress"], [W * 0.78, W * 0.22, "Status"]];
   let y = doc.y;
+  if (!x.program) {
   doc.rect(L, y, W, 20).fillColor(C.row).fill();
   cols.forEach(([cx, cw, label]) => doc.font("B").fontSize(9).fillColor(C.muted).text(label, L + cx + 6, y + 5, { width: cw - 12 }));
   y += 20;
@@ -972,6 +1227,7 @@ async function reportPdf(p) {
     y += 24;
   }
   doc.y = y + 6;
+  }
   const list = (title, rows, empty) => {
     heading(title);
     if (!rows.length) return doc.font("R").fontSize(10).fillColor(C.muted).text(empty, L, doc.y, { width: W });
@@ -987,8 +1243,12 @@ async function reportPdf(p) {
       doc.y = yy + h;
     }
   };
-  list(`Completed since ${day(x.since)}`, x.finished.map((t) => [t.name, day(t.doneAt)]), "No work items were completed in this period.");
-  list("Coming up next", x.next.map((t) => [t.name, `Target ${day(t.due)}`]), x.total ? "All work items are complete." : "Work items have not been planned yet.");
+  if (!x.program || x.sections.work) {
+    list(`Completed since ${day(x.since)}`, x.finished.map((t) => [t.name, day(t.doneAt)]), "No work items were completed in this period.");
+    list("Coming up next", x.next.map((t) => [t.name, `Target ${day(t.due)}`]), x.total ? "All work items are complete." : "Work items have not been planned yet.");
+  }
+  if (x.program && x.sections.risks) list("Open risks, issues and change requests", x.risks.map((r) => [`${r.code} ${r.kind}: ${r.title}${r.project ? ` (${r.project})` : ""}`, r.due ? `Due ${day(r.due)}` : ""]), "There are no open items.");
+  if (x.program && x.sections.manday) list("Effort (man-days, used / estimated)", x.subs.map((c) => [c.name, `${c.mdAct} / ${c.mdEst}`]), "No effort recorded yet.");
   if (x.note.trim()) {
     heading("What we need from you");
     doc.font("R").fontSize(10).fillColor(C.ink).text(fit(x.note, W - 20), L + 10, doc.y, { width: W - 20 });
@@ -1074,6 +1334,18 @@ async function runReminders() {
       const raw = await one("SELECT reminded FROM project_tasks WHERE id = $1", [t.id]);
       // Reaching its start date with a predecessor still open is told once (and again only if it happens after a later reminder was cleared).
       if (t.blocked && !(raw.reminded || {}).blocked) rows.push([t, "blocked"]);
+      else if (t.xrisk && !(raw.reminded || {}).xrisk) rows.push([t, "xrisk"]);
+      // The other side: tasks of another sub-project wait for this one, and this one is late or ends on/after their start.
+      if (!(raw.reminded || {}).holds) {
+        const deps = await all(
+          `SELECT w.name, w.start_date, x.name AS project FROM project_tasks w JOIN projects x ON x.id = w.project_id
+            WHERE $1 = ANY(w.xpred) AND w.project_id <> $2 AND w.status NOT IN ('cancelled','done')`, [t.id, p.id]);
+        const hit = deps.filter((w) => t.overdue || t.due >= isoDay(w.start_date));
+        if (hit.length) {
+          t.holds = hit.map((w) => `${w.project}: ${w.name} (เริ่ม ${thai(isoDay(w.start_date))})`);
+          rows.push([t, "holds"]);
+        }
+      }
       const key = t.overdue ? "overdue" : left === 3 ? "d3" : left === 1 ? "d1" : null;
       if (!key) continue;
       if ((raw.reminded || {})[key] === t0) continue;
@@ -1089,23 +1361,23 @@ async function runReminders() {
       }
     }
     if (!rows.length) continue;
-    const label = { overdue: "เลยกำหนด", d3: "อีก 3 วันทำการ", d1: "อีก 1 วันทำการ", blocked: "ถึงวันเริ่มแล้ว แต่งานก่อนหน้ายังไม่เสร็จ" };
-    const color = { overdue: "#A5162E", d3: "#7A5600", d1: "#9A3412", blocked: "#7A3E9D" };
-    const wait = (t) => t.waitingFor.map((w) => `ลำดับ ${w.no} ${w.name}`).join(", ");
+    const label = { overdue: "เลยกำหนด", d3: "อีก 3 วันทำการ", d1: "อีก 1 วันทำการ", blocked: "ถึงวันเริ่มแล้ว แต่งานก่อนหน้ายังไม่เสร็จ", xrisk: "เสี่ยงเริ่มช้า: งานในโปรเจกต์ย่อยอื่นที่รออยู่ยังไม่เสร็จ", holds: "งานในโปรเจกต์ย่อยอื่นรอ task นี้อยู่" };
+    const color = { overdue: "#A5162E", d3: "#7A5600", d1: "#9A3412", blocked: "#7A3E9D", xrisk: "#7A3E9D", holds: "#7A3E9D" };
+    const wait = (t) => (t.holds ? t.holds.join(", ") : t.waitingFor.map((w) => (w.project ? `${w.project}: ${w.no ? `ลำดับ ${w.no} ` : ""}${w.name}` : `ลำดับ ${w.no} ${w.name}`)).join(", "));
     const td = (v, st = "") => `<td style="padding:8px 10px;border-bottom:1px solid #E2E5EA;${st}">${v}</td>`;
     const table = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:14px;border:1px solid #E2E5EA"><tr style="background:#F6F7F9;color:#5B6576">${td("Task")}${td("ผู้รับผิดชอบ")}${td("กำหนดเสร็จ")}${td("สถานะ")}</tr>${rows
-      .map(([t, k]) => `<tr>${td(`<strong>${esc(t.name)}</strong>${t.sr ? `<br><span style="color:#5B6576">${esc(t.sr.no)}</span>` : ""}`)}${td(t.kind === "own" ? "PM" : `${esc(t.teamLabel)}${t.assignee ? `<br>${esc(t.assignee.name)}` : ""}`)}${td(thai(t.due))}${td(k === "overdue" ? `เลย ${t.overdueDays} วันทำการ` : k === "blocked" ? `${label[k]}<br><span style="font-weight:400;color:#5B6576">รอ: ${esc(wait(t))}</span>` : label[k], `color:${color[k]};font-weight:600`)}</tr>`)
+      .map(([t, k]) => `<tr>${td(`<strong>${esc(t.name)}</strong>${t.sr ? `<br><span style="color:#5B6576">${esc(t.sr.no)}</span>` : ""}`)}${td(t.kind === "own" ? "PM" : `${esc(t.teamLabel)}${t.assignee ? `<br>${esc(t.assignee.name)}` : ""}`)}${td(thai(t.due))}${td(k === "overdue" ? `เลย ${t.overdueDays} วันทำการ` : ["blocked", "xrisk", "holds"].includes(k) ? `${label[k]}<br><span style="font-weight:400;color:#5B6576">${k === "holds" ? "งานที่รอ" : "รอ"}: ${esc(wait(t))}</span>` : label[k], `color:${color[k]};font-weight:600`)}</tr>`)
       .join("")}</table>`;
     const late = rows.filter(([, k]) => k === "overdue").length;
     const near = rows.filter(([, k]) => k === "d3" || k === "d1").length;
-    const stuck = rows.filter(([, k]) => k === "blocked").length;
+    const stuck = rows.filter(([, k]) => ["blocked", "xrisk", "holds"].includes(k)).length;
     const subject = `[โปรเจกต์] ${p.name} · ${late ? `เลยกำหนด ${late} task` : near ? `ใกล้ครบกำหนด ${near} task` : `รองานก่อนหน้า ${stuck} task`}`;
     await graph.sendMail({ to: [p.pm_email], cc: ownLate ? leads.filter((e) => e !== p.pm_email) : [], subject,
       html: shell(late ? "#C0283C" : "#C07A00", `<p style="margin:0 0 14px">สรุป task ที่ต้องติดตามวันนี้ของโปรเจกต์ <strong>${esc(p.name)}</strong>${p.customer ? ` (${esc(p.customer)})` : ""}</p>${table}<p style="margin:16px 0 0">${button(url(p.id), "เปิดโปรเจกต์")}</p>`) })
       .catch((e) => { out.errors++; console.error("[projects] digest:", e.message); });
     await require("./teamsnotify").notify((await settings()).teams[0], "project", {
       title: `📋 ${subject}`, color: late ? "Attention" : "Warning", text: `PM ${p.pm_name}`,
-      facts: rows.slice(0, 8).map(([t, k]) => [t.name, k === "blocked" ? `รองานก่อนหน้า: ${wait(t)}` : `${k === "overdue" ? `เลย ${t.overdueDays} วันทำการ` : label[k]} · ${thai(t.due)}`]),
+      facts: rows.slice(0, 8).map(([t, k]) => [t.name, ["blocked", "xrisk", "holds"].includes(k) ? `${label[k]}: ${wait(t)}` : `${k === "overdue" ? `เลย ${t.overdueDays} วันทำการ` : label[k]} · ${thai(t.due)}`]),
       actions: [["เปิดโปรเจกต์", url(p.id)]],
     });
     for (const [t, k] of rows) await q("UPDATE project_tasks SET reminded = reminded || jsonb_build_object($2::text, $3::text) WHERE id = $1", [t.id, k, t0]);
@@ -1188,7 +1460,10 @@ function mount(api, { wrap }) {
         const mine = await myTaskIds(req.user, p.id);
         tasks = tasks.filter((t) => mine.includes(t.id));
       }
-      items.push({ ...serProject(p), full, mine: p.pm_id === req.user.id, summary: summary(tasks) });
+      const kids = full ? await childrenOf(p.id) : [];
+      if (kids.length) for (const c of kids) tasks = tasks.concat(await tasksOf(c.id, hol));
+      const parent = p.parent_id ? await one("SELECT id, name FROM projects WHERE id = $1", [p.parent_id]) : null;
+      items.push({ ...serProject(p), full, mine: p.pm_id === req.user.id, summary: summary(tasks), children: kids.length, parent });
     }
     res.json({ items });
   }));
@@ -1211,8 +1486,15 @@ function mount(api, { wrap }) {
     );
     const s = await settings();
     const edit = await canEdit(req.user, p);
+    const program = full ? await programOf(p, hol) : null;
+    let logs = full ? await logsOf(p.id) : [];
+    if (program) for (const c of program.subs) logs = logs.concat((await logsOf(c.id)).map((l) => ({ ...l, projectId: c.id, project: c.name })));
+    const parent = p.parent_id ? await loadProject(p.parent_id) : null;
     res.json({
-      project: serProject(p), full, milestones, tasks, docs, summary: summary(tasks), logs: full ? await logsOf(p.id) : [],
+      project: serProject(p), full, milestones: program ? program.milestones : milestones, tasks: program ? program.tasks : tasks, docs,
+      summary: summary(program ? program.tasks : tasks), logs, program,
+      parent: parent ? { id: parent.id, name: parent.name, canOpen: await seesAll(req.user, parent) } : null,
+      siblings: edit && p.parent_id ? await siblingTasks(p) : [],
       cost: full && (await costVisible(req.user, p)) ? { rate: s.mdRate } : null,
       can: { edit, upload: full && req.user.role !== "viewer" && req.user.role !== "observer", deliver: edit && p.status !== "delivered", template: edit && (await isPm(req.user)) },
     });
@@ -1274,12 +1556,46 @@ function mount(api, { wrap }) {
     await saveTemplate(req.user, p, req.body || {});
     res.json({ ok: true });
   }));
+  // Large projects: existing projects that can be moved under this one (no parent, no sub-projects of their own).
+  api.get("/projects/:id/attachable", wrap(async (req, res) => {
+    const { p } = await projectFor(req.user, req.params.id, { edit: true });
+    const rows = await all(
+      `SELECT x.id, x.name, x.customer, x.status FROM projects x WHERE x.id <> $1 AND x.parent_id IS NULL AND NOT EXISTS (SELECT 1 FROM projects k WHERE k.parent_id = x.id) ORDER BY x.id DESC`, [p.id]);
+    const out = [];
+    for (const r of rows) if (await canEdit(req.user, await loadProject(r.id))) out.push(r);
+    res.json({ items: out });
+  }));
+  api.post("/projects/:id/attach", wrap(async (req, res) => {
+    const { p } = await projectFor(req.user, req.params.id, { edit: true });
+    const c = await loadProject(req.body && req.body.childId);
+    if (!c || c.id === p.id) throw bad("เลือกโปรเจกต์ที่จะย้ายเข้ามา");
+    if (p.parent_id) throw bad("โปรเจกต์ย่อยซ้อนได้ชั้นเดียว");
+    if (c.parent_id) throw bad("โปรเจกต์นี้อยู่ในโปรเจกต์ใหญ่อื่นแล้ว");
+    if (await one("SELECT 1 FROM projects WHERE parent_id = $1", [c.id])) throw bad("โปรเจกต์นี้เป็นโปรเจกต์ใหญ่อยู่แล้ว");
+    if (await one("SELECT 1 FROM project_tasks WHERE project_id = $1", [p.id])) throw bad("โปรเจกต์นี้มี task อยู่แล้ว จึงเป็นโปรเจกต์ใหญ่ไม่ได้");
+    if (!(await canEdit(req.user, c))) throw bad("ย้ายได้เฉพาะโปรเจกต์ที่คุณแก้ไขได้", 403);
+    await q("UPDATE projects SET parent_id = $2, updated_at = now() WHERE id = $1", [c.id, p.id]);
+    await audit(req.user, "project_attach", `${p.name} ← ${c.name}`, { parent: p.id, child: c.id });
+    res.json({ ok: true });
+  }));
+  api.post("/projects/:id/detach", wrap(async (req, res) => {
+    const c = await loadProject(req.params.id);
+    if (!c || !c.parent_id) throw bad("โปรเจกต์นี้ไม่ได้อยู่ในโปรเจกต์ใหญ่");
+    await projectFor(req.user, c.parent_id, { edit: true });
+    // Links to tasks of the other sub-projects end with the move.
+    await q("UPDATE project_tasks SET xpred = '{}' WHERE project_id = $1", [c.id]);
+    await q("UPDATE project_tasks t SET xpred = ARRAY(SELECT x FROM unnest(t.xpred) x WHERE x NOT IN (SELECT id FROM project_tasks WHERE project_id = $1)) WHERE t.xpred && (SELECT coalesce(array_agg(id), '{}') FROM project_tasks WHERE project_id = $1)", [c.id]);
+    await q("UPDATE projects SET parent_id = NULL, updated_at = now() WHERE id = $1", [c.id]);
+    await audit(req.user, "project_detach", c.name, { child: c.id, parent: c.parent_id });
+    res.json({ ok: true });
+  }));
   api.get("/projects/:id/plan.xlsx", wrap(async (req, res) => {
     const { p, full } = await projectFor(req.user, req.params.id);
     if (!full) throw bad("ดาวน์โหลดแผนทั้งโปรเจกต์ได้เฉพาะผู้ที่เห็นทั้งโปรเจกต์", 403);
+    const program = await programOf(p);
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     res.setHeader("Content-Disposition", `attachment; filename=ProjectPlan-${p.id}.xlsx`);
-    res.send(await planExport(p, await tasksOf(p.id)));
+    res.send(program ? await programExport(p, program) : await planExport(p, await tasksOf(p.id)));
   }));
   api.post("/projects/:id/logs", wrap(async (req, res) => {
     const { p } = await projectFor(req.user, req.params.id, { edit: true });
@@ -1317,6 +1633,7 @@ function mount(api, { wrap }) {
     const freq = REPORT_FREQ[b.freq] ? b.freq : "off";
     if (freq !== "off" && !emailsOf(b.to).length) throw bad("ใส่อีเมลผู้รับของลูกค้าก่อนเปิดการส่งอัตโนมัติ");
     await q("UPDATE projects SET report_to=$2, report_cc=$3, report_freq=$4, report_note=$5, updated_at=now() WHERE id=$1", [p.id, emailsOf(b.to).join(", ") || null, emailsOf(b.cc).join(", ") || null, freq, clean(b.note, 2000) || null]);
+    if (b.sections && typeof b.sections === "object") await q("UPDATE projects SET report_sections = $2 WHERE id = $1", [p.id, JSON.stringify(Object.fromEntries(Object.keys(SECTIONS).map((k) => [k, !!b.sections[k]])))]);
     await audit(req.user, "project_report_settings", p.name, { id: p.id, freq, to: emailsOf(b.to) });
     res.json({ ok: true });
   }));
