@@ -831,11 +831,22 @@ ${caseTable(cases, { missingRes: showRes, empty: "ไม่พบเคสตา
       };
   }
 
+  /** Red notice while the person has a case past Due or a service request past Target: it weighs on the KPI and on the manager's review. */
+  function lateWarn(nCase, nSr, hasKpi) {
+    if (!nCase && !nSr) return "";
+    const parts = [nCase && `เคส ${nCase}`, nSr && `คำขอบริการ ${nSr}`].filter(Boolean).join(" · ");
+    return `<div class="late-warn" role="alert"><div class="lw-ic" aria-hidden="true">⚠️</div><div class="lw-b">
+<strong>คุณมีงานเกินกำหนด ${nCase + nSr} รายการ: ${parts}</strong>
+<div>${hasKpi ? "งานที่เกินกำหนดมีผลต่อคะแนน KPI เดือนนี้ (ด้าน SLA / ตรงเวลา และงานค้าง) และหัวหน้างานใช้ข้อมูลนี้ประกอบการพิจารณา" : "หัวหน้างานใช้ข้อมูลงานที่เกินกำหนดประกอบการพิจารณา"} กรุณาอัปเดตความคืบหน้า ปิดงาน หรือขอขยายเวลาพร้อมเหตุผล</div>
+<div class="lw-act">${nCase ? `<a class="btn" href="#/mine?tab=open" data-lw="cases">ดูเคสเกินกำหนด (${nCase})</a>` : ""}${nSr ? `<a class="btn" href="#mine-sr">ดูคำขอบริการเลย Target (${nSr})</a>` : ""}</div></div></div>`;
+  }
   async function viewMine(params) {
     setNav("mine");
+    const kpiP = api(`/kpi/card/${ME.user.id}`).catch(() => ({ card: null }));
     const [{ cases }, lk, ikHtml, extHtml, srAll, pjHtml] = await Promise.all([api("/cases?mine=1"), lookups(), intakeSection(), Promise.all([extPendingSection(), transferPendingSection(), transferFollowSection()]).then((a) => a.join("")), srList("assigned"), pjMyTasksSection().catch(() => "")]);
     const srMine = srAll.filter(srOpen).sort(srByTarget);
     const srLate = srMine.filter((r) => r.status === "overdue" || r.daysLeft === 0 || r.daysLeft === 1);
+    const hasKpi = !!(await kpiP).card;
     const tab = params.tab || "open";
     const open = cases.filter((c) => c.stage !== "closed");
     const closed30 = cases.filter((c) => c.stage === "closed" && (c.endDate || "") >= daysAgo(30));
@@ -863,6 +874,7 @@ ${caseTable(cases, { missingRes: showRes, empty: "ไม่พบเคสตา
 <div class="head"><div><h1>เคสของฉัน</h1><p>เปิดเคสใหม่ อัปเดตความคืบหน้า และปิดเคสได้จากหน้านี้</p></div>
 <div class="actions">${lvl("export") !== "none" ? `<a class="btn" href="api/export?${qs({ from: daysAgo(89), to: daysAgo(0), owner: ME.user.email })}">Export เคสของฉัน</a>` : ""}
 ${can("case_create") ? `<a class="btn primary" href="#/case/new">เปิดเคสใหม่</a>` : ""}</div></div>
+${lateWarn(cases.filter((c) => c.stage === "overdue").length, srMine.filter((r) => r.status === "overdue").length, hasKpi)}
 ${extHtml}
 ${ikHtml}
 ${pjHtml}
@@ -3832,8 +3844,8 @@ ${r.urgent.map((c) => `<tr class="click" data-href="#/case/${c.id}"><td><a href=
   }
   async function refreshSrBadge() {
     try {
-      const m = await srMeta(true);
-      const n = m.canManage ? m.counts.pending : 0;
+      const r = await api("/sr/attention");
+      const n = r.pending + r.due + r.confirm;
       const a = document.querySelector('#tabs a[data-nav="sr"]');
       if (!a) return;
       let b = a.querySelector(".badge");
@@ -3845,7 +3857,7 @@ ${r.urgent.map((c) => `<tr class="click" data-href="#/case/${c.id}"><td><a href=
       if (b) {
         b.textContent = n;
         b.hidden = !n;
-        b.title = `${n} คำขอรออนุมัติ`;
+        b.title = [r.pending && `${r.pending} รออนุมัติ`, r.due && `${r.due} ที่ได้รับมอบหมาย ครบ Target ใน 1 วันทำการหรือเลยแล้ว`, r.confirm && `${r.confirm} รอคุณยืนยันรับงาน`].filter(Boolean).join(" · ");
       }
     } catch (e) {}
   }

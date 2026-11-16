@@ -755,6 +755,20 @@ function mount(api, { wrap }) {
       canManage: req.user.role === "admin" || req.user.role === "manager", counts, fileExt: FILE_EXT, maxFileMb: MAX_FILE_MB,
     });
   }));
+  // What the "คำขอบริการ" menu number counts for the signed-in person: assigned requests due within 1 workday or late,
+  // finished requests waiting for them to confirm (last 30 days), and for managers the requests waiting for approval.
+  api.get("/sr/attention", wrap(async (req, res) => {
+    const u = req.user;
+    const mine = (await list(u, "assigned")).filter((r) => r.rawStatus === "in_progress" && (r.status === "overdue" || (r.daysLeft != null && r.daysLeft <= 1)));
+    const c = await one(
+      `SELECT count(*)::int AS n FROM service_requests WHERE requester_id = $1 AND status = 'done' AND confirmed_at IS NULL AND closed_at > now() - interval '30 days'`, [u.id]);
+    let pending = 0;
+    if (u.role === "admin" || u.role === "manager") {
+      const teams = u.role === "admin" || perms.seesAllTeams(u) ? (await all("SELECT code FROM teams")).map((t) => t.code) : await userTeams(u.id);
+      pending = (await one("SELECT count(*)::int AS n FROM service_requests WHERE team = ANY($1) AND status IN ('pending','info')", [teams])).n;
+    }
+    res.json({ due: mine.length, overdue: mine.filter((r) => r.status === "overdue").length, confirm: c.n, pending });
+  }));
   api.get("/sr", wrap(async (req, res) => {
     const scope = ["mine", "assigned", "team"].includes(req.query.scope) ? req.query.scope : req.user.role === "requester" ? "mine" : "team";
     res.json({ items: await list(req.user, req.user.role === "requester" ? "mine" : scope) });

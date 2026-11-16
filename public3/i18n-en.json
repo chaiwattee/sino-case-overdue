@@ -2719,5 +2719,12 @@
 "เสร็จ / ผ่าน milestone": "Done / milestone passed",
 "ตามแผน / กำลังทำ": "On track / in progress",
 "งานมากเกินหนึ่งจอ: แสดงเป็นแถบต่อ Milestone กดที่ Milestone เพื่อดูงานข้างใน": "Too many items for one screen: one bar per milestone, click a milestone to see its items",
-"บันทึกรูปแล้ว (1920×1080) ใส่ในสไลด์ได้ทันที": "Image saved (1920×1080), ready for a slide"
+"บันทึกรูปแล้ว (1920×1080) ใส่ในสไลด์ได้ทันที": "Image saved (1920×1080), ready for a slide",
+"คุณมีงานเกินกำหนด": "You have late work:",
+"งานที่เกินกำหนดมีผลต่อคะแนน KPI เดือนนี้ (ด้าน SLA / ตรงเวลา และงานค้าง) และหัวหน้างานใช้ข้อมูลนี้ประกอบการพิจารณา": "Late work lowers this month's KPI (SLA / on time and backlog) and your manager takes it into account",
+"หัวหน้างานใช้ข้อมูลงานที่เกินกำหนดประกอบการพิจารณา": "Your manager takes late work into account",
+"กรุณาอัปเดตความคืบหน้า ปิดงาน หรือขอขยายเวลาพร้อมเหตุผล": "Please update progress, close the work, or ask for more time with a reason.",
+"ดูเคสเกินกำหนด": "Late cases",
+"ดูคำขอบริการเลย Target": "Service requests past target",
+"รอคุณยืนยันรับงาน": "waiting for you to confirm"
 }
