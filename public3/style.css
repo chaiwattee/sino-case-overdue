@@ -1017,3 +1017,7 @@ tr.pj-off td { opacity: .55; }
 .late-warn .lw-b { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 .late-warn strong { font-size: 17px; }
 .late-warn .lw-act { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+
+/* Extension: admin step */
+.ext-adm { display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin-top: 8px; }
+.ext-nd { font-size: 20px; font-weight: 700; }

@@ -78,7 +78,7 @@
   async function start() {
     document.documentElement.lang = "en";
     try {
-      const r = await fetch("i18n-en.json?v=3.28.1", { credentials: "same-origin" });
+      const r = await fetch("i18n-en.json?v=3.29.0", { credentials: "same-origin" });
       build(await r.json());
     } catch (e) {
       return;

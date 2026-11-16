@@ -1,5 +1,7 @@
-// Case extensions: an owner asks a manager (chosen by name) for 7 more days with a reason.
-// Approved -> Due + SLA days, cases.ext_count + 1, alert rounds start again for the new period.
+// Case extensions: an owner asks a manager (chosen by name) for more time with a reason, optionally saying how many working days.
+// Two steps: the manager checks the reason and forwards it to the admins (or rejects it); an admin approves and sets the
+// number of working days (default 3, or what was asked; at most 30; weekends and company holidays not counted).
+// Approved -> Due moves, cases.ext_count + 1, alert rounds start again for the new period.
 // Every request, approval, rejection and cancellation is kept (case activities, case_changes, audit log).
 const { config } = require("../config");
 const { config3 } = require("./config3");
@@ -14,10 +16,27 @@ const bad = (msg, status = 400) => Object.assign(new Error(msg), { status });
 const clean = (s, max = 2000) => String(s ?? "").trim().slice(0, max);
 const th = (iso) => (iso ? d.thaiDate(d.fromISODate(String(iso).slice(0, 10))) : "-");
 
-const EXT_SELECT = `SELECT e.*, rq.display_name AS requested_by_name, ap.display_name AS approver_name, ap.email AS approver_email,
+const DEFAULT_DAYS = 3;
+const MAX_DAYS = 30;
+const sr = () => require("./sr");
+const EXT_SELECT = `SELECT e.*, rq.display_name AS requested_by_name, ap.display_name AS approver_name, ap.email AS approver_email, fw.display_name AS forwarded_by_name, dc.display_name AS decided_by_name,
     c.case_no, c.cs_number, c.site, c.task, c.owner_id, ow.display_name AS owner_name, ow.email AS owner_email
   FROM case_extensions e JOIN cases c ON c.id = e.case_id
-  LEFT JOIN users rq ON rq.id = e.requested_by LEFT JOIN users ap ON ap.id = e.approver_id LEFT JOIN users ow ON ow.id = c.owner_id`;
+  LEFT JOIN users rq ON rq.id = e.requested_by LEFT JOIN users ap ON ap.id = e.approver_id LEFT JOIN users ow ON ow.id = c.owner_id
+  LEFT JOIN users fw ON fw.id = e.forwarded_by LEFT JOIN users dc ON dc.id = e.decided_by`;
+const daysOf = (v, fallback) => {
+  const n = Math.round(Number(v));
+  if (!Number.isFinite(n) || n < 1) return fallback;
+  if (n > MAX_DAYS) throw bad(`ขยายได้ครั้งละไม่เกิน ${MAX_DAYS} วันทำการ ถ้าต้องการมากกว่านี้ ให้ขอขยายอีกครั้ง`);
+  return n;
+};
+/** New Due: n working days after the current Due, or after today when the Due has already passed. */
+async function dueAfter(dueIso, n) {
+  const hol = await sr().holidays();
+  const t0 = d.toISODate(d.today());
+  return sr().addWorkdays(dueIso < t0 ? t0 : dueIso, n, hol);
+}
+const adminEmails = async () => (await all("SELECT email FROM users WHERE active AND role = 'admin' AND email IS NOT NULL")).map((r) => r.email);
 
 async function approvers() {
   return all("SELECT id, display_name, email, role FROM users WHERE active AND role IN ('manager','admin') ORDER BY role = 'admin', display_name");
@@ -35,20 +54,21 @@ async function request(user, kase, b) {
   if (!approver) throw bad("กรุณาเลือก Manager ที่จะอนุมัติ");
   if (approver.id === user.id && user.role !== "admin") throw bad("อนุมัติคำขอของตัวเองไม่ได้ เลือก Manager คนอื่น");
   const oldDue = d.toISODate(kase.dueDate);
-  const days = kase.slaDays || config.slaDays; // PM cases extend by their own SLA length
-  const newDue = d.toISODate(d.addDays(kase.dueDate, days));
+  const reqDays = b.days === undefined || b.days === null || b.days === "" ? null : daysOf(b.days, null);
+  const days = reqDays || DEFAULT_DAYS; // the admin decides; this is the starting value and the preview
+  const newDue = await dueAfter(oldDue, days);
   const ext = await tx(async (c) => {
     const seq = (await c.query("SELECT count(*)::int AS n FROM case_extensions WHERE case_id = $1 AND status <> 'cancelled'", [kase.id])).rows[0].n + 1;
     const r = await c.query(
-      `INSERT INTO case_extensions (case_id, seq, reason, requested_by, approver_id, old_due, new_due, days)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
-      [kase.id, seq, reason, user.id, approver.id, oldDue, newDue, days]
+      `INSERT INTO case_extensions (case_id, seq, reason, requested_by, approver_id, old_due, new_due, days, req_days, workdays)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,true) RETURNING id`,
+      [kase.id, seq, reason, user.id, approver.id, oldDue, newDue, days, reqDays]
     ).catch((e) => {
       if (e.code === "23505") throw bad("เคสนี้มีคำขอขยายเวลาที่รออนุมัติอยู่แล้ว");
       throw e;
     });
     await c.query("INSERT INTO case_activities (case_id, activity_date, kind, detail, is_system, created_by) VALUES ($1,$2,$3,$4,true,$5)", [
-      kase.id, d.toISODate(d.today()), "ขอขยายเวลา", `คำขอขยายครั้งที่ ${seq} (${days} วัน) Due ${th(oldDue)} → ${th(newDue)} ส่งให้ ${approver.display_name} อนุมัติ เหตุผล: ${reason}`, user.id,
+      kase.id, d.toISODate(d.today()), "ขอขยายเวลา", `คำขอขยายครั้งที่ ${seq}${reqDays ? ` (ขอ ${reqDays} วันทำการ)` : ""} Due ${th(oldDue)} ส่งให้ ${approver.display_name} ตรวจ แล้ว Admin อนุมัติ เหตุผล: ${reason}`, user.id,
     ]);
     return { id: r.rows[0].id, seq };
   });
@@ -59,31 +79,54 @@ async function request(user, kase, b) {
     title: `⏳ ขอขยายเวลาเคส ${kase.caseNo || "#" + kase.id} (ครั้งที่ ${ext.seq})`,
     color: "Warning",
     text: reason,
-    facts: [["ลูกค้า", kase.site || "-"], ["งาน", kase.task || "-"], ["ผู้ขอ", user.display_name], ["Due", `${th(oldDue)} → ${th(newDue)}`], ["ผู้อนุมัติ", approver.display_name]],
+    facts: [["ลูกค้า", kase.site || "-"], ["งาน", kase.task || "-"], ["ผู้ขอ", user.display_name], ["Due เดิม", th(oldDue)], ...(reqDays ? [["ขอ", `${reqDays} วันทำการ`]] : []), ["Manager ที่ตรวจ", approver.display_name]],
     actions: [["เปิดเคส", `${require("./config3").config3.baseUrl}/#/case/${kase.id}`]],
   });
   return { ok: true, id: ext.id, seq: ext.seq, newDue };
 }
 
+/** Step 1: the manager the request was sent to checks the reason and forwards it to the admins. */
+async function forward(user, id, b) {
+  const e = await one(`${EXT_SELECT} WHERE e.id = $1`, [id]);
+  if (!e) throw bad("ไม่พบคำขอนี้", 404);
+  if (e.status !== "pending" || e.stage !== "manager") throw bad("คำขอนี้ส่งต่อหรือพิจารณาไปแล้ว", 409);
+  if (e.approver_id !== user.id && user.role !== "admin") throw bad(`คำขอนี้ส่งให้ ${e.approver_name} ตรวจ`, 403);
+  const note = clean(b.note, 1000);
+  const upd = await q("UPDATE case_extensions SET stage = 'admin', forwarded_by = $2, forwarded_at = now(), forward_note = $3 WHERE id = $1 AND status = 'pending' AND stage = 'manager'", [id, user.id, note || null]);
+  if (!upd.rowCount) throw bad("คำขอนี้ส่งต่อไปแล้ว", 409);
+  await q("INSERT INTO case_activities (case_id, activity_date, kind, detail, is_system, created_by) VALUES ($1,$2,'ส่งขออนุมัติขยาย',$3,true,$4)", [
+    e.case_id, d.toISODate(d.today()), `${user.display_name} ตรวจคำขอขยายครั้งที่ ${e.seq} แล้ว ส่งขออนุมัติ Admin${note ? ` ความเห็น: ${note}` : ""}`, user.id,
+  ]);
+  await audit(user, "case_ext_forward", e.case_no, { case_id: e.case_id, seq: e.seq, note });
+  const row = await one(`${EXT_SELECT} WHERE e.id = $1`, [id]);
+  mailForward(row, user).catch((err) => console.error("[ext] mail:", err.message));
+  return { ok: true, stage: "admin" };
+}
+
+/** Rejection by the manager (step 1) or an admin (step 2); approval only by an admin, who sets the working days. */
 async function decide(user, id, b) {
   const e = await one(`${EXT_SELECT} WHERE e.id = $1`, [id]);
   if (!e) throw bad("ไม่พบคำขอนี้", 404);
   if (e.status !== "pending") throw bad("คำขอนี้พิจารณาไปแล้ว", 409);
-  if (e.approver_id !== user.id && user.role !== "admin") throw bad(`คำขอนี้ส่งให้ ${e.approver_name} อนุมัติ`, 403);
+  const isAdmin = user.role === "admin";
   const approve = !!b.approve;
+  if (approve && !isAdmin) throw bad("Manager ส่งขออนุมัติ Admin ก่อน เคสจะขยายเวลาเมื่อ Admin อนุมัติ", 403);
+  if (!approve && !isAdmin && !(e.stage === "manager" && e.approver_id === user.id)) throw bad(e.stage === "admin" ? "คำขอนี้อยู่ที่ Admin แล้ว" : `คำขอนี้ส่งให้ ${e.approver_name} ตรวจ`, 403);
   const note = clean(b.note, 1000);
   if (!approve && note.length < 3) throw bad("กรุณาใส่ความเห็นเมื่อไม่อนุมัติ");
+  const days = approve ? daysOf(b.days, e.req_days || DEFAULT_DAYS) : e.days;
   const kase = await repo.getCase(e.case_id);
   await tx(async (c) => {
-    const upd = await c.query("UPDATE case_extensions SET status = $2, decided_at = now(), decision_note = $3, approver_id = $4 WHERE id = $1 AND status = 'pending'", [
-      id, approve ? "approved" : "rejected", note || null, user.id,
+    // approver_id keeps the manager who checked it; decided_by is the person who made the final call.
+    const upd = await c.query("UPDATE case_extensions SET status = $2, decided_at = now(), decision_note = $3, decided_by = $4, days = $5, workdays = true WHERE id = $1 AND status = 'pending'", [
+      id, approve ? "approved" : "rejected", note || null, user.id, days,
     ]);
     if (!upd.rowCount) throw bad("คำขอนี้พิจารณาไปแล้ว", 409);
     let newDue = e.new_due;
     if (approve) {
       // Extend from the Due the case has now (in case it changed since the request).
       const cur = (await c.query("SELECT due_date FROM cases WHERE id = $1 FOR UPDATE", [e.case_id])).rows[0];
-      newDue = d.toISODate(d.addDays(d.fromISODate(cur.due_date), e.days));
+      newDue = await dueAfter(d.toISODate(d.fromISODate(cur.due_date)), days);
       await c.query("UPDATE case_extensions SET old_due = $2, new_due = $3 WHERE id = $1", [id, cur.due_date, newDue]);
       await c.query("UPDATE cases SET due_date = $2, ext_count = ext_count + 1, updated_at = now() WHERE id = $1", [e.case_id, newDue]);
       await c.query(
@@ -94,10 +137,10 @@ async function decide(user, id, b) {
     }
     await c.query("INSERT INTO case_activities (case_id, activity_date, kind, detail, is_system, created_by) VALUES ($1,$2,$3,$4,true,$5)", [
       e.case_id, d.toISODate(d.today()), approve ? "อนุมัติขยายเวลา" : "ไม่อนุมัติขยายเวลา",
-      approve ? `${user.display_name} อนุมัติคำขอขยายครั้งที่ ${e.seq} Due ใหม่ ${th(newDue)}${note ? ` ความเห็น: ${note}` : ""}` : `${user.display_name} ไม่อนุมัติคำขอขยายเวลา ความเห็น: ${note}`, user.id,
+      approve ? `${user.display_name} อนุมัติคำขอขยายครั้งที่ ${e.seq} ขยาย ${days} วันทำการ Due ใหม่ ${th(newDue)}${note ? ` ความเห็น: ${note}` : ""}` : `${user.display_name} ไม่อนุมัติคำขอขยายเวลา ความเห็น: ${note}`, user.id,
     ]);
   });
-  await audit(user, approve ? "case_ext_approve" : "case_ext_reject", `${kase.caseNo} · ${kase.site || ""}`, { case_id: kase.id, seq: e.seq, note });
+  await audit(user, approve ? "case_ext_approve" : "case_ext_reject", `${kase.caseNo} · ${kase.site || ""}`, { case_id: kase.id, seq: e.seq, note, days: approve ? days : undefined, stage: e.stage });
   const row = await one(`${EXT_SELECT} WHERE e.id = $1`, [id]);
   mailDecision(row, user).catch((err) => console.error("[ext] mail:", err.message));
   return { ok: true, status: row.status, newDue: row.new_due };
@@ -121,19 +164,44 @@ async function mailRequest(e, kase) {
   await graph.sendMail({
     to: [e.approver_email],
     cc: [e.owner_email].filter((x) => x && x !== e.approver_email),
-    subject: `[ขออนุมัติขยายเวลา] ${e.case_no} · ${e.site || "-"} · คำขอครั้งที่ ${e.seq} (${e.days} วัน)`,
+    subject: `[ขอขยายเวลา รอตรวจ] ${e.case_no} · ${e.site || "-"} · คำขอครั้งที่ ${e.seq}${e.req_days ? ` (${e.req_days} วันทำการ)` : ""}`,
     html: shell(
       "#B07800",
       `<p style="margin:0 0 12px">เรียน ${esc(e.approver_name)}</p>
-<p style="margin:0 0 14px">${esc(e.requested_by_name)} ขอขยายเวลาเคส <strong>${esc(e.case_no)}</strong> อีก ${e.days} วัน จาก Due <strong>${esc(th(e.old_due))}</strong> เป็น <strong>${esc(th(e.new_due))}</strong></p>
+<p style="margin:0 0 14px">${esc(e.requested_by_name)} ขอขยายเวลาเคส <strong>${esc(e.case_no)}</strong>${e.req_days ? ` อีก ${e.req_days} วันทำการ` : ""} จาก Due <strong>${esc(th(e.old_due))}</strong> กรุณาตรวจเหตุผล แล้วส่งขออนุมัติ Admin หรือไม่อนุมัติ</p>
 ${fieldTable([["เลขเคส", `${e.case_no}${e.cs_number ? ` / ${e.cs_number}` : ""}`], ["ลูกค้า", e.site || "-"], ["งาน", e.task || "-"], ["User", e.owner_name || "-"], ["เปิดเคสมาแล้ว", `${kase.totalAge ?? kase.age ?? "-"} วัน`], ["ขยายไปแล้ว", `${kase.extCount || 0} ครั้ง`]])}
 <p style="margin:14px 0;background:#F6F7F9;padding:12px 14px;border-radius:8px;white-space:pre-wrap"><strong>เหตุผล:</strong> ${esc(e.reason)}</p>
-${button(`${config3.baseUrl}/#/case/${e.case_id}`, "เปิดเพื่ออนุมัติ")}`
+${button(`${config3.baseUrl}/#/case/${e.case_id}`, "เปิดเพื่อตรวจ")}`
     ),
   });
 }
+async function mailForward(e, by) {
+  const to = await adminEmails();
+  if (!to.length) return;
+  await graph.sendMail({
+    to,
+    cc: [],
+    subject: `[ขออนุมัติขยายเวลา] ${e.case_no} · ${e.site || "-"} · คำขอครั้งที่ ${e.seq}${e.req_days ? ` (${e.req_days} วันทำการ)` : ""}`,
+    html: shell(
+      "#B07800",
+      `<p style="margin:0 0 12px">เรียน Admin</p>
+<p style="margin:0 0 14px">${esc(by.display_name)} ตรวจคำขอขยายเวลาเคส <strong>${esc(e.case_no)}</strong> แล้ว และส่งขออนุมัติ กรุณากำหนดจำนวนวันทำการที่จะขยาย (ค่าเริ่มต้น ${e.req_days || DEFAULT_DAYS} วัน) แล้วอนุมัติหรือไม่อนุมัติ</p>
+${fieldTable([["เลขเคส", `${e.case_no}${e.cs_number ? ` / ${e.cs_number}` : ""}`], ["ลูกค้า", e.site || "-"], ["งาน", e.task || "-"], ["User", e.owner_name || "-"], ["Due เดิม", th(e.old_due)], ["ผู้ขอ", e.requested_by_name || "-"], ...(e.req_days ? [["ขอ", `${e.req_days} วันทำการ`]] : [])])}
+<p style="margin:14px 0;background:#F6F7F9;padding:12px 14px;border-radius:8px;white-space:pre-wrap"><strong>เหตุผล:</strong> ${esc(e.reason)}</p>
+${e.forward_note ? `<p style="margin:0 0 14px"><strong>ความเห็น Manager:</strong> ${esc(e.forward_note)}</p>` : ""}
+${button(`${config3.baseUrl}/#/case/${e.case_id}`, "เปิดเพื่ออนุมัติ")}`
+    ),
+  });
+  // The requester sees the request moved on.
+  if (e.owner_email || e.requested_by) {
+    const reqEmail = (await one("SELECT email FROM users WHERE id = $1", [e.requested_by]) || {}).email;
+    const to2 = [...new Set([reqEmail, e.owner_email].filter(Boolean))];
+    if (to2.length) await graph.sendMail({ to: to2, cc: [], subject: `[ขอขยายเวลา] ${e.case_no} · Manager ส่งต่อแล้ว รอ Admin อนุมัติ`,
+      html: shell("#B07800", `<p style="margin:0 0 14px">${esc(by.display_name)} ตรวจคำขอขยายเวลาเคส ${esc(e.case_no)} (คำขอครั้งที่ ${e.seq}) แล้ว และส่งขออนุมัติ Admin เคสยังใช้ Due เดิม ${esc(th(e.old_due))} จนกว่า Admin จะอนุมัติ</p>${button(`${config3.baseUrl}/#/case/${e.case_id}`, "เปิดเคส")}`) });
+  }
+}
 async function mailDecision(e, by) {
-  const to = [e.owner_email].filter(Boolean);
+  const to = [...new Set([e.owner_email, e.approver_id !== by.id ? e.approver_email : null].filter(Boolean))];
   if (!to.length) return;
   const ok = e.status === "approved";
   await graph.sendMail({
@@ -143,7 +211,7 @@ async function mailDecision(e, by) {
     html: shell(
       ok ? "#1C6B45" : "#9A1B30",
       `<p style="margin:0 0 12px">เรียน ${esc(e.owner_name || "User")}</p>
-<p style="margin:0 0 14px">${esc(by.display_name)} ${ok ? `<strong>อนุมัติ</strong>ขยายเวลาเคส ${esc(e.case_no)} (คำขอครั้งที่ ${e.seq}) Due ใหม่ <strong>${esc(th(e.new_due))}</strong> ระบบเริ่มนับรอบแจ้งเตือนใหม่ (วันที่ ${config.alert1Day}, วันที่ ${config.alert2Day} และเมื่อเกิน Due)` : `<strong>ไม่อนุมัติ</strong>คำขอขยายเวลาเคส ${esc(e.case_no)} Due ยังเป็น ${esc(th(e.old_due))}`}</p>
+<p style="margin:0 0 14px">${esc(by.display_name)} ${ok ? `<strong>อนุมัติ</strong>ขยายเวลาเคส ${esc(e.case_no)} (คำขอครั้งที่ ${e.seq}) ${e.days} วันทำการ Due ใหม่ <strong>${esc(th(e.new_due))}</strong> ระบบเริ่มนับรอบแจ้งเตือนใหม่ (วันที่ ${config.alert1Day}, วันที่ ${config.alert2Day} และเมื่อเกิน Due)` : `<strong>ไม่อนุมัติ</strong>คำขอขยายเวลาเคส ${esc(e.case_no)} Due ยังเป็น ${esc(th(e.old_due))}`}</p>
 ${e.decision_note ? `<p style="margin:0 0 14px;background:#F6F7F9;padding:12px 14px;border-radius:8px"><strong>ความเห็น:</strong> ${esc(e.decision_note)}</p>` : ""}
 ${button(`${config3.baseUrl}/#/case/${e.case_id}`, "เปิดเคส")}`
     ),
@@ -209,7 +277,7 @@ function addSheet(wb, rep) {
     ws.addRow({
       owner: e.owner_name, case_no: e.case_no, cs: e.cs_number, site: e.site, seq: e.seq,
       at: new Date(e.requested_at).toLocaleString("sv-SE", { timeZone: config.tz }).slice(0, 16), by: e.requested_by_name, reason: e.reason,
-      old: e.old_due, new: e.status === "approved" || e.status === "pending" ? e.new_due : "", status: STATUS_TH[e.status], approver: e.approver_name, note: e.decision_note,
+      old: e.old_due, new: e.status === "approved" || e.status === "pending" ? e.new_due : "", status: STATUS_TH[e.status], approver: [e.approver_name, e.decided_by_name && e.decided_by_name !== e.approver_name ? `อนุมัติโดย ${e.decided_by_name}` : ""].filter(Boolean).join(" · "), note: e.decision_note,
     })
   );
   ws.getColumn("reason").alignment = { wrapText: true, vertical: "top" };
@@ -220,8 +288,12 @@ function addSheet(wb, rep) {
 function mount(api, { wrap }) {
   api.get("/extensions/approvers", wrap(async (req, res) => res.json({ approvers: await approvers() })));
   api.get("/extensions/pending", wrap(async (req, res) => {
-    const rows = await all(`${EXT_SELECT} WHERE e.status = 'pending' AND (e.approver_id = $1 OR e.requested_by = $1) ORDER BY e.requested_at`, [req.user.id]);
-    res.json({ forMe: rows.filter((r) => r.approver_id === req.user.id), mine: rows.filter((r) => r.requested_by === req.user.id) });
+    const admin = req.user.role === "admin";
+    const rows = await all(
+      `${EXT_SELECT} WHERE e.status = 'pending' AND (e.approver_id = $1 OR e.requested_by = $1 OR ($2 AND e.stage = 'admin')) ORDER BY e.requested_at`, [req.user.id, admin]);
+    // Waiting for me: as the manager to check (step 1), or as an admin to approve (step 2).
+    const forMe = rows.filter((r) => (r.stage === "manager" && r.approver_id === req.user.id) || (admin && r.stage === "admin"));
+    res.json({ forMe, mine: rows.filter((r) => r.requested_by === req.user.id), isAdmin: admin, defaultDays: DEFAULT_DAYS, maxDays: MAX_DAYS, holidays: [...(await sr().holidays())] });
   }));
   api.get("/case/:id(\\d+)/extensions", wrap(async (req, res) => {
     const c = await repo.getCase(Number(req.params.id));
@@ -233,8 +305,9 @@ function mount(api, { wrap }) {
     if (!c || !repo.canSee(req.user, c)) throw bad("ไม่พบเคสนี้", 404);
     res.json(await request(req.user, c, req.body || {}));
   }));
+  api.post("/extensions/:id(\\d+)/forward", wrap(async (req, res) => res.json(await forward(req.user, Number(req.params.id), req.body || {}))));
   api.post("/extensions/:id(\\d+)/decide", wrap(async (req, res) => res.json(await decide(req.user, Number(req.params.id), req.body || {}))));
   api.post("/extensions/:id(\\d+)/cancel", wrap(async (req, res) => res.json(await cancel(req.user, Number(req.params.id)))));
 }
 
-module.exports = { mount, forCase, forCases, approvers, request, decide, cancel, augmentReport, addSheet, STATUS_TH };
+module.exports = { mount, forCase, forCases, approvers, request, forward, decide, cancel, DEFAULT_DAYS, MAX_DAYS, augmentReport, addSheet, STATUS_TH };

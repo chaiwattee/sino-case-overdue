@@ -2465,6 +2465,68 @@ ${forced ? "" : `<label class="f">รหัสผ่านปัจจุบั�
 
 
   // ------------------------------------------------------------ case extensions (ขอขยายเวลา)
+  // Two steps: the manager checks and forwards (ส่งขออนุมัติ Admin) or rejects; an admin approves and sets the working days.
+  let EXT_HOL = null;
+  const extAddWorkdays = (iso, n) => {
+    const t = new Date(iso + "T00:00:00");
+    const today = isoDay(new Date());
+    if (iso < today) t.setTime(new Date(today + "T00:00:00").getTime());
+    let left = n;
+    while (left > 0) {
+      t.setDate(t.getDate() + 1);
+      const k = isoDay(t);
+      if (t.getDay() !== 0 && t.getDay() !== 6 && !(EXT_HOL && EXT_HOL.has(k))) left--;
+    }
+    return isoDay(t);
+  };
+  const extStage = (e) => (e.stage === "admin" ? `<span class="chip c-r2">Manager ส่งต่อแล้ว · รอ Admin อนุมัติ</span>` : `<span class="chip c-r1">รอ Manager ตรวจ</span>`);
+  /** What the person can do with a pending request: the manager forwards or rejects; an admin sets days and approves or rejects. */
+  function extActions(e, id) {
+    const admin = ME.user.role === "admin";
+    const mgrTurn = e.stage === "manager" && e.approver_id === ME.user.id;
+    if (admin && (e.stage === "admin" || e.approver_id === ME.user.id)) {
+      const n = e.req_days || 3;
+      return `<div class="ext-adm" data-ext="${e.id}"><div class="formgrid" style="align-items:end;grid-template-columns:minmax(150px,200px) minmax(0,1fr) auto">
+<label class="f">ขยายกี่วันทำการ<input type="number" min="1" max="30" step="1" value="${n}" data-days="${e.id}" required><span class="hint">ไม่นับเสาร์-อาทิตย์และวันหยุดบริษัท · สูงสุด 30</span></label>
+<div><div class="muted" style="font-size:13px">Due ใหม่</div><div class="ext-nd" data-nd="${e.id}" data-old="${e.old_due}">${fd(extAddWorkdays(e.old_due, n), true)}</div></div>
+<div class="actions" style="justify-content:flex-start"><button class="btn primary" type="button" data-extdec="1" data-id="${e.id}">อนุมัติ ขยาย <span data-dn="${e.id}">${n}</span> วันทำการ</button><button class="btn" type="button" data-extdec="0" data-id="${e.id}">ไม่อนุมัติ</button></div></div>
+<label class="f">ความเห็น (บังคับเมื่อไม่อนุมัติ)<input ${id ? `id="${id}"` : `data-note="${e.id}"`}></label></div>`;
+    }
+    if (mgrTurn) return `<div class="formgrid" style="align-items:end"><label class="f">ความเห็นถึง Admin (บังคับเมื่อไม่อนุมัติ)<input ${id ? `id="${id}"` : `data-note="${e.id}"`} placeholder="เช่น เหตุผลสมควร ติดตาม Vendor ทุกวัน"></label>
+<div class="actions" style="justify-content:flex-start"><button class="btn primary" type="button" data-extfwd="${e.id}">ส่งขออนุมัติ Admin →</button><button class="btn" type="button" data-extdec="0" data-id="${e.id}">ไม่อนุมัติ</button></div></div>`;
+    return "";
+  }
+  /** Live "Due ใหม่" as the admin changes the number of working days. */
+  async function bindExtActions(root, noteOf, after) {
+    if (root.querySelector("[data-days]") && !EXT_HOL) {
+      try { EXT_HOL = new Set((await api("/extensions/pending")).holidays || []); } catch (e) { EXT_HOL = new Set(); }
+      root.querySelectorAll("[data-nd]").forEach((el) => {
+        const inp = root.querySelector(`[data-days="${el.dataset.nd}"]`);
+        el.textContent = fd(extAddWorkdays(el.dataset.old, Number(inp.value) || 3), true);
+      });
+    }
+    root.querySelectorAll("[data-days]").forEach((inp) => (inp.oninput = () => {
+      const id = inp.dataset.days;
+      const n = Math.max(1, Math.min(30, Math.round(Number(inp.value) || 0)));
+      const nd = root.querySelector(`[data-nd="${id}"]`);
+      if (nd) nd.textContent = Number(inp.value) >= 1 ? fd(extAddWorkdays(nd.dataset.old, n), true) : "-";
+      const dn = root.querySelector(`[data-dn="${id}"]`);
+      if (dn) dn.textContent = n;
+    }));
+    root.querySelectorAll("[data-extfwd]").forEach((b) => (b.onclick = async () => {
+      b.disabled = true;
+      try {
+        const note = noteOf(b.dataset.extfwd);
+        await post(`/extensions/${b.dataset.extfwd}/forward`, { note: note ? note.value : "" });
+        toast("ส่งขออนุมัติ Admin แล้ว ระบบแจ้ง Admin และ User ทาง email", 6000);
+        after && after();
+      } catch (err) {
+        b.disabled = false;
+        toast(err.message, 6000);
+      }
+    }));
+    root.querySelectorAll("[data-extdec]").forEach((b) => (b.onclick = () => decideExt(b, noteOf(b.dataset.id), after, root.querySelector(`[data-days="${b.dataset.id}"]`))));
+  }
   const EXT_ST = { pending: ["r1", "รออนุมัติ"], approved: ["ok", "อนุมัติ"], rejected: ["fail", "ไม่อนุมัติ"], cancelled: ["closed", "ยกเลิก"] };
   function canRequestExt(c) {
     return c.stage !== "closed" && !c.pendingExtId && (c.ownerUserId === ME.user.id || lvl("case_edit") === "all");
@@ -2474,15 +2536,15 @@ ${forced ? "" : `<label class="f">รหัสผ่านปัจจุบั�
     const hist = list.filter((e) => e.status !== "pending").slice().reverse();
     return `<section class="card" id="ext-card"><div class="title"><h2>ขยายเวลา</h2><span>${c.extCount ? `ขยายแล้ว ${c.extCount} ครั้ง` : "ยังไม่เคยขยาย"}</span></div>
 ${pending ? `<div class="banner warn" style="display:flex;flex-direction:column;gap:8px">
-<div><strong>รออนุมัติคำขอขยายครั้งที่ ${pending.seq}</strong> · ส่งให้ ${esc(pending.approver_name || "-")} · ${fdt(pending.requested_at)}</div>
-<div>Due ${fd(pending.old_due)} → <strong>${fd(pending.new_due)}</strong> · เหตุผล: ${esc(pending.reason)}</div>
-${pending.approver_id === ME.user.id || ME.user.role === "admin" ? `<label class="f">ความเห็น (บังคับเมื่อไม่อนุมัติ)<input id="ext-note" placeholder="เช่น อนุมัติ ติดตาม Vendor ทุกวัน"></label>
-<div class="actions" style="justify-content:flex-start"><button class="btn primary" type="button" data-extdec="1" data-id="${pending.id}">อนุมัติ ขยาย ${pending.days} วัน</button><button class="btn" type="button" data-extdec="0" data-id="${pending.id}">ไม่อนุมัติ</button></div>` : ""}
+<div><strong>คำขอขยายครั้งที่ ${pending.seq}</strong> ${extStage(pending)} · ส่งให้ ${esc(pending.approver_name || "-")} ตรวจ · ${fdt(pending.requested_at)}</div>
+<div>Due เดิม ${fd(pending.old_due)}${pending.req_days ? ` · ขอ ${pending.req_days} วันทำการ` : ""} · เหตุผล: ${esc(pending.reason)}</div>
+${pending.stage === "admin" ? `<div class="muted">ส่งต่อโดย ${esc(pending.forwarded_by_name || "-")} · ${fdt(pending.forwarded_at)}${pending.forward_note ? ` · “${esc(pending.forward_note)}”` : ""}</div>` : ""}
+${extActions(pending, "ext-note")}
 ${pending.requested_by === ME.user.id ? `<div><button class="btn" type="button" id="ext-cancel" data-id="${pending.id}" style="min-height:34px">ยกเลิกคำขอ</button></div>` : ""}</div>` : ""}
-${!closed && canRequestExt(c) ? `<button class="btn primary" type="button" id="ext-req">ขอขยายเวลา ${c.slaDays || cfg.slaDays} วัน</button>` : ""}
+${!closed && canRequestExt(c) ? `<button class="btn primary" type="button" id="ext-req">ขอขยายเวลา</button>` : ""}
 ${hist.length ? `<ul class="ext-hist">${hist.map((e) => `<li>${chip(EXT_ST[e.status][0], EXT_ST[e.status][1])} <strong>คำขอครั้งที่ ${e.seq}</strong> · ${fdt(e.requested_at)} · โดย ${esc(e.requested_by_name || "-")}
-<div>${e.status === "approved" ? `Due ${fd(e.old_due)} → <strong>${fd(e.new_due)}</strong> · ` : ""}เหตุผล: ${esc(e.reason)}</div>
-${e.approver_name && e.status !== "cancelled" ? `<div class="muted">${esc(e.approver_name)}${e.decision_note ? ` · “${esc(e.decision_note)}”` : ""}</div>` : ""}</li>`).join("")}</ul>` : ""}
+<div>${e.status === "approved" ? `Due ${fd(e.old_due)} → <strong>${fd(e.new_due)}</strong>${e.workdays ? ` (${e.days} วันทำการ)` : ""} · ` : ""}เหตุผล: ${esc(e.reason)}</div>
+${e.approver_name && e.status !== "cancelled" ? `<div class="muted">${e.forwarded_at ? `ตรวจโดย ${esc(e.forwarded_by_name || e.approver_name)} · ` : ""}${e.decided_by_name && (e.forwarded_at || e.decided_by_name !== e.approver_name) ? `${e.status === "approved" ? "อนุมัติ" : "ไม่อนุมัติ"}โดย ${esc(e.decided_by_name)}` : esc(e.approver_name)}${e.decision_note ? ` · “${esc(e.decision_note)}”` : ""}</div>` : ""}</li>`).join("")}</ul>` : ""}
 ${!pending && !hist.length && closed ? `<div class="hint">เคสปิดแล้ว</div>` : ""}</section>`;
   }
   function bindExtCard(c, list) {
@@ -2501,12 +2563,12 @@ ${!pending && !hist.length && closed ? `<div class="hint">เคสปิดแ�
         toast(e.message, 6000);
       }
     };
-    card.querySelectorAll("[data-extdec]").forEach((b) => (b.onclick = () => decideExt(b, document.getElementById("ext-note"), reload)));
+    bindExtActions(card, () => document.getElementById("ext-note"), reload);
   }
-  async function decideExt(b, noteEl, after) {
+  async function decideExt(b, noteEl, after, daysEl) {
     b.disabled = true;
     try {
-      const r = await post(`/extensions/${b.dataset.id}/decide`, { approve: b.dataset.extdec === "1", note: noteEl ? noteEl.value : "" });
+      const r = await post(`/extensions/${b.dataset.id}/decide`, { approve: b.dataset.extdec === "1", note: noteEl ? noteEl.value : "", days: daysEl ? Number(daysEl.value) : undefined });
       toast(r.status === "approved" ? `อนุมัติแล้ว Due ใหม่ ${fd(r.newDue, true)} ระบบแจ้ง User ทาง email` : "ไม่อนุมัติ ระบบแจ้ง User ทาง email แล้ว", 6000);
       after && after();
     } catch (e) {
@@ -2517,30 +2579,31 @@ ${!pending && !hist.length && closed ? `<div class="hint">เคสปิดแ�
   async function openExtRequest(c, list, after) {
     const { approvers } = await api("/extensions/approvers");
     const dlg = document.getElementById("dlg");
-    const newDue = (() => {
-      const t = new Date(c.dueDate + "T00:00:00");
-      t.setDate(t.getDate() + (c.slaDays || cfg.slaDays));
-      return isoDay(t);
-    })();
+    if (!EXT_HOL) try { EXT_HOL = new Set((await api("/extensions/pending")).holidays || []); } catch (e) { EXT_HOL = new Set(); }
     const lastApprover = (list.filter((e) => e.status === "approved").pop() || {}).approver_id;
     dlg.innerHTML = `<form class="card" method="dialog" id="xf"><h2>ขอขยายเวลา ${esc(caseRef(c))}</h2>
 <div class="stat2" style="grid-template-columns:repeat(3,1fr)"><div><div class="k">Due ปัจจุบัน</div><div class="v" style="font-size:20px">${fd(c.dueDate)}</div></div>
-<div><div class="k">Due ใหม่ถ้าอนุมัติ</div><div class="v" style="font-size:20px;color:var(--accent)">${fd(newDue)}</div></div>
+<div><div class="k">Due ใหม่ ถ้าได้ตามที่ขอ</div><div class="v" style="font-size:20px;color:var(--accent)" id="xf-nd">${fd(extAddWorkdays(c.dueDate, 3))}</div></div>
 <div><div class="k">ขยายไปแล้ว</div><div class="v" style="font-size:20px">${c.extCount || 0} ครั้ง</div></div></div>
-<label class="f">ส่งให้ Manager อนุมัติ<select name="ap" required><option value="">เลือก Manager</option>${approvers.filter((u) => u.id !== ME.user.id).map((u) => `<option value="${u.id}" ${u.id === lastApprover ? "selected" : ""}>${esc(u.display_name)} · ${ROLE[u.role]}</option>`).join("")}</select></label>
+<label class="f">ต้องการขยายกี่วันทำการ (ไม่บังคับ)<input type="number" name="days" min="1" max="30" step="1" placeholder="ไม่ระบุ = Admin ใช้ 3 วันทำการ"><span class="hint">ไม่นับเสาร์-อาทิตย์และวันหยุดบริษัท · สูงสุด 30 · Admin เป็นผู้กำหนดจำนวนวันสุดท้าย</span></label>
+<label class="f">ส่งให้ Manager ตรวจ<select name="ap" required><option value="">เลือก Manager</option>${approvers.filter((u) => u.id !== ME.user.id).map((u) => `<option value="${u.id}" ${u.id === lastApprover ? "selected" : ""}>${esc(u.display_name)} · ${ROLE[u.role]}</option>`).join("")}</select></label>
 <label class="f">เหตุผลที่ต้องขยาย<textarea name="reason" rows="3" required minlength="5" placeholder="เช่น รอ Vendor ส่ง patch คาดว่าได้รับภายใน 10 พ.ย. เปิดเคส Vendor ไว้แล้ว #00912345"></textarea></label>
-<p class="hint" style="margin:0">ถ้าอนุมัติ ระบบนับช่วงใหม่ ${c.slaDays || cfg.slaDays} วันต่อจาก Due เดิม และแจ้งเตือนวันที่ ${cfg.alert1Day + (c.slaDays || cfg.slaDays) - cfg.slaDays}, ${cfg.alert2Day + (c.slaDays || cfg.slaDays) - cfg.slaDays} ของช่วงใหม่ และเมื่อเกิน Due</p>
+<p class="hint" style="margin:0">ขั้นตอน: Manager ตรวจเหตุผลแล้วส่งขออนุมัติ Admin → Admin อนุมัติและกำหนดจำนวนวันทำการ → Due ใหม่มีผลและรอบแจ้งเตือนเริ่มนับใหม่ ระหว่างนี้เคสยังใช้ Due เดิม</p>
 <div class="right"><button class="btn" value="cancel" formnovalidate>ยกเลิก</button><button class="btn primary" value="ok">ส่งคำขอ</button></div></form>`;
     const f = dlg.querySelector("#xf");
+    f.days.oninput = () => {
+      const n = Math.max(1, Math.min(30, Math.round(Number(f.days.value) || 3)));
+      dlg.querySelector("#xf-nd").textContent = fd(extAddWorkdays(c.dueDate, n));
+    };
     f.onsubmit = async (e) => {
       if (e.submitter && e.submitter.value === "cancel") return;
       e.preventDefault();
       if (!f.ap.value) return toast("เลือก Manager ที่จะอนุมัติ");
       if (f.reason.value.trim().length < 5) return toast("ใส่เหตุผลที่ต้องขยาย");
       try {
-        await post(`/case/${c.id}/extensions`, { approverId: Number(f.ap.value), reason: f.reason.value });
+        await post(`/case/${c.id}/extensions`, { approverId: Number(f.ap.value), reason: f.reason.value, days: f.days.value ? Number(f.days.value) : undefined });
         dlg.close();
-        toast("ส่งคำขอแล้ว ระบบแจ้ง Manager ทาง email", 5000);
+        toast("ส่งคำขอแล้ว ระบบแจ้ง Manager ให้ตรวจทาง email", 5000);
         after && after();
       } catch (err) {
         toast(err.message, 6000);
@@ -2556,15 +2619,16 @@ ${!pending && !hist.length && closed ? `<div class="hint">เคสปิดแ�
     } catch (e) {
       return "";
     }
-    const row = (e, forMe) => `<div class="ext-item"><div><a class="mono" href="#/case/${e.case_id}">${esc(e.case_no)}</a> · <strong>${esc(e.site || "-")}</strong> · ${esc(e.task || "")} <span class="chip c-r1">คำขอครั้งที่ ${e.seq}</span>${e.ext_done ? "" : ""}</div>
-<div class="muted" style="font-size:13px">${forMe ? `ขอโดย ${esc(e.requested_by_name || "-")}` : `ส่งให้ ${esc(e.approver_name || "-")}`} · ${fdt(e.requested_at)} · Due ${fd(e.old_due)} → <strong>${fd(e.new_due)}</strong></div>
+    const row = (e, forMe) => `<div class="ext-item"><div><a class="mono" href="#/case/${e.case_id}">${esc(e.case_no)}</a> · <strong>${esc(e.site || "-")}</strong> · ${esc(e.task || "")} <span class="chip c-r1">คำขอครั้งที่ ${e.seq}</span> ${extStage(e)}</div>
+<div class="muted" style="font-size:13px">${forMe ? `ขอโดย ${esc(e.requested_by_name || "-")}` : `ส่งให้ ${esc(e.approver_name || "-")} ตรวจ`} · ${fdt(e.requested_at)} · Due เดิม <strong>${fd(e.old_due)}</strong>${e.req_days ? ` · ขอ ${e.req_days} วันทำการ` : ""}</div>
 <div class="ext-reason">${esc(e.reason)}</div>
-${forMe ? `<div class="formgrid" style="align-items:end"><label class="f">ความเห็น (บังคับเมื่อไม่อนุมัติ)<input data-note="${e.id}"></label><div class="actions" style="justify-content:flex-start"><button class="btn primary" type="button" data-extdec="1" data-id="${e.id}">อนุมัติ ขยาย ${e.days} วัน</button><button class="btn" type="button" data-extdec="0" data-id="${e.id}">ไม่อนุมัติ</button></div></div>` : ""}</div>`;
-    return `${d.forMe.length ? `<section class="card ext-wrap"><div class="title"><h2>คำขอขยายเวลา รออนุมัติจากคุณ (${d.forMe.length})</h2></div>${d.forMe.map((e) => row(e, true)).join("")}</section>` : ""}
-${d.mine.length ? `<section class="card"><div class="title"><h2>คำขอขยายเวลาของคุณ รออนุมัติ (${d.mine.length})</h2></div>${d.mine.map((e) => row(e, false)).join("")}</section>` : ""}`;
+${e.stage === "admin" ? `<div class="muted" style="font-size:13px">ส่งต่อโดย ${esc(e.forwarded_by_name || "-")} · ${fdt(e.forwarded_at)}${e.forward_note ? ` · ความเห็น Manager: “${esc(e.forward_note)}”` : ""}</div>` : ""}
+${forMe ? extActions(e) : ""}</div>`;
+    return `${d.forMe.length ? `<section class="card ext-wrap"><div class="title"><h2>${d.isAdmin ? "คำขอขยายเวลา รอคุณอนุมัติ" : "คำขอขยายเวลา รอคุณตรวจและส่งต่อ"} (${d.forMe.length})</h2><span>${d.isAdmin ? "Admin อนุมัติขั้นสุดท้ายและกำหนดจำนวนวันทำการ" : "ตรวจเหตุผลแล้วส่งขออนุมัติ Admin · เคสขยายเวลาเมื่อ Admin อนุมัติเท่านั้น"}</span></div>${d.forMe.map((e) => row(e, true)).join("")}</section>` : ""}
+${d.mine.length ? `<section class="card"><div class="title"><h2>คำขอขยายเวลาของคุณ รอพิจารณา (${d.mine.length})</h2></div>${d.mine.map((e) => row(e, false)).join("")}</section>` : ""}`;
   }
   function bindExtPending(root) {
-    root.querySelectorAll(".ext-wrap [data-extdec]").forEach((b) => (b.onclick = () => decideExt(b, root.querySelector(`[data-note="${b.dataset.id}"]`), () => route())));
+    root.querySelectorAll(".ext-wrap").forEach((w) => bindExtActions(w, (id) => w.querySelector(`[data-note="${id}"]`), () => route()));
   }
   /** Extra table row under a case that has been extended. cols: cells before / after the age cell. */
   function extRow(c, { before, after }) {
