@@ -434,6 +434,30 @@ ${edit || !csOf(c) ? "" : `<div class="rca-sec" id="rca-sec"></div>`}
     ["report", "Report", ["reports", "csat"]],
     ["admin", "ผู้ดูแลระบบ", ["users", "settings", "audit"]],
   ];
+  /** Opening a menu group that shows a number: list what the number is made of (each REQ / SR), with links. */
+  async function showGroupAlerts(g) {
+    const menu = g.querySelector(".ngrp-menu");
+    const gb = g.querySelector(".gbadge");
+    if (!menu) return;
+    let box = menu.querySelector(".ngrp-alerts");
+    if (!gb || gb.hidden) { if (box) box.remove(); return; }
+    const wants = (nav) => !!g.querySelector(`a[data-nav="${nav}"] .badge:not([hidden])`);
+    const [ik, sr] = await Promise.all([
+      wants("intake") ? api("/intake?status=pending").catch(() => null) : null,
+      wants("sr") ? api("/sr/attention").catch(() => null) : null,
+    ]);
+    const rows = [];
+    if (ik) ik.items.slice(0, 6).forEach((i) => rows.push(`<a href="#/intake/${i.id}" class="na-row"><span class="chip c-r1">เคสจากลูกค้า</span><span class="na-t"><b class="mono">${esc(i.req_no)}</b> ${esc(i.site || i.customer_text || "")} · ${esc(i.subject || "")}</span><span class="na-w">รอรับเคส ${waitedText(i.created_at)}</span></a>`));
+    if (ik && ik.items.length > 6) rows.push(`<a href="#/intake" class="na-more">เคสจากลูกค้าอีก ${ik.items.length - 6} รายการ →</a>`);
+    if (sr) sr.items.forEach((x) => rows.push(`<a href="#/sr/${x.id}" class="na-row"><span class="chip c-all">คำขอบริการ</span><span class="na-t"><b class="mono">${esc(x.no)}</b> ${esc(x.title)}</span><span class="na-w t-${x.tone === "overdue" ? "over" : x.tone}">${esc(x.why)}</span></a>`));
+    if (!rows.length) { if (box) box.remove(); return; }
+    if (!box) {
+      box = document.createElement("div");
+      box.className = "ngrp-alerts";
+      menu.prepend(box);
+    }
+    box.innerHTML = `<div class="na-h">ตัวเลข ${esc(gb.textContent)} มาจากรายการเหล่านี้</div>${rows.join("")}`;
+  }
   function closeGroups(except) {
     document.querySelectorAll("#tabs .ngrp.open").forEach((g) => {
       if (g === except) return;
@@ -452,6 +476,7 @@ ${edit || !csOf(c) ? "" : `<div class="rca-sec" id="rca-sec"></div>`}
         closeGroups(g);
         g.classList.toggle("open", open);
         b.setAttribute("aria-expanded", String(open));
+        if (open) showGroupAlerts(g);
         if (open && e.detail === 0) {
           const first = g.querySelector(".ngrp-menu a");
           if (first) first.focus();

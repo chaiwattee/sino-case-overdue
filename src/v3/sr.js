@@ -785,7 +785,16 @@ function mount(api, { wrap }) {
       const teams = u.role === "admin" || perms.seesAllTeams(u) ? (await all("SELECT code FROM teams")).map((t) => t.code) : await userTeams(u.id);
       pending = (await one("SELECT count(*)::int AS n FROM service_requests WHERE team = ANY($1) AND status IN ('pending','info')", [teams])).n;
     }
-    res.json({ due: mine.length, overdue: mine.filter((r) => r.status === "overdue").length, confirm: c.n, pending });
+    // The requests behind the number, so the menu can say where each alert comes from.
+    const items = mine.slice(0, 10).map((r) => ({ id: r.id, no: r.srNo, title: r.title, why: r.status === "overdue" ? `เลย Target ${r.overdueDays || ""} วันทำการ`.replace("  ", " ") : r.daysLeft === 0 ? "ครบ Target วันนี้" : "ครบ Target พรุ่งนี้", tone: r.status === "overdue" ? "overdue" : "r2" }));
+    if (c.n) (await all(`SELECT id, sr_no, title FROM service_requests WHERE requester_id = $1 AND status = 'done' AND confirmed_at IS NULL AND closed_at > now() - interval '30 days' ORDER BY closed_at LIMIT 10`, [u.id]))
+      .forEach((r) => items.push({ id: r.id, no: r.sr_no, title: r.title, why: "เสร็จแล้ว รอคุณยืนยันรับงาน", tone: "ok" }));
+    if (pending) {
+      const teams = u.role === "admin" || perms.seesAllTeams(u) ? (await all("SELECT code FROM teams")).map((t) => t.code) : await userTeams(u.id);
+      (await all("SELECT id, sr_no, title, status FROM service_requests WHERE team = ANY($1) AND status IN ('pending','info') ORDER BY created_at LIMIT 10", [teams]))
+        .forEach((r) => items.push({ id: r.id, no: r.sr_no, title: r.title, why: r.status === "info" ? "รอข้อมูลเพิ่มจากผู้ขอ" : "รอคุณอนุมัติ", tone: "r1" }));
+    }
+    res.json({ due: mine.length, overdue: mine.filter((r) => r.status === "overdue").length, confirm: c.n, pending, items });
   }));
   api.get("/sr", wrap(async (req, res) => {
     const scope = ["mine", "assigned", "team"].includes(req.query.scope) ? req.query.scope : req.user.role === "requester" ? "mine" : "team";
