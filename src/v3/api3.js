@@ -57,6 +57,7 @@ const bad = (msg, status = 400) => Object.assign(new Error(msg), { status });
 require("./intake").mountInternal(api, { need, wrap });
 const ext = require("./extensions");
 ext.mount(api, { wrap });
+require("./closereq").mount(api, { wrap });
 require("./kpi").mount(api, { wrap, need });
 require("./kpiprofiles").mount(api, { wrap, need });
 require("./sr").mount(api, { wrap });
@@ -188,7 +189,7 @@ api.get("/overview", wrap(async (req, res) => {
 function ser3(c) {
   const iso = (x) => (x instanceof Date ? d.toISODate(x) : x || null);
   return { ...ser(c), caseNo: c.caseNo, caseNoOld: c.caseNoOld || "", extCount: c.extCount || 0, origDueDate: iso(c.origDueDate), periodStart: iso(c.periodStart), totalAge: c.totalAge,
-    pendingExtId: c.pendingExtId, lastExt: c.lastExt, closedInExtension: c.closedInExtension ?? null, severity: c.severity, id: c.id, team: c.team, slaDays: c.slaDays,
+    pendingExtId: c.pendingExtId, pendingCloseId: c.pendingCloseId, pmScheduleId: c.pmScheduleId, lastExt: c.lastExt, closedInExtension: c.closedInExtension ?? null, severity: c.severity, id: c.id, team: c.team, slaDays: c.slaDays,
     customerUnconfirmed: c.customerUnconfirmed || "",
     resolution: c.resolution || "", rootCause: c.rootCause || "", resolvedAt: c.resolvedAt || null, resolvedBy: c.resolvedBy || "", ownerUserId: c.owner_id, updatedAt: c.updatedAt, startAt: c.startAt,
     rcaText: c.rcaText || "", rcaCategory: c.rcaCategory || "", rcaDate: c.rcaDate || "", rcaFileName: c.rcaFileName || "", rcaBy: c.rcaBy || "", rcaAt: c.rcaAt || null,
@@ -409,6 +410,7 @@ api.post("/case", wrap(async (req, res) => {
   }
   const closedStatus = config.closedStatuses.includes(String(b.status || "").toLowerCase());
   if (closedStatus && !(await perms.can(u, "case_close"))) throw bad("ไม่มีสิทธิ์ปิดเคส", 403);
+  if (closedStatus && require("./closereq").needsApproval(u, {})) throw bad("ปิดเคสต้องให้ Manager อนุมัติ: เปิดเคสก่อน แล้วกด “ขอปิดเคส”");
   const r = await repo.createCase(u, { ...b, team }, { ownerId: ownerIdNum });
   if (r.newSite) await require("./customers").onNewSite(u, r.newSite, { id: r.id, case_no: (await one("SELECT case_no FROM cases WHERE id = $1", [r.id])).case_no, team });
   await audit(u, "case_create", String(r.id), { cs: b.cs_number, site: b.site });
@@ -428,6 +430,14 @@ api.put("/case/:id", wrap(async (req, res) => {
   if ((b.owner_id && Number(b.owner_id) !== c.owner_id) || (b.team && b.team !== c.team)) {
     if (!allowReassign) throw bad("ไม่มีสิทธิ์เปลี่ยน User หรือทีม", 403);
     await perms.checkAssign(u, b.team || c.team, b.owner_id ? Number(b.owner_id) : c.owner_id);
+  }
+  // Closing / cancelling by an owner goes to a manager first (closereq.js); other edits in the same save are applied now.
+  const closeReq = require("./closereq");
+  if (b.status && closeReq.isCloseStatus(b.status) && !closeReq.isCloseStatus(c.status) && closeReq.needsApproval(u, c)) {
+    const rest = { ...b };
+    ["status", "resolution", "root_cause", "root_cause_note", "rca"].forEach((k) => delete rest[k]);
+    if (Object.keys(rest).some((k) => rest[k] !== undefined)) await repo.updateCase(u, c, rest, { allowReassign });
+    return res.json(await closeReq.request(u, await repo.getCase(c.id), b));
   }
   const r = await repo.updateCase(u, c, b, { allowReassign });
   if (r.newSite) await require("./customers").onNewSite(u, r.newSite, { id: c.id, case_no: c.caseNo, team: b.team || c.team });

@@ -2726,5 +2726,12 @@
 "กรุณาอัปเดตความคืบหน้า ปิดงาน หรือขอขยายเวลาพร้อมเหตุผล": "Please update progress, close the work, or ask for more time with a reason.",
 "ดูเคสเกินกำหนด": "Late cases",
 "ดูคำขอบริการเลย Target": "Service requests past target",
-"รอคุณยืนยันรับงาน": "waiting for you to confirm"
+"รอคุณยืนยันรับงาน": "waiting for you to confirm",
+"ขอปิดเคส": "Request close",
+"คำขอปิดเคส": "Close requests",
+"รออนุมัติปิด": "Close awaiting approval",
+"ถอนคำขอ": "Withdraw request",
+"การตอบสนองของ Manager": "Manager response",
+"ขอหลัง Due": "Asked after Due",
+"ขอก่อน Due": "Asked before Due"
 }

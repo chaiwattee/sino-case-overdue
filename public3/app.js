@@ -572,7 +572,7 @@ ${showOwner ? `<td><a href="#/owner/${encodeURIComponent(c.ownerId)}">${esc(c.ow
 <td>${fd(c.startDate)}</td>
 <td>${c.extCount ? `<span class="muted" style="text-decoration:line-through">${fd(c.origDueDate)}</span>` : fd(c.dueDate)}</td>
 <td>${c.extCount ? `<small class="muted">รวม ${c.totalAge} วัน · ขยายแล้ว</small>` : ageCell(c)}</td>
-<td>${c.extCount ? "" : chip(c.stage)}${extTag(c)}${rcaTag(c)}<div class="muted" style="font-size:12px;margin-top:4px">${esc(c.status || "")}</div></td>
+<td>${c.extCount ? "" : chip(c.stage)}${extTag(c)}${rcaTag(c)}${c.pendingCloseId ? ` <span class="chip c-r2">รออนุมัติปิด</span>` : ""}<div class="muted" style="font-size:12px;margin-top:4px">${esc(c.status || "")}</div></td>
 </tr>${extRow(c, { before: showOwner ? 6 : 5, after: 1 })}`
       )
       .join("")}</tbody></table></div>`;
@@ -843,7 +843,7 @@ ${caseTable(cases, { missingRes: showRes, empty: "ไม่พบเคสตา
   async function viewMine(params) {
     setNav("mine");
     const kpiP = api(`/kpi/card/${ME.user.id}`).catch(() => ({ card: null }));
-    const [{ cases }, lk, ikHtml, extHtml, srAll, pjHtml] = await Promise.all([api("/cases?mine=1"), lookups(), intakeSection(), Promise.all([extPendingSection(), transferPendingSection(), transferFollowSection()]).then((a) => a.join("")), srList("assigned"), pjMyTasksSection().catch(() => "")]);
+    const [{ cases }, lk, ikHtml, extHtml, srAll, pjHtml] = await Promise.all([api("/cases?mine=1"), lookups(), intakeSection(), Promise.all([closePendingSection(), extPendingSection(), transferPendingSection(), transferFollowSection()]).then((a) => a.join("")), srList("assigned"), pjMyTasksSection().catch(() => "")]);
     const srMine = srAll.filter(srOpen).sort(srByTarget);
     const srLate = srMine.filter((r) => r.status === "overdue" || r.daysLeft === 0 || r.daysLeft === 1);
     const hasKpi = !!(await kpiP).card;
@@ -1030,9 +1030,10 @@ ${allowNew ? `<span class="hint">${newHint}</span>` : ""}</div>`;
       can("case_reassign") ? api("/users/options") : Promise.resolve({ users: [] }),
       isNew ? Promise.resolve(null) : api("/case/" + id),
     ]);
-    const [extData, custFiles] = isNew
-      ? [{ extensions: [] }, { files: [] }]
-      : await Promise.all([api(`/case/${Number(id)}/extensions`).catch(() => ({ extensions: [] })), api(`/case/${Number(id)}/customer-files`).catch(() => ({ files: [] }))]);
+    const [extData, custFiles, closeData] = isNew
+      ? [{ extensions: [] }, { files: [] }, null]
+      : await Promise.all([api(`/case/${Number(id)}/extensions`).catch(() => ({ extensions: [] })), api(`/case/${Number(id)}/customer-files`).catch(() => ({ files: [] })),
+          api(`/case/${Number(id)}/close-request`).catch(() => null)]);
     const c = data ? data.case : { team: ME.user.teams[0] || (ME.teams[0] || {}).key, status: "In Progress", ownerUserId: ME.user.id, owner: ME.user.display_name, ownerEmail: ME.user.email };
     const permsC = data ? data.can : { edit: true, close: can("case_close"), reassign: can("case_reassign"), editStart: false, delete: false };
     const ro = !permsC.edit;
@@ -1074,7 +1075,7 @@ ${allowNew ? `<span class="hint">${newHint}</span>` : ""}</div>`;
 <div class="actions">
 ${!isNew && c.site && !c.customerUnconfirmed && lvl("export") === "all" ? `<a class="btn" href="#/reports?site=${encodeURIComponent(c.site)}">Export เคสของ ${esc(c.site)}</a>` : ""}
 ${!isNew && permsC.delete ? `<button class="btn danger" type="button" id="btn-del">ลบเคส</button>` : ""}
-${!isNew && !closed && permsC.close ? `<button class="btn" type="button" id="btn-close" style="color:var(--normal-fg)">ปิดเคส</button>` : ""}
+${!isNew && !closed && permsC.close && !c.pendingCloseId ? `<button class="btn" type="button" id="btn-close" style="color:var(--normal-fg)">${closeNeedsApproval(c) ? "ขอปิดเคส" : "ปิดเคส"}</button>` : ""}
 ${!ro ? `<button class="btn primary" type="submit" form="cf">${isNew ? "เปิดเคส" : "บันทึก"}</button>` : ""}</div></div>
 ${ro && !c.transferredTo ? `<div class="banner warn">คุณดูเคสนี้ได้อย่างเดียว ไม่มีสิทธิ์แก้ไข</div>` : ""}
 ${!isNew && c.sitePendingId ? `<div class="banner warn unconf" id="site-pending"><div><strong>ลูกค้าใหม่รอ Manager อนุมัติ</strong> · ${esc(c.site)}<br><span style="font-size:13px">ทำงานต่อได้ตามปกติ แต่ปิดเคสได้หลัง Manager ของทีมอนุมัติชื่อ แก้ชื่อ หรือรวมกับลูกค้าที่มีอยู่</span></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" type="button" id="btn-site-remind">เตือน Manager อีกครั้ง</button><button class="btn primary" type="button" id="btn-site-decide" hidden>ตรวจชื่อลูกค้า</button></div></div>` : ""}
@@ -1123,6 +1124,7 @@ ${custFiles.files.length ? `<section class="card"><div class="title"><h2>รู�
       return `<a class="cf" href="${u}" target="_blank" rel="noopener" title="${esc(f.file_name)}">${img ? `<img src="${u}" alt="${esc(f.file_name)}" loading="lazy">` : `<span class="cf-ext">${esc((f.file_name.split(".").pop() || "").toUpperCase())}</span>`}<span class="cf-n">${esc(f.file_name)}</span><span class="cf-d">${fdt(f.created_at)} · ${f.source === "form" ? "ฟอร์ม" : "email"}</span></a>`;
     }).join("")}</div></section>` : ""}
 ${data ? teamFilesCard(data.files || [], c, permsC) : ""}
+${isNew ? "" : closeCardHtml(closeData)}
 ${isNew ? "" : extCard(c, extData.extensions, closed, permsC)}
 ${isNew ? `<section class="card"><h2>ก่อนเปิดเคส</h2><p class="muted" style="margin:0;font-size:14px">กรอก Site, Task และ Status ให้ครบ ระบบจะส่ง email เตือน User ในวันที่ ${cfg.alert1Day}, ${cfg.alert2Day} และทุกวันหลังเกิน Due ถ้ายังไม่ปิดเคส</p></section>` : `
 <section class="card"><div><h2>Activity / Detail</h2><div class="hint" style="margin-top:4px">ทุกบันทึกมีวันที่และชื่อผู้บันทึก แก้หรือลบย้อนหลังไม่ได้</div></div>
@@ -1140,6 +1142,7 @@ ${actsHtml(data.activities)}</section>`}
 
     if (!isNew) {
       bindExtCard(c, extData.extensions);
+      bindCloseCard(closeData, () => viewCase(id));
       bindTransferCard(c, data.transfer);
       bindChecklist(c);
       bindTeamFiles(c);
@@ -1192,7 +1195,8 @@ ${actsHtml(data.activities)}</section>`}
           location.hash = "#/case/" + r.id;
         } else {
           const r = await saveCaseWithRca(id, body);
-          toast(r.changed.length ? (body.resolution && !closed ? "ปิดเคสแล้ว" : r.newSite ? `บันทึกแล้ว และเพิ่มลูกค้าใหม่ “${r.newSite}”` : "บันทึกแล้ว") : "ไม่มีอะไรเปลี่ยน", 4000);
+          if (r.pendingClose) toast("ส่งคำขอปิดเคสแล้ว รอ Manager อนุมัติ · ถ้าอนุมัติ End date คือวันนี้", 6000);
+          else toast(r.changed.length ? (body.resolution && !closed ? "ปิดเคสแล้ว" : r.newSite ? `บันทึกแล้ว และเพิ่มลูกค้าใหม่ “${r.newSite}”` : "บันทึกแล้ว") : "ไม่มีอะไรเปลี่ยน", 4000);
           viewCase(id);
         }
       } catch (err) {
@@ -1232,8 +1236,8 @@ ${actsHtml(data.activities)}</section>`}
         const r = await askResolution(c);
         if (!r) return;
         try {
-          await saveCaseWithRca(id, r);
-          toast("ปิดเคสแล้ว");
+          const res = await saveCaseWithRca(id, r);
+          toast(res.pendingClose ? "ส่งคำขอปิดเคสแล้ว รอ Manager อนุมัติ · ถ้าอนุมัติ End date คือวันนี้" : "ปิดเคสแล้ว", 6000);
           viewCase(id);
         } catch (err) {
           toast(err.message, 6000);
@@ -2464,6 +2468,65 @@ ${forced ? "" : `<label class="f">รหัสผ่านปัจจุบั�
   }
 
 
+  // ------------------------------------------------------------ close / cancel approval (closereq.js)
+  const closeNeedsApproval = (c) => !["admin", "manager"].includes(ME.user.role) && !c.pmScheduleId;
+  function closeCardHtml(cd) {
+    if (!cd || (!cd.pending && !cd.history.length)) return "";
+    const p = cd.pending;
+    const what = (x) => (x.kind === "cancel" ? "ยกเลิก" : "ปิด");
+    return `<section class="card" id="close-card"><div class="title"><h2>คำขอปิดเคส</h2><span>Manager อนุมัติก่อนเคสปิด · End date = วันที่ขอ</span></div>
+${p ? `<div class="banner warn" style="display:flex;flex-direction:column;gap:8px">
+<div><strong>รอ Manager อนุมัติ${what(p)}เคส</strong> · Status ${esc(p.toStatus)} · ขอโดย ${esc(p.requestedByName)} · ${fdt(p.requestedAt)}</div>
+<div>Due ${fd(p.dueAtReq)} · ขอปิดวันที่ ${fd(p.reqDate)} ${p.onTime ? `<span class="chip c-ok">ทันเวลา: ถ้าอนุมัติไม่นับว่า delay</span>` : `<span class="chip c-overdue">ขอหลัง Due</span>`}</div>
+${p.resolution ? `<div class="ext-reason">${esc(p.resolution)}</div>` : ""}
+${cd.canDecide && p.requestedBy !== ME.user.id ? `<label class="f" style="flex:none">ความเห็น (บังคับเมื่อไม่อนุมัติ)<input id="cl-note" placeholder="เช่น ยังไม่ได้ยืนยันกับลูกค้า"></label>
+<div class="actions" style="justify-content:flex-start"><button class="btn primary" type="button" data-cldec="1" data-id="${p.id}">อนุมัติ${what(p)}เคส</button><button class="btn" type="button" data-cldec="0" data-id="${p.id}">ไม่อนุมัติ</button></div>` : ""}
+${p.requestedBy === ME.user.id ? `<div><button class="btn" type="button" id="cl-cancel" data-id="${p.id}" style="min-height:34px">ถอนคำขอ</button></div>` : ""}</div>` : ""}
+${cd.history.length ? `<ul class="ext-hist">${cd.history.map((x) => `<li>${chip(x.state === "approved" ? "ok" : x.state === "rejected" ? "fail" : "closed", x.state === "approved" ? "อนุมัติ" : x.state === "rejected" ? "ไม่อนุมัติ" : "ถอนคำขอ")} <strong>ขอ${what(x)}เคส</strong> · ${fdt(x.requestedAt)} · โดย ${esc(x.requestedByName)}
+${x.decidedByName ? `<div class="muted">${esc(x.decidedByName)} · ${fdt(x.decidedAt)}${x.note ? ` · “${esc(x.note)}”` : ""}</div>` : ""}</li>`).join("")}</ul>` : ""}</section>`;
+  }
+  function bindCloseCard(cd, after) {
+    const card = document.getElementById("close-card");
+    if (!card) return;
+    bindCloseDecide(card, () => document.getElementById("cl-note"), after);
+    const cn = document.getElementById("cl-cancel");
+    if (cn) cn.onclick = async () => {
+      try {
+        await post(`/close-requests/${cn.dataset.id}/cancel`);
+        toast("ถอนคำขอปิดเคสแล้ว");
+        after();
+      } catch (e) {
+        toast(e.message, 6000);
+      }
+    };
+  }
+  function bindCloseDecide(root, noteOf, after) {
+    root.querySelectorAll("[data-cldec]").forEach((b) => (b.onclick = async () => {
+      b.disabled = true;
+      try {
+        const note = noteOf(b.dataset.id);
+        const r = await post(`/close-requests/${b.dataset.id}/decide`, { approve: b.dataset.cldec === "1", note: note ? note.value : "" });
+        toast(r.state === "approved" ? `อนุมัติแล้ว เคสปิด End date ${fd(r.endDate, true)}` : "ไม่อนุมัติ เคสยังเปิดอยู่ ระบบแจ้ง User ทาง email แล้ว", 6000);
+        after && after();
+      } catch (e) {
+        b.disabled = false;
+        toast(e.message, 6000);
+      }
+    }));
+  }
+  /** "คำขอปิดเคส รอคุณอนุมัติ" on My cases (managers of the team, admins). */
+  async function closePendingSection() {
+    if (!["admin", "manager"].includes(ME.user.role)) return "";
+    const r = await api("/close-requests/pending").catch(() => ({ items: [] }));
+    if (!r.items.length) return "";
+    return `<section class="card ext-wrap" id="cl-wrap"><div class="title"><h2>คำขอปิด / ยกเลิกเคส รอคุณอนุมัติ (${r.items.length})</h2><span>ตอบภายใน 1 วันทำการ เวลาตอบนับใน KPI การตอบสนองของ Manager</span></div>
+${r.items.map((x) => `<div class="ext-item"><div><a class="mono" href="#/case/${x.caseId}">${esc(x.caseNo)}</a> · <strong>${esc(x.site || "-")}</strong> · ${esc(x.task || "")} <span class="chip ${x.kind === "cancel" ? "c-closed" : "c-r1"}">ขอ${x.kind === "cancel" ? "ยกเลิก" : "ปิด"}เคส · ${esc(x.toStatus)}</span> ${x.onTime ? `<span class="chip c-ok">ขอก่อน Due</span>` : `<span class="chip c-overdue">ขอหลัง Due</span>`}</div>
+<div class="muted" style="font-size:13px">ขอโดย ${esc(x.requestedByName)} · ${fdt(x.requestedAt)} · Due ${fd(x.dueAtReq)} · ${esc(x.teamLabel)}</div>
+${x.resolution ? `<div class="ext-reason">${esc(x.resolution)}</div>` : ""}
+<div class="formgrid" style="align-items:end"><label class="f">ความเห็น (บังคับเมื่อไม่อนุมัติ)<input data-clnote="${x.id}"></label>
+<div class="actions" style="justify-content:flex-start"><button class="btn primary" type="button" data-cldec="1" data-id="${x.id}">อนุมัติ</button><button class="btn" type="button" data-cldec="0" data-id="${x.id}">ไม่อนุมัติ</button></div></div></div>`).join("")}</section>`;
+  }
+
   // ------------------------------------------------------------ case extensions (ขอขยายเวลา)
   // Two steps: the manager checks and forwards (ส่งขออนุมัติ Admin) or rejects; an admin approves and sets the working days.
   let EXT_HOL = null;
@@ -2629,6 +2692,8 @@ ${forMe ? extActions(e) : ""}</div>`;
 ${d.mine.length ? `<section class="card"><div class="title"><h2>คำขอขยายเวลาของคุณ รอพิจารณา (${d.mine.length})</h2></div>${d.mine.map((e) => row(e, false)).join("")}</section>` : ""}`;
   }
   function bindExtPending(root) {
+    const cw = root.querySelector("#cl-wrap");
+    if (cw) bindCloseDecide(cw, (id) => cw.querySelector(`[data-clnote="${id}"]`), () => route());
     root.querySelectorAll(".ext-wrap").forEach((w) => bindExtActions(w, (id) => w.querySelector(`[data-note="${id}"]`), () => route()));
   }
   /** Extra table row under a case that has been extended. cols: cells before / after the age cell. */
@@ -3588,6 +3653,16 @@ ${r.answers.slice(0, 60).map((a) => `<tr><td><a class="mono" href="#/case/${a.ca
     };
   }
 
+  /** "การตอบสนองของ Manager": a separate 100-point score, answers to close requests, extensions and SRs within 1 working day. */
+  async function loadMgrResponse(month) {
+    const r = await api("/kpi/manager-response?" + qs({ month })).catch(() => null);
+    if (!r || !r.rows.length) return;
+    const KIND = (it) => `${esc(it.kind)} ${esc(it.ref || "")} · ${it.pending ? "ยังไม่ตอบ " : ""}${it.days} วันทำการ`;
+    $app.insertAdjacentHTML("beforeend", `<section class="card" id="kp-mgr"><div class="title"><h2>การตอบสนองของ Manager · ${ymLabel(month)}</h2><span>คะแนนแยกจาก KPI งานเคส เต็ม 100 · ตอบภายใน ${r.respondDays} วันทำการ = ทันเวลา · นับคำขอปิด / ยกเลิกเคส, ขอขยายเวลา (ขั้น Manager) และคำขอบริการรออนุมัติ</span></div>
+<div class="tablewrap"><table><thead><tr><th>Manager</th><th class="n">คะแนน</th><th class="n">ทั้งหมด</th><th class="n">ทันเวลา</th><th class="n">ช้า</th><th class="n">ยังรออยู่</th><th>รายการที่ช้า</th></tr></thead><tbody>
+${r.rows.map((x) => `<tr><td><strong>${esc(x.name)}</strong><div class="hint">${esc(x.teams.join(", "))}</div></td><td class="n"><span class="chip ${x.score >= 90 ? "c-ok" : x.score >= 70 ? "c-r1" : "c-overdue"}">${x.score}</span></td><td class="n">${x.total}</td><td class="n">${x.onTime}</td><td class="n ${x.late ? "t-over" : ""}">${x.late}${x.late ? `<div class="hint">เฉลี่ย ${x.avgLate} วัน</div>` : ""}</td><td class="n">${x.pending}</td>
+<td style="font-size:13px">${x.items.slice(0, 4).map(KIND).join("<br>")}${x.items.length > 4 ? `<div class="hint">และอีก ${x.items.length - 4} รายการ</div>` : ""}</td></tr>`).join("")}</tbody></table></div></section>`);
+  }
   async function viewKpi(params) {
     setNav("kpi");
     const months = [];
@@ -3726,6 +3801,7 @@ ${r.canEditCategories ? `<section class="card noprint"><details><summary style="
     }
     function bindKpiAfter() {
     bindKpiNav();
+    if (r.canAll) loadMgrResponse(month);
     bindRowLinks();
     const sv = document.getElementById("kp-save");
     if (sv) sv.onclick = async () => {

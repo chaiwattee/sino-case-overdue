@@ -59,7 +59,8 @@ async function alertRules() {
   return s ? { cc: s.cc, ccTypes: s.ccTypes || [], fallback: s.fallback } : { cc: def.cc.join(", "), ccTypes: def.ccTypes, fallback: def.fallback.join(", ") };
 }
 async function runAlerts({ dryRun = false } = {}) {
-  const cases = await repo.loadCases(null, { where: "c.closed_at IS NULL" });
+  // A case waiting for its close to be approved is the manager's turn: no reminders to the owner meanwhile.
+  const cases = await repo.loadCases(null, { where: "c.closed_at IS NULL AND NOT EXISTS (SELECT 1 FROM case_close_requests x WHERE x.case_id = c.id AND x.state = 'pending')" });
   const todayIso = d.toISODate(d.today());
   const due = cases.map((c) => ({ c, ...(alertFor(c, todayIso) || {}) })).filter((x) => x.type);
   const keys = due.map((x) => x.dedupe);

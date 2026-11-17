@@ -13,6 +13,7 @@ const CASE_SELECT = `
            ORDER BY a.activity_date DESC, a.id DESC LIMIT 1) AS last_activity,
          (SELECT max(a.created_at) FROM case_activities a WHERE a.case_id = c.id) AS last_activity_at,
          (SELECT e.id FROM case_extensions e WHERE e.case_id = c.id AND e.status = 'pending' LIMIT 1) AS pending_ext_id,
+         (SELECT x.id FROM case_close_requests x WHERE x.case_id = c.id AND x.state = 'pending' LIMIT 1) AS pending_close_id,
          (SELECT l.id FROM lookups l WHERE l.kind = 'site' AND l.pending AND lower(l.value) = lower(c.site) LIMIT 1) AS site_pending_id,
          (SELECT json_build_object('seq', e.seq, 'reason', e.reason, 'approver', ua.display_name, 'decidedAt', e.decided_at,
                    'from', e.old_due, 'to', e.new_due, 'note', e.decision_note)
@@ -120,6 +121,8 @@ function toCase(r) {
   c.origDueDate = c.dueDate;
   c.totalAge = c.age;
   c.pendingExtId = r.pending_ext_id || null;
+  c.pendingCloseId = r.pending_close_id || null;
+  c.pmScheduleId = r.pm_schedule_id || null;
   c.lastExt = r.last_ext || null;
   if (ext > 0) {
     const due = d.fromISODate(r.due_date);
@@ -256,13 +259,13 @@ async function createCase(user, body, { ownerId, startDate, slaDays } = {}) {
 }
 
 /** Update editable fields. Returns list of changed field names. */
-async function updateCase(user, kase, body, { allowReassign }) {
-  const r = await updateCaseTx(user, kase, body, { allowReassign });
+async function updateCase(user, kase, body, { allowReassign, endDate, approvedBy } = {}) {
+  const r = await updateCaseTx(user, kase, body, { allowReassign, endDate, approvedBy });
   // Customer cases: ask the customer for a rating once the change is saved.
   if (r.closedNow) setImmediate(() => require("./csat").onCaseClosed(kase.id));
   return r;
 }
-async function updateCaseTx(user, kase, body, { allowReassign }) {
+async function updateCaseTx(user, kase, body, { allowReassign, endDate, approvedBy }) {
   let closedNow = false;
   return tx(async (c) => {
     const sets = [];
@@ -325,7 +328,8 @@ async function updateCaseTx(user, kase, body, { allowReassign }) {
       set("status", status);
       if (nowClosed && !wasClosed) {
         closedNow = true;
-        set("end_date", d.toISODate(d.today()));
+        // An approved close request: End date is the day the owner asked to close (see closereq.js).
+        set("end_date", endDate || d.toISODate(d.today()));
         vals.push(new Date());
         sets.push(`closed_at = $${vals.length}`);
         set("resolution", resolution);
@@ -342,9 +346,9 @@ async function updateCaseTx(user, kase, body, { allowReassign }) {
         // Reopened: the old resolution stays in the timeline; a new one is required at the next close.
         sets.push("end_date = NULL", "closed_at = NULL", "resolution = NULL", "root_cause = NULL", "resolved_by = NULL", "resolved_at = NULL");
       }
-      await addActivity(c, kase.id, user, {
-        kind: nowClosed && !wasClosed ? "ปิดเคส" : !nowClosed && wasClosed ? "เปิดเคสใหม่" : "เปลี่ยน Status",
-        detail: resolution ? `Status: ${kase.status || "-"} → ${status}\nResolution: ${resolution}` : `Status: ${kase.status || "-"} → ${status}`,
+      await addActivity(c, kase.id, approvedBy || user, {
+        kind: nowClosed && !wasClosed ? (approvedBy ? "อนุมัติปิดเคส" : "ปิดเคส") : !nowClosed && wasClosed ? "เปิดเคสใหม่" : "เปลี่ยน Status",
+        detail: (approvedBy ? `${approvedBy.display_name} อนุมัติคำขอปิดของ ${user.display_name} (End date ${endDate})\n` : "") + (resolution ? `Status: ${kase.status || "-"} → ${status}\nResolution: ${resolution}` : `Status: ${kase.status || "-"} → ${status}`),
         system: !resolution,
       });
       await logChange(c, kase, user, "status", kase.status, status);
@@ -416,5 +420,5 @@ async function deleteCase(user, kase, reason) {
 module.exports = {
   TRANSFERRED, isTransferred, isTransferredStatus,
   loadCases, getCase, canSee, activities, addActivity, createCase, updateCase, editStartDate, deleteCase,
-  ensureLookup, logChange, toCase, CASE_SELECT, SEVERITIES, severityOf, customerSeverityOf, ROOT_CAUSES, RESOLUTION_MIN, STATUS_HELP,
+  ensureLookup, logChange, toCase, CASE_SELECT, checkResolution, rcaMod, SEVERITIES, severityOf, customerSeverityOf, ROOT_CAUSES, RESOLUTION_MIN, STATUS_HELP,
 };
