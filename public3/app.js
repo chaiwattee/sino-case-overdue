@@ -607,6 +607,28 @@ ${showOwner ? `<td><a href="#/owner/${encodeURIComponent(c.ownerId)}">${esc(c.ow
   }
 
   // ------------------------------------------------------------ overview
+  /** Under the overview search box: customer requests (REQ) and service requests (SR) that match what is typed. */
+  function bindQuickSearch(inp, box) {
+    if (!inp || !box) return;
+    let timer = null, seq = 0;
+    inp.addEventListener("input", () => {
+      clearTimeout(timer);
+      const qv = inp.value.trim();
+      if (qv.length < 2) { box.hidden = true; return; }
+      timer = setTimeout(async () => {
+        const my = ++seq;
+        const r = await api("/search/quick?" + qs({ q: qv })).catch(() => ({ intake: [], sr: [] }));
+        if (my !== seq) return;
+        const n = r.intake.length + r.sr.length;
+        box.hidden = !n;
+        if (!n) return;
+        const IK = { pending: "รอรับเคส", claimed: "รับแล้ว", rejected: "ไม่รับ", duplicate: "ซ้ำ" };
+        box.innerHTML = `<div class="qs-head">ผลค้นหา “${esc(qv)}” ในเคสจากลูกค้าและคำขอบริการ · กด “ค้นหา” เพื่อดูเคส</div>
+${r.intake.map((x) => `<a class="qs-row" href="#/intake/${x.id}"><span class="chip c-r1">เคสจากลูกค้า</span><span class="mono">${esc(x.req_no)}</span><span>${esc(x.customer || "-")} · ${esc(x.subject || "")}</span><span class="muted">${IK[x.status] || esc(x.status)} · ${fd(isoDay(new Date(x.created_at)))}</span></a>`).join("")}
+${r.sr.map((x) => `<a class="qs-row" href="#/sr/${x.id}"><span class="chip c-all">คำขอบริการ</span><span class="mono">${esc(x.no)}</span><span>${esc(x.title)}${x.customer ? ` · ${esc(x.customer)}` : ""}</span><span class="muted">${esc(x.statusLabel)} · ${esc(x.team)}</span></a>`).join("")}`;
+      }, 250);
+    });
+  }
   async function viewOverview(params) {
     setNav("overview");
     const [data, ikHtml, extHtml, lk, srAll, cp] = await Promise.all([api("/overview?" + qs({ source: params.source })), intakeSection(), Promise.all([extPendingSection(), transferPendingSection()]).then((a) => a.join("")), lookups(), srList("team"), api("/customers/pending").catch(() => ({ list: [] }))]);
@@ -655,18 +677,15 @@ ${cols.map((c) => `<div class="rw-col"><div class="rw-count">${c.items.length ||
 <div class="actions">
 ${lvl("export") === "all" ? `<a class="btn" href="api/export?${qs({ from: daysAgo(29), to: daysAgo(0), source: params.source })}">Export Excel (30 วัน)</a>` : ""}
 ${can("case_create") ? `<a class="btn primary" href="#/case/new">เปิดเคสใหม่</a>` : ""}</div></div>
-${cpHtml}
-${extHtml}
-${ikHtml}
-${srHtml}
 <form class="ofilters" id="flt" onsubmit="return false">
 <label class="f">ทีม<select name="source"><option value="">ทุกทีมที่เห็นได้ (${data.sources.length})</option>${teamOpts}</select></label>
-<label class="f">ค้นหาเคส<input type="search" name="q" placeholder="เลขเคส, CS, งาน, User, Resolution"></label>
+<label class="f">ค้นหา<input type="search" name="q" placeholder="เลขเคส, CS, REQ, SR, ลูกค้า, งาน, User" autocomplete="off"></label>
 <div class="site-pick">${comboBox("site", "", lk.site, { allowNew: false, required: false, label: "ลูกค้า" })}</div>
 <label class="f">สถานะเคส<select name="st"><option value="open">ยังไม่ปิด</option><option value="closed">ปิดแล้ว</option><option value="all">ทั้งหมด</option>
 <optgroup label="ทีละ Status">${lk.status.map((x) => `<option value="s:${esc(x)}" title="${esc(statusHelp(x))}">${esc(x)}</option>`).join("")}</optgroup></select></label>
 <button class="btn primary" type="submit" id="flt-go">ค้นหา</button>
 </form>
+<div id="qs-box" hidden></div>
 <div class="kpis">
 ${kpi("all", "เคสที่ยังไม่ปิด", openTotal, params.source ? esc(teamLabel(params.source)) : "ทุกทีมที่เห็นได้")}
 ${kpi("normal", `ปกติ (วันที่ 0–${cfg.alert1Day - 1})`, k.normal || 0, "ยังไม่ถึงรอบแจ้งเตือน")}
@@ -675,6 +694,10 @@ ${kpi("r2", `แจ้งรอบ 2 (วันที่ ${cfg.alert2Day}–${cf
 ${kpi("overdue", "เกิน Due", k.overdue || 0, "แจ้งทุกวันจนกว่าจะปิด")}
 ${kpi("closed", "ปิดแล้ว (30 วัน)", k.sla.closed, k.sla.pct === null ? "-" : `ทัน SLA ${k.sla.pct}%`)}
 </div>
+${cpHtml}
+${extHtml}
+${ikHtml}
+${srHtml}
 <section class="card"><div class="title"><h2>SLA runway: เคสที่ยังเปิดอยู่ทั้งหมด</h2><span>1 จุด = 1 เคส · คลิกเพื่อเปิดเคส</span></div>
 ${data.runway.length ? runwayHtml : `<div class="empty">ไม่มีเคสที่เปิดอยู่</div>`}
 <div class="rw-zones">${segs.map((s) => `<span><span class="dot d-${s}" aria-hidden="true"></span>${STAGE[s]} (${RANGE[s]}): ${k[s]}</span>`).join("")}</div>
@@ -703,6 +726,7 @@ ${lvl("audit_view") !== "none" ? `<section class="card"><div class="title"><h2>�
     };
     f.site.placeholder = "ทุกลูกค้า · พิมพ์เพื่อค้นหา";
     bindCombo(f, "site", lk.site, { allowNew: false });
+    bindQuickSearch(f.q, document.getElementById("qs-box"));
     f.onsubmit = (e) => {
       e.preventDefault();
       go();
@@ -3088,7 +3112,8 @@ ${i.site ? "" : `<label class="f">ลูกค้า (Site)<select name="site"><
   async function viewIntake(params) {
     setNav("intake");
     const status = params.status || "pending";
-    const [d, hl] = await Promise.all([api("/intake?status=" + status), api("/hotline").catch(() => null)]);
+    const qv = String(params.q || "").trim();
+    const [d, hl] = await Promise.all([api("/intake?" + qs({ status, q: qv })), api("/hotline").catch(() => null)]);
     setIntakeBadge(d.counts.pending);
     INTAKE_CACHE = Object.fromEntries(d.items.map((i) => [i.id, i]));
     const tab = (k, l, n) => `<a class="btn ${status === k ? "primary" : ""}" href="#/intake?status=${k}">${l} (${n})</a>`;
@@ -3101,12 +3126,22 @@ ${status === "pending" || status === "held" ? `<td class="${Date.now() - new Dat
     const heads = status === "pending" || status === "held" ? "<th>รอมาแล้ว</th><th>ดูแลเคสล่าสุด</th>" : status === "claimed" ? "<th>รับเมื่อ</th><th>User / เคส</th>" : "<th>ปิดเมื่อ</th><th>เหตุผล</th>";
     $app.innerHTML = `<div class="head"><div><h1>เคสจากลูกค้า</h1><p>ลูกค้าแจ้งผ่าน LINE OA, Email หรือลิงก์ ทุกคนในทีมรับได้ · SLA ${cfg.slaDays} วันเริ่มนับเมื่อรับเคส · ยังไม่มีคนรับเกิน 1 ชม. ระบบเตือนทีมทุกชั่วโมง 06:00–22:00</p></div>
 <div class="actions">${can("case_create") ? `<button class="btn" type="button" id="ml-btn">สร้างลิงก์ส่งให้ลูกค้าเอง</button>` : ""}${lvl("settings_manage") === "all" ? `<a class="btn" href="#/intake-admin">ตั้งค่า LINE OA, Email และ API</a>` : ""}</div></div>
-${hl ? hotlineCard(hl) : ""}
-<div class="chips" style="gap:8px">${tab("pending", "รอรับเคส", d.counts.pending)}${d.counts.held ? tab("held", "พักไว้ตรวจ", d.counts.held) : ""}${tab("claimed", "รับแล้ว 30 วัน", d.counts.claimed)}${tab("closed", "ปฏิเสธ / ซ้ำ 90 วัน", d.counts.closed)}</div>
-${status === "pending" && d.items.length ? `<div class="ik-grid">${d.items.map(ikCard).join("")}</div>` : `<section class="card">${d.items.length ? `<div class="tablewrap"><table style="min-width:820px"><thead><tr><th>เลขรับแจ้ง</th><th>Severity</th><th>ลูกค้า / หัวข้อ</th><th>ผู้ติดต่อ</th>${heads}</tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty">${status === "pending" ? "ไม่มีเคสรอรับ" : "ไม่มีรายการ"}</div>`}</section>`}
+<form class="pg-search" id="ik-q" role="search"><input type="search" name="q" value="${esc(qv)}" placeholder="ค้นหา: เลข REQ, ลูกค้า, หัวข้อ, ผู้แจ้ง, email, เบอร์" aria-label="ค้นหาเคสจากลูกค้า"><button class="btn primary">ค้นหา</button>${qv ? `<a class="btn" href="#/intake">ล้าง</a>` : ""}</form>
+${qv ? `<section class="card"><div class="title"><h2>ผลค้นหา “${esc(qv)}” (${d.items.length})</h2><span>ทุกสถานะ · ย้อนหลัง 1 ปี</span></div>${d.items.length ? `<div class="tablewrap"><table style="min-width:760px"><thead><tr><th>เลขรับแจ้ง</th><th>ลูกค้า / หัวข้อ</th><th>ผู้แจ้ง</th><th>สถานะ</th><th>แจ้งเมื่อ</th><th>เคส</th></tr></thead><tbody>
+${d.items.map((i) => `<tr class="click" data-href="#/intake/${i.id}"><td><a class="mono" href="#/intake/${i.id}">${esc(i.req_no)}</a></td><td><strong>${ikCustomer(i)}</strong><div class="muted" style="font-size:13px">${esc(i.subject)}</div></td><td>${esc(i.contact_name)}<div class="muted" style="font-size:13px">${ikContact(i)}</div></td>
+<td>${{ pending: chip("r1", "รอรับเคส"), claimed: chip("ok", "รับแล้ว"), rejected: chip("closed", "ไม่รับ"), duplicate: chip("closed", "ซ้ำ") }[i.status] || esc(i.status)}</td><td>${fdt(i.created_at)}</td><td>${i.case_id ? `<a href="#/case/${i.case_id}">${esc(i.case_no || "เคส")}</a><div class="muted" style="font-size:12px">${esc(i.owner_name || "")}</div>` : "-"}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">ไม่พบเคสจากลูกค้าที่ตรงกับคำค้น</div>`}</section>` : ""}
+${qv ? "" : hl ? hotlineCard(hl) : ""}
+${qv ? "" : `<div class="chips" style="gap:8px">${tab("pending", "รอรับเคส", d.counts.pending)}${d.counts.held ? tab("held", "พักไว้ตรวจ", d.counts.held) : ""}${tab("claimed", "รับแล้ว 30 วัน", d.counts.claimed)}${tab("closed", "ปฏิเสธ / ซ้ำ 90 วัน", d.counts.closed)}</div>
+${status === "pending" && d.items.length ? `<div class="ik-grid">${d.items.map(ikCard).join("")}</div>` : `<section class="card">${d.items.length ? `<div class="tablewrap"><table style="min-width:820px"><thead><tr><th>เลขรับแจ้ง</th><th>Severity</th><th>ลูกค้า / หัวข้อ</th><th>ผู้ติดต่อ</th>${heads}</tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty">${status === "pending" ? "ไม่มีเคสรอรับ" : "ไม่มีรายการ"}</div>`}</section>`}`}
 <dialog id="dlg"></dialog>`;
     bindRowLinks();
     bindIntakeActions($app);
+    const ikq = document.getElementById("ik-q");
+    if (ikq) ikq.onsubmit = (e) => {
+      e.preventDefault();
+      const v = ikq.q.value.trim();
+      location.hash = v ? "#/intake?" + qs({ q: v }) : "#/intake";
+    };
     const mb = document.getElementById("ml-btn");
     if (mb) mb.onclick = openManualLinkDialog;
     bindHotline(() => viewIntake(params));
@@ -4097,7 +4132,7 @@ ${showAssignee ? `<td>${r.assignee ? esc(r.assignee.name) : "-"}</td>` : ""}
       const n = (f) => L.filter(f).length;
       const open = n((r) => ["pending", "info", "in_progress", "overdue"].includes(r.status));
       const parts = [["c-r1", "รออนุมัติ", n((r) => r.status === "pending")], ["c-r1", "ขอข้อมูลเพิ่ม", n((r) => r.status === "info")], ["c-normal", "กำลังดำเนินการ", n((r) => r.status === "in_progress")], ["c-overdue", "เลย Target", n((r) => r.status === "overdue")], ["c-closed", "เสร็จแล้ว", n((r) => r.status === "done")]];
-      return `<a class="sr-scope ${k === scope ? "on" : ""}" role="tab" aria-selected="${k === scope}" href="#/sr?${qs({ scope: k })}">
+      return `<a class="sr-scope ${k === scope ? "on" : ""}" role="tab" aria-selected="${k === scope}" href="#/sr?${qs({ scope: k, q: params.q || "" })}">
 <span class="sr-scope-l">${l}</span><span class="sr-scope-h">${SC_HINT[k] || ""}</span>
 <span class="sr-scope-n"><b>${open}</b><span>ยังไม่เสร็จ</span><span class="muted">จากทั้งหมด</span><span class="muted">${L.length}</span></span>
 <span class="sr-scope-p">${parts.filter((x) => x[2]).map(([c, t, v]) => `<span class="chip ${c}"><span>${t}</span><b>${v}</b></span>`).join("") || `<span class="muted">ยังไม่มีคำขอ</span>`}</span></a>`;
@@ -4107,7 +4142,9 @@ ${showAssignee ? `<td>${r.assignee ? esc(r.assignee.name) : "-"}</td>` : ""}
     all.forEach((r) => (teamCount[r.team] = teamCount[r.team] || { label: r.teamLabel, n: 0 }) && teamCount[r.team].n++);
     const teamOrder = ME.teams.map((t) => t.key).filter((k) => teamCount[k]).concat(Object.keys(teamCount).filter((k) => !ME.teams.some((t) => t.key === k)));
     const team = teamCount[params.team] ? params.team : "";
-    const items = team ? all.filter((r) => r.team === team) : all;
+    const qv = String(params.q || "").trim().toLowerCase();
+    const hit = (r) => !qv || [r.srNo, r.title, r.customer, r.detail, r.requester && r.requester.name, r.assignee && r.assignee.name, r.assigneeExtName, r.teamLabel].some((x) => x && String(x).toLowerCase().includes(qv));
+    const items = (team ? all.filter((r) => r.team === team) : all).filter(hit);
     const groups = [
       ["", "ทั้งหมด", () => true],
       ["pending", "รออนุมัติ", (r) => r.status === "pending"],
@@ -4119,10 +4156,12 @@ ${showAssignee ? `<td>${r.assignee ? esc(r.assignee.name) : "-"}</td>` : ""}
     ];
     const g = groups.find((x) => x[0] === (params.status || "")) || groups[0];
     const rows = items.filter(g[2]);
-    const link = (o) => "#/sr?" + qs({ scope, team, status: params.status || "", ...o });
+    const link = (o) => "#/sr?" + qs({ scope, team, status: params.status || "", q: params.q || "", ...o });
     $app.innerHTML = `<div class="pagehead"><div><h1>คำขอบริการ</h1><p class="muted" style="margin:0">ขอให้ทีม Engineer ช่วยทำงานภายใน เช่น ข้อมูล รายงาน ตั้งค่า · แยกจากเคสลูกค้า</p></div>
 ${canAsk ? `<a class="btn primary" href="#/sr/new">+ คำขอใหม่</a>` : ""}</div>
 ${canAsk && m.profileMissing.length ? `<div class="banner warn">กรอกหน่วยงาน ตำแหน่ง และเบอร์โทรของคุณก่อนส่งคำขอแรก <a href="#/profile">กรอกข้อมูล</a></div>` : ""}
+<form class="pg-search" id="sr-q" role="search"><input type="search" name="q" value="${esc(params.q || "")}" placeholder="ค้นหา: เลข SR, หัวข้อ, ลูกค้า, ผู้ขอ, ผู้รับผิดชอบ" aria-label="ค้นหาคำขอบริการ"><button class="btn primary">ค้นหา</button>${qv ? `<a class="btn" href="${"#/sr?" + qs({ scope, team, status: params.status || "" })}">ล้าง</a>` : ""}</form>
+${qv ? `<p class="hint" style="margin:0">ค้นใน “${esc(scopes.find((x) => x[0] === scope)[1])}” พบ ${items.length} รายการ · เปลี่ยนแท็บด้านล่างเพื่อค้นในรายการอื่น</p>` : ""}
 ${scopes.length > 1 ? `<div class="sr-scopes" role="tablist">${scopes.map(scopeCard).join("")}</div>` : ""}
 ${teamOrder.length > 1 ? `<div class="fpills" style="margin-top:8px" aria-label="ทีม"><span class="hint" style="align-self:center;margin-right:2px">ทีม</span><a class="fpill ${team ? "" : "on"}" href="${link({ team: "", status: "" })}">ทุกทีม <b>${all.length}</b></a>${teamOrder.map((k) => `<a class="fpill ${k === team ? "on" : ""}" href="${link({ team: k, status: "" })}">${esc(teamCount[k].label)} <b>${teamCount[k].n}</b></a>`).join("")}</div>` : ""}
 <div class="fpills" style="margin-top:8px">${groups.map(([k, l, f]) => {
@@ -4136,6 +4175,11 @@ ${rows.map((r) => `<tr data-go="#/sr/${r.id}" tabindex="0"><td><span class="mono
 <td>${srChip(r)}${r.ext ? `<br><span class="hint">ขอเลื่อนเป็น ${dlong(r.ext.target)}</span>` : ""}</td>
 <td>${r.targetDate ? `${dlong(r.targetDate)}${r.status === "in_progress" && r.daysLeft != null ? `<br><span class="hint">อีก ${r.daysLeft} วันทำการ</span>` : r.status === "overdue" ? `<br><span class="hint" style="color:var(--bad,#C0283C)">เลย ${r.overdueDays} วันทำการ</span>` : ""}` : `${dlong(r.requestedDate)}<br><span class="hint">ที่ขอ</span>`}</td></tr>`).join("") || `<tr><td colspan="5" class="muted" style="padding:28px;text-align:center">ไม่มีคำขอ${g[0] ? "ในสถานะนี้" : ""}</td></tr>`}
 </tbody></table></div></section>`;
+    const srq = document.getElementById("sr-q");
+    if (srq) srq.onsubmit = (e) => {
+      e.preventDefault();
+      location.hash = "#/sr?" + qs({ scope, team, status: params.status || "", q: srq.q.value.trim() });
+    };
     $app.querySelectorAll("tr[data-go]").forEach((tr) => {
       tr.onclick = (e) => {
         if (!e.target.closest("a")) location.hash = tr.dataset.go;

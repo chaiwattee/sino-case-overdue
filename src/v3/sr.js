@@ -757,6 +757,24 @@ function mount(api, { wrap }) {
   }));
   // What the "คำขอบริการ" menu number counts for the signed-in person: assigned requests due within 1 workday or late,
   // finished requests waiting for them to confirm (last 30 days), and for managers the requests waiting for approval.
+  // Overview search box: customer requests (REQ) and service requests (SR) that match, alongside the case list.
+  // SR: what this person may see (team scope = all for admins/observers, their teams for managers, own for others).
+  api.get("/search/quick", wrap(async (req, res) => {
+    const qv = String(req.query.q || "").trim().toLowerCase().slice(0, 80);
+    if (qv.length < 2) return res.json({ intake: [], sr: [] });
+    const has = (...xs) => xs.some((x) => x && String(x).toLowerCase().includes(qv));
+    const srs = (await list(req.user, "team")).filter((r) => has(r.srNo, r.title, r.customer, r.requester && r.requester.name, r.assignee && r.assignee.name, r.assigneeExtName, r.teamLabel)).slice(0, 8)
+      .map((r) => ({ id: r.id, no: r.srNo, title: r.title, customer: r.customer || "", status: r.status, statusLabel: r.statusLabel, team: r.teamLabel }));
+    let ik = [];
+    if (!["requester", "viewer"].includes(req.user.role)) {
+      const like = `%${qv.replace(/[%_\\]/g, (m) => "\\" + m)}%`;
+      ik = await all(`SELECT i.id, i.req_no, i.subject, i.status, coalesce(i.site, i.customer_text) AS customer, i.contact_name, i.created_at, i.case_id
+        FROM intakes i WHERE NOT i.is_test AND i.created_at > now() - interval '365 days'
+          AND concat_ws(' ', i.req_no, i.subject, i.site, i.customer_text, i.contact_name, i.contact_email, i.customer_ref) ILIKE $1
+        ORDER BY i.created_at DESC LIMIT 8`, [like]);
+    }
+    res.json({ intake: ik, sr: srs });
+  }));
   api.get("/sr/attention", wrap(async (req, res) => {
     const u = req.user;
     const mine = (await list(u, "assigned")).filter((r) => r.rawStatus === "in_progress" && (r.status === "overdue" || (r.daysLeft != null && r.daysLeft <= 1)));

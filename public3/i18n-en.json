@@ -2733,5 +2733,8 @@
 "ถอนคำขอ": "Withdraw request",
 "การตอบสนองของ Manager": "Manager response",
 "ขอหลัง Due": "Asked after Due",
-"ขอก่อน Due": "Asked before Due"
+"ขอก่อน Due": "Asked before Due",
+"ในเคสจากลูกค้าและคำขอบริการ": "in customer requests and service requests",
+"กด “ค้นหา” เพื่อดูเคส": "press “Search” for cases",
+"ทุกสถานะ · ย้อนหลัง 1 ปี": "all statuses · last 12 months"
 }

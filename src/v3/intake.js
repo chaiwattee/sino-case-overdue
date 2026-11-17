@@ -859,7 +859,14 @@ function mountInternal(api, { need, wrap: w }) {
     if (st === "claimed") where = "i.status = 'claimed' AND i.claimed_at > now() - interval '30 days'";
     else if (st === "closed") where = "i.status IN ('rejected','duplicate') AND i.claimed_at > now() - interval '90 days'";
     else if (st === "held") where = "i.status = 'pending' AND i.held";
-    const rows = await all(`${LIST} WHERE ${where} ORDER BY i.created_at ${st === "pending" || st === "held" ? "ASC" : "DESC"} LIMIT 300`);
+    // Search: every status, the last year, by number, subject, customer, contact.
+    const qv = String(req.query.q || "").trim().slice(0, 80);
+    const vals = [];
+    if (qv.length >= 2) {
+      vals.push(`%${qv.replace(/[%_\\]/g, (m) => "\\" + m)}%`);
+      where = "i.created_at > now() - interval '365 days' AND concat_ws(' ', i.req_no, i.subject, i.site, i.customer_text, i.contact_name, i.contact_email, i.contact_phone, i.customer_ref) ILIKE $1";
+    }
+    const rows = await all(`${LIST} WHERE ${where} ORDER BY i.created_at ${!vals.length && (st === "pending" || st === "held") ? "ASC" : "DESC"} LIMIT 300`, vals);
     const counts = await one(
       `SELECT count(*) FILTER (WHERE status='pending')::int AS pending, count(*) FILTER (WHERE status='pending' AND held)::int AS held,
               count(*) FILTER (WHERE status='claimed' AND claimed_at > now() - interval '30 days')::int AS claimed,

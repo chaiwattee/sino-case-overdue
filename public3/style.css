@@ -1027,3 +1027,12 @@ tr.pj-off td { opacity: .55; }
 @media (max-width: 560px) { .ext-adm-row { flex-direction: column; gap: 8px; } .ext-adm-row .f { flex: none; width: 100%; } .ext-adm-due { padding-top: 0; } }
 .ext-adm-due { padding-top: 26px; }
 .ext-adm .actions.ext-adm-act { justify-content: flex-start; margin: 0; }
+
+/* Search on overview / customer requests / service requests */
+.pg-search { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.pg-search input { flex: 1 1 280px; min-width: 0; }
+#qs-box { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 10px 14px; display: flex; flex-direction: column; gap: 4px; }
+#qs-box .qs-head { font-size: 13px; color: var(--muted); font-weight: 600; margin-bottom: 2px; }
+#qs-box .qs-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 6px 8px; border-radius: 8px; color: inherit; text-decoration: none; }
+#qs-box .qs-row:hover, #qs-box .qs-row:focus-visible { background: var(--row); }
+#qs-box .qs-row .mono { color: var(--accent); }
