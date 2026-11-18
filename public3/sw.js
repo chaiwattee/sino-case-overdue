@@ -1,6 +1,6 @@
 // Service worker: lets the site install as an app, open when the network is poor, and show push notifications.
 // Data (/api/…) is never cached: cases always come fresh from the server.
-const CACHE = "case-sla-v21";
+const CACHE = "case-sla-v22";
 const SHELL = ["/", "/style.css", "/app.js", "/i18n.js", "/i18n-en.json", "/icons/icon-192.png", "/sinostech-logo.png"];
 
 self.addEventListener("install", (e) => {
@@ -14,12 +14,12 @@ self.addEventListener("activate", (e) => {
 self.addEventListener("fetch", (e) => {
   const r = e.request;
   const u = new URL(r.url);
-  if (r.method !== "GET" || u.origin !== location.origin || u.pathname.startsWith("/api/") || u.pathname.startsWith("/csat/") || /^\/(u|r)\//.test(u.pathname)) return;
+  if (r.method !== "GET" || u.origin !== location.origin || u.pathname.startsWith("/api/") || u.pathname.startsWith("/auth/") || u.pathname.startsWith("/csat/") || /^\/(u|r)\//.test(u.pathname)) return;
   e.respondWith(
     fetch(r)
       .then((res) => {
         // Only keep real pages and files (not the login redirect).
-        if (res.ok && !res.redirected && (r.mode === "navigate" || SHELL.some((p) => u.pathname === p))) {
+        if (res.ok && !res.redirected && (r.mode === "navigate" ? u.pathname === "/" : SHELL.some((p) => u.pathname === p))) {
           const copy = res.clone();
           caches.open(CACHE).then((c) => c.put(r.mode === "navigate" ? "/" : u.pathname, copy));
         }
