@@ -482,6 +482,10 @@ function startJobs() {
   const mailIntake = require("./mailintake");
   job("intake-email", "*/2 * * * *", j.intake, () => mailIntake.poll());
   job("intake-email-cleanup", "50 2 * * *", j.intake, () => mailIntake.cleanup());
+  // Updates from NICE (copy of support@ in a shared mailbox): read every 3 minutes, old processed mail removed nightly.
+  const niceMail = require("./nicemail");
+  job("nice-mail", "*/3 * * * *", true, () => niceMail.poll());
+  job("nice-mail-cleanup", "55 2 * * *", true, () => niceMail.cleanup());
   console.log("[v3 jobs]", Object.entries(j).map(([k, v]) => `${k}=${v ? "on" : "off"}`).join(" "));
 }
 

@@ -80,6 +80,7 @@ require("./custinfo").mount(api, { wrap });
 require("./custreport").mount(api, { wrap, need, perms });
 require("./pm").mount(api, { wrap, loadVisible });
 require("./transfer").mount(api, { wrap, loadVisible });
+require("./nicemail").mount(api, { wrap, need, loadVisible });
 require("./projects").mount(api, { wrap });
 require("./push").mount(api, { wrap });
 require("./casefiles").mount(api, { wrap, loadVisible, perms, jsonFile });
@@ -378,6 +379,7 @@ api.get("/case/:id", wrap(async (req, res) => {
     ma: await require("./pm").maFor(c.id),
     files: await require("./casefiles").list(c.id),
     activities: acts,
+    nice: await require("./nicemail").forCase(c.id),
     alerts,
     changes,
     transfer: await require("./transfer").forCaseView(u, c),

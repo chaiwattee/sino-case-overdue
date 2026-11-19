@@ -1047,3 +1047,16 @@ tr.pj-off td { opacity: .55; }
 .ngrp-alerts .na-w { grid-column: 2; font-size: 12.5px; color: var(--muted); }
 .ngrp-alerts .na-w.t-over { color: var(--over-fg); font-weight: 600; }
 .ngrp-alerts .na-more { font-size: 13px; padding: 4px 8px; }
+
+/* NICE updates by email */
+.d-nice { background: #7C3AED; }
+.act.nice .k { color: #7C3AED; }
+.act.nice .x { background: color-mix(in srgb, #7C3AED 7%, transparent); border: 1px solid color-mix(in srgb, #7C3AED 22%, transparent); border-radius: 10px; padding: 10px 12px; margin-top: 4px; }
+.nice-card .title { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.nice-strip { display: grid; gap: 8px; margin-top: 10px; }
+.nice-strip > div { border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.nice-strip span { font-size: 13px; color: var(--muted); }
+.nice-strip b { font-size: 15px; }
+.nice-q { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 10px 0; border-top: 1px solid var(--row); }
+.nice-q:first-of-type { border-top: none; }
+.nice-qb { display: flex; gap: 6px; flex-wrap: wrap; align-items: flex-start; }

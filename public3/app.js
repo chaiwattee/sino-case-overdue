@@ -1062,9 +1062,10 @@ ${allowNew ? `<span class="hint">${newHint}</span>` : ""}</div>`;
     return `<div class="acts">${acts
       .map((a) => {
         const t = new Date(a.created_at);
-        return `<div class="act ${a.is_system ? "sys" : ""}"><div class="dt"><strong>${fd(a.activity_date)}</strong>${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}</div>
-<span class="dot ${dotFor(a)}" aria-hidden="true"></span>
-<div><div class="k">${esc(a.kind)}</div><div class="x">${esc(a.detail)}</div><div class="by">${esc(a.by || (a.is_system ? "ระบบ" : "-"))}${
+        const nice = a.kind === "อัปเดตจาก NICE";
+        return `<div class="act ${nice ? "nice" : a.is_system ? "sys" : ""}"><div class="dt"><strong>${fd(a.activity_date)}</strong>${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}</div>
+<span class="dot ${nice ? "d-nice" : dotFor(a)}" aria-hidden="true"></span>
+<div><div class="k">${esc(a.kind)}</div><div class="x">${esc(a.detail)}</div><div class="by">${esc(nice ? "NICE (จาก email)" + (a.by ? " · ผูกโดย " + a.by : "") : a.by || (a.is_system ? "ระบบ" : "-"))}${
           a.activity_date !== isoDay(t) ? ` · บันทึกเมื่อ ${fdt(a.created_at)}` : ""
         }</div></div></div>`;
       })
@@ -1175,6 +1176,7 @@ ${custFiles.files.length ? `<section class="card"><div class="title"><h2>รู�
 ${data ? teamFilesCard(data.files || [], c, permsC) : ""}
 ${isNew ? "" : closeCardHtml(closeData)}
 ${isNew ? "" : extCard(c, extData.extensions, closed, permsC)}
+${!isNew && (c.csNumber || data.nice) ? niceCard(data.nice, c) : ""}
 ${isNew ? `<section class="card"><h2>ก่อนเปิดเคส</h2><p class="muted" style="margin:0;font-size:14px">กรอก Site, Task และ Status ให้ครบ ระบบจะส่ง email เตือน User ในวันที่ ${cfg.alert1Day}, ${cfg.alert2Day} และทุกวันหลังเกิน Due ถ้ายังไม่ปิดเคส</p></section>` : `
 <section class="card"><div><h2>Activity / Detail</h2><div class="hint" style="margin-top:4px">ทุกบันทึกมีวันที่และชื่อผู้บันทึก แก้หรือลบย้อนหลังไม่ได้</div></div>
 ${permsC.edit ? `<form id="af" class="stack">
@@ -1195,8 +1197,17 @@ ${actsHtml(data.activities)}</section>`}
       bindTransferCard(c, data.transfer);
       bindChecklist(c);
       bindTeamFiles(c);
+      bindNiceCard(c, id);
     }
     const f = document.getElementById("cf");
+    if (isNew) {
+      let pre = null;
+      try { pre = JSON.parse(sessionStorage.getItem("nicePrefill") || "null"); sessionStorage.removeItem("nicePrefill"); } catch (e) {}
+      if (pre && f) {
+        if (f.cs_number && pre.cs) f.cs_number.value = pre.cs;
+        if (f.task && pre.task) f.task.value = pre.task;
+      }
+    }
     bindCombo(f, "site", lk.site, { newLabel: (v) => `+ ใช้ชื่อใหม่ “${esc(v)}” (ต้องให้ Manager อนุมัติ)` });
     f.status.addEventListener("change", () => (document.getElementById("st-hint").textContent = statusHelp(f.status.value)));
     // The owner list follows the team picked: members of that team (plus the current owner), keeping the choice when it still fits.
@@ -2273,7 +2284,7 @@ ${bkBanner}${testBanner}
     const lkChips = (k) => byKind(k).map((l) => `<span class="lk ${l.is_new ? "new" : ""} ${l.active ? "" : "off"}" title="${l.is_new ? `เพิ่มโดย ${esc(l.created_by || "-")} ${fdt(l.created_at)}` : ""}">${esc(l.value)}${l.is_new ? ` <span class="chip c-r1">ใหม่</span>` : ""}
 <button type="button" data-lk="${l.id}" aria-label="แก้ ${esc(l.value)}">แก้</button></span>`).join("");
     $app.innerHTML = `
-<div class="head"><div><h1>ตั้งค่าระบบ</h1><p>แทน tab Settings ในไฟล์ Excel เดิม แก้ได้เฉพาะ Admin</p></div><div class="actions"><a class="btn" href="#/intake-admin">รับแจ้งเคสจากลูกค้า: LINE OA, Email และ API</a></div></div>
+<div class="head"><div><h1>ตั้งค่าระบบ</h1><p>แทน tab Settings ในไฟล์ Excel เดิม แก้ได้เฉพาะ Admin</p></div><div class="actions"><a class="btn" href="#/nice-admin">อัปเดตจาก NICE</a><a class="btn" href="#/intake-admin">รับแจ้งเคสจากลูกค้า: LINE OA, Email และ API</a></div></div>
 ${s.cert && !s.cert.error ? `<div class="banner ${s.cert.daysLeft <= 21 ? "warn" : "ok"}">ใบรับรอง HTTPS ${esc(s.cert.issuer)} ใช้ได้ถึง ${fd(s.cert.validTo, true)} (อีก ${s.cert.daysLeft} วัน)${s.cert.daysLeft <= 21 ? " ต้องต่ออายุ ระบบแจ้งทาง Telegram และ email ทุกวันจนกว่าจะต่ออายุ" : ""}</div>` : ""}
 ${(() => {
       const w = s.webRisk || {};
@@ -3259,6 +3270,107 @@ ${prior.length ? `<div class="k">คำขอก่อนหน้าจาก L
       toast("ยืนยันแล้ว ระบบแจ้งทีมให้รับเคส และตอบ email ลูกค้า (ถ้ามาทาง email)", 5000);
       viewIntakeItem(i.id);
     };
+  }
+
+  // ---------------------------------------------------------- NICE updates by email
+  function niceCard(n, c) {
+    const wait = n && n.waitingSince ? Math.max(0, Math.round((Date.now() - new Date(n.waitingSince)) / 3600000)) : null;
+    const imp = n && n.impact ? `<span class="chip ${/critical|high/i.test(n.impact) ? "c-overdue" : "c-r1"}">${esc(n.impact)}</span>` : "-";
+    return `<section class="card nice-card"><div class="title"><h2>อัปเดตจาก NICE</h2><button class="btn" type="button" id="nice-pull">⟳ ดึงจาก NICE ตอนนี้</button></div>
+${n ? `<div class="nice-strip"><div><span>NICE Impact</span><b>${imp}</b></div><div><span>NICE ตอบล่าสุด</span><b>${fdt(n.lastAt)}</b></div><div><span>รอฝั่งเรา</span><b class="${wait != null ? "t-over" : ""}">${wait != null ? `ใช่ · ${wait < 1 ? "เพิ่งตอบ" : wait < 24 ? wait + " ชม." : Math.floor(wait / 24) + " วัน"}` : "ไม่"}</b></div></div>
+<p class="hint" style="margin:8px 0 0">"รอฝั่งเรา" = NICE ตอบมาแล้วยังไม่มี Activity จากทีมหลังจากนั้น</p>` : `<p class="muted" style="margin:0;font-size:14px">ยังไม่มี email จาก NICE สำหรับ ${esc(c.csNumber)} ระบบตรวจกล่องจดหมายทุก 3 นาที</p>`}
+<p class="hint" id="nice-msg" style="margin:6px 0 0"></p></section>`;
+  }
+  function bindNiceCard(c, id) {
+    const b = document.getElementById("nice-pull");
+    if (!b) return;
+    b.addEventListener("click", async () => {
+      b.disabled = true;
+      const m = document.getElementById("nice-msg");
+      try {
+        const r = await post(`/case/${Number(id)}/nice-pull`);
+        if (r.matched) return viewCase(id);
+        m.textContent = r.poll && r.poll.error ? `อ่านกล่องจดหมายไม่สำเร็จ: ${r.poll.error}` : "ไม่มีอัปเดตใหม่จาก NICE";
+      } catch (e) {
+        m.textContent = e.message;
+      } finally {
+        b.disabled = false;
+      }
+    });
+  }
+
+  async function viewNiceAdmin() {
+    setNav("settings");
+    const $ = (id) => document.getElementById(id);
+    const [d, um] = await Promise.all([api("/nice-admin"), api("/nice/unmatched")]);
+    const s = d.settings, st = d.status || {};
+    const STL = { imported: "นำเข้าแล้ว", unmatched: "ไม่พบเคส", skipped: "ข้าม", ignored: "ไม่นำเข้า", error: "ผิดพลาด" };
+    $app.innerHTML = `
+<div class="crumb"><a href="#/settings">ตั้งค่าระบบ</a> / อัปเดตจาก NICE</div>
+<div class="head"><div><h1>อัปเดตจาก NICE</h1><p>email จาก NICE ที่ส่งเข้า support@ ถูกบันทึกเป็น Activity ในเคสที่มี CS Number ตรงกัน</p></div></div>
+<div class="grid2">
+<section class="card"><h2>ตั้งค่า</h2>
+<form id="nf" class="stack">
+<label class="chk"><input type="checkbox" id="nf-on" ${s.enabled ? "checked" : ""}> เปิดใช้ (อ่านทุก 3 นาที)</label>
+<label class="f">กล่องที่อ่าน (shared mailbox ที่เป็นสมาชิกของ support@)<input type="email" id="nf-mb" value="${esc(s.mailbox)}" placeholder="nice-sync@sinostech.co.th"><span class="hint">support@ เป็น Distribution list อ่านตรงไม่ได้ · สิทธิ์ Graph ของแอปต้องจำกัดเฉพาะกล่องนี้ (Exchange RBAC for Applications) · email อื่นที่ไม่ใช่จาก NICE ในกล่องนี้ถูกลบทันที</span></label>
+<label class="f">ผู้ส่งที่ยอมรับ<input type="text" id="nf-from" value="${esc(s.senders.join(", "))}"></label>
+<label class="f">เก็บ email NICE ในกล่องกี่วัน<input type="number" id="nf-keep" min="7" max="365" value="${s.keepDays}"><span class="hint">ข้อความถูกเก็บใน Activity ของเคสแล้ว</span></label>
+<div class="right" style="gap:8px;display:flex;justify-content:flex-end"><button class="btn" type="button" id="nf-poll">อ่านกล่องตอนนี้</button><button class="btn primary" type="submit">บันทึก</button></div>
+<p class="hint" id="nf-msg"></p></form>
+<p class="hint" style="margin-top:10px">${d.mock ? "โหมดข้อมูลจำลอง: ไม่อ่านกล่องจริง · " : ""}อ่านล่าสุด ${st.at ? fdt(st.at) : "-"}${st.error ? ` · <span class="t-over">${esc(st.error)}</span>` : ""} · 7 วัน: นำเข้า ${d.stats.imported || 0} · ไม่พบเคส ${d.stats.unmatched || 0} · ไม่นำเข้า ${d.stats.ignored || 0}</p></section>
+<section class="card"><div class="title"><h2>NICE ที่ยังไม่ตรงกับเคส (${um.items.length})</h2></div>
+${um.items.map((x) => `<div class="nice-q"><div><strong class="mono">${esc(x.cs_number)}</strong> · ${esc(x.customer || "-")} ${x.impact ? `<span class="chip c-r1">${esc(x.impact)}</span>` : ""}<div style="font-size:13px">${esc(x.description || x.subject || "")}</div><div class="muted" style="font-size:12px">${fdt(x.nice_at || x.received_at)} · ${esc(x.updated_by || "NICE")}</div></div>
+<div class="nice-qb"><button class="btn primary" type="button" data-nlink="${x.id}">ผูกกับเคส…</button><button class="btn" type="button" data-nnew="${x.id}">เปิดเคสใหม่จากนี้</button><button class="btn" type="button" data-nskip="${x.id}">ข้าม</button></div></div>`).join("") || `<p class="muted" style="margin:0">ไม่มีรายการ</p>`}
+</section></div>
+<section class="card"><h2>ทดสอบกับ email ตัวอย่าง</h2><p class="hint">วางหัวเรื่องและเนื้อหา email จาก NICE เพื่อดูว่าระบบอ่านได้อย่างไร (ไม่แตะกล่องจริง)</p>
+<label class="f">หัวเรื่อง<input type="text" id="ns-subj" placeholder="NICE Customer Support - Customer update for Case CS5089477, High"></label>
+<label class="f">เนื้อหา<textarea id="ns-body" rows="6"></textarea></label>
+<div class="right" style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" type="button" id="ns-dry">อ่านอย่างเดียว</button><button class="btn" type="button" id="ns-run">นำเข้าจริง</button></div>
+<pre id="ns-out" class="mono" style="white-space:pre-wrap;font-size:12px;margin:8px 0 0"></pre></section>
+<section class="card"><h2>ล่าสุด</h2><div class="tablewrap"><table><thead><tr><th>เวลา NICE</th><th>CS</th><th>สถานะ</th><th>เคส</th><th>โดย</th></tr></thead><tbody>
+${d.recent.map((r) => `<tr><td>${fdt(r.nice_at || r.received_at)}</td><td class="mono">${esc(r.cs_number || "-")}</td><td>${esc(STL[r.status] || r.status)}${r.reason ? ` <span class="muted" style="font-size:12px">${esc(r.reason)}</span>` : ""}</td><td>${r.case_id ? `<a href="#/case/${r.case_id}" class="mono">${esc(r.case_no || "#" + r.case_id)}</a>` : "-"}</td><td>${esc(r.updated_by || "")}</td></tr>`).join("") || `<tr><td colspan="5" class="muted">ยังไม่มี</td></tr>`}
+</tbody></table></div></section>`;
+    const msg = (t) => ($("nf-msg").textContent = t);
+    $("nf").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      try {
+        await post("/nice-admin", { enabled: $("nf-on").checked, mailbox: $("nf-mb").value.trim(), senders: $("nf-from").value, keepDays: $("nf-keep").value }, "PUT");
+        msg("บันทึกแล้ว");
+      } catch (err) { msg(err.message); }
+    });
+    $("nf-poll").addEventListener("click", async () => {
+      try {
+        const r = await post("/nice-admin/poll");
+        if (r.skipped) return msg(r.skipped);
+        msg(`อ่าน ${r.read || 0} · นำเข้า ${r.imported || 0} · ไม่พบเคส ${r.unmatched || 0} · ลบ (ไม่ใช่ NICE) ${r.deleted || 0}`);
+      } catch (err) { msg(err.message); }
+    });
+    const sim = async (dryRun) => {
+      try {
+        const r = await post("/nice-admin/simulate", { subject: $("ns-subj").value, body: $("ns-body").value, dryRun });
+        const p = r.parsed;
+        $("ns-out").textContent = `${r.status ? "ผล: " + (STL[r.status] || r.status) + "\n" : ""}CS: ${p.cs || "-"}\nImpact: ${p.impact || "-"}\nโดย: ${p.updatedBy || "-"} · ${p.niceAtText || "-"}\nลูกค้า: ${p.customer || "-"}\nPortal: ${p.portal || "-"}${p.merged ? "\n(ข้อความซ้ำ 2 รอบ รวมเหลือ 1)" : ""}\n\n${p.body}`;
+      } catch (err) { $("ns-out").textContent = err.message; }
+    };
+    $("ns-dry").addEventListener("click", () => sim(true));
+    $("ns-run").addEventListener("click", () => sim(false).then(() => setTimeout(viewNiceAdmin, 600)));
+    $app.querySelectorAll("[data-nlink]").forEach((b) => b.addEventListener("click", async () => {
+      const ref = prompt("เลขเคส (เช่น CASE-2026-11-0142) หรือ id ของเคส");
+      if (!ref) return;
+      try {
+        const r = await post(`/nice/unmatched/${b.dataset.nlink}/link`, { case: ref.trim() });
+        location.hash = `#/case/${r.caseId}`;
+      } catch (err) { alert(err.message); }
+    }));
+    $app.querySelectorAll("[data-nnew]").forEach((b) => b.addEventListener("click", () => {
+      const x = um.items.find((i) => String(i.id) === b.dataset.nnew);
+      try { sessionStorage.setItem("nicePrefill", JSON.stringify({ cs: x.cs_number, task: x.description || "" })); } catch (e) {}
+      location.hash = "#/case/new";
+    }));
+    $app.querySelectorAll("[data-nskip]").forEach((b) => b.addEventListener("click", async () => {
+      if (!confirm("ข้ามรายการนี้? email จะไม่ถูกนำเข้าเคสใด")) return;
+      try { await post(`/nice/unmatched/${b.dataset.nskip}/skip`); viewNiceAdmin(); } catch (err) { alert(err.message); }
+    }));
   }
 
   async function viewIntakeAdmin() {
@@ -7179,6 +7291,7 @@ ${rows.slice(0, 12).map(([p, t]) => `<tr class="click" data-href="#/projects/${p
         case "password": return viewPassword();
         case "intake": return parts[1] ? await viewIntakeItem(parts[1]) : await viewIntake(params);
         case "intake-admin": return await viewIntakeAdmin();
+        case "nice-admin": return await viewNiceAdmin();
         case "skills": return await viewSkills(params);
         case "kpi": return await viewKpi(params);
         case "workload": return await viewWorkload(params);
