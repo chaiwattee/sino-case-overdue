@@ -603,6 +603,18 @@ ${showOwner ? `<td><a href="#/owner/${encodeURIComponent(c.ownerId)}">${esc(c.ow
       .join("")}</tbody></table></div>`;
   }
 
+  /** Compact list (no horizontal scroll): cases waiting for close/cancel approval on the overview. */
+  function pendingCloseTable(cases) {
+    const age = (c) => (c.daysOverdue ? `<span class="t-over">วันที่ ${c.age} · เกิน ${c.daysOverdue} วัน</span>` : `วันที่ ${c.age ?? "-"}`);
+    return `<table class="pc-table"><thead><tr><th style="width:24%">เลขเคส / ลูกค้า</th><th>งาน</th><th style="width:18%">User / ทีม</th><th style="width:16%">Due / อายุเคส</th><th style="width:14%">สถานะ</th></tr></thead><tbody>
+${cases.map((c) => `<tr class="click" data-href="#/case/${c.id}">
+<td><a href="#/case/${c.id}" class="mono">${esc(caseRef(c))}</a><div style="font-weight:600">${esc(c.site || "-")}</div></td>
+<td>${sevChip(c.severity)} <span style="font-size:13px">${esc(c.task || "")}</span></td>
+<td><a href="#/owner/${encodeURIComponent(c.ownerId)}">${esc(c.owner || "-")}</a><div class="muted" style="font-size:12px">${esc(c.sourceLabel || "")}</div></td>
+<td>${fd(c.dueDate)}<div style="font-size:12px">${age(c)}</div></td>
+<td><span class="chip c-r2">รออนุมัติปิด</span><div class="muted" style="font-size:12px;margin-top:4px">${esc(c.status || "")}</div></td></tr>`).join("")}</tbody></table>`;
+  }
+
   const FIELD = { extension: "ขยายเวลา (Due)", severity: "Severity", start_date: "Start date", target_date: "Target date", status: "Status", owner: "User", deleted: "ลบเคส", resolution: "Resolution", team: "ทีม" };
   const DIR = { later: "เลื่อนออกไป", earlier: "เลื่อนเข้ามา", set: "ใส่ค่าใหม่", cleared: "ลบค่าออก" };
   function changeRows(changes, { empty = "ยังไม่มีประวัติการแก้ไข" } = {}) {
@@ -720,7 +732,7 @@ ${kpi("overdue", "เกิน Due", k.overdue || 0, "แจ้งทุกว�
 ${kpi("closed", "ปิดแล้ว (30 วัน)", k.sla.closed, k.sla.pct === null ? "-" : `ทัน SLA ${k.sla.pct}%`)}
 </div>
 ${cpHtml}
-${(data.pendingClose || []).length ? `<section class="card"><div class="title"><h2>รออนุมัติปิด / ยกเลิกเคส (${data.pendingClose.length})</h2><span>User ส่งคำขอแล้ว รอ Manager อนุมัติ · วันปิดนับจากวันที่ขอ</span></div>${caseTable(data.pendingClose)}</section>` : ""}
+${(data.pendingClose || []).length ? `<section class="card"><div class="title"><h2>รออนุมัติปิด / ยกเลิกเคส (${data.pendingClose.length})</h2><span>User ส่งคำขอแล้ว รอ Manager อนุมัติ · วันปิดนับจากวันที่ขอ</span></div>${pendingCloseTable(data.pendingClose)}</section>` : ""}
 ${extHtml}
 ${ikHtml}
 ${srHtml}

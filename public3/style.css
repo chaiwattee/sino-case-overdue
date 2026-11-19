@@ -1063,3 +1063,12 @@ tr.pj-off td { opacity: .55; }
 
 /* runway: case waiting for close approval */
 .rw-dot.pc { box-shadow: 0 0 0 2px var(--card, #fff), 0 0 0 4px #7C3AED; }
+
+.pc-table { width: 100%; table-layout: fixed; }
+.pc-table td, .pc-table th { overflow-wrap: anywhere; vertical-align: top; }
+@media (max-width: 760px) {
+  .pc-table thead { display: none; }
+  .pc-table tr { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; padding: 10px 0; border-bottom: 1px solid var(--row); }
+  .pc-table td { border: 0; padding: 0; }
+  .pc-table td:nth-child(2) { grid-column: 1 / -1; }
+}
