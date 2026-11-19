@@ -175,8 +175,19 @@ function headerMap(m) {
 /** Returns "deleted" (not from NICE), or the stored row's status. */
 async function processMessage(s, m) {
   const from = lower(m.from && m.from.emailAddress && m.from.emailAddress.address);
-  if (!s.senders.includes(from)) return "deleted";
   const mid = m.internetMessageId || `graph-${m.id}`;
+  if (!s.senders.includes(from)) {
+    // Looks like a NICE case mail from an address not in the list: keep it and show it to the admin instead of deleting.
+    if (!CS_RE.test(String(m.subject || "")) || !/nice/i.test(`${m.subject || ""} ${from}`)) return "deleted";
+    if (await one("SELECT id FROM nice_mails WHERE message_id = $1", [mid])) return "duplicate";
+    const p = parse(m);
+    await q(
+      `INSERT INTO nice_mails (message_id, cs_number, status, reason, sender, subject, received_at)
+       VALUES ($1,$2,'ignored',$3,$4,$5,$6) ON CONFLICT (message_id) DO NOTHING`,
+      [mid, p.cs || null, `ผู้ส่ง ${from} ไม่อยู่ในรายการผู้ส่งที่ยอมรับ (เพิ่มในตั้งค่าแล้วกู้ email กลับเข้า Inbox)`, from, p.subject, m.receivedDateTime || new Date().toISOString()]
+    );
+    return "ignored";
+  }
   if (await one("SELECT id FROM nice_mails WHERE message_id = $1", [mid])) return "duplicate";
   const h = headerMap(m);
   const authFail = /\b(dmarc=fail|spf=fail|compauth=fail)\b/i.test(h["authentication-results"] || "");
