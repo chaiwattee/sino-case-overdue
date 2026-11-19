@@ -3307,12 +3307,12 @@ ${n ? `<div class="nice-strip"><div><span>NICE Impact</span><b>${imp}</b></div><
     const STL = { imported: "นำเข้าแล้ว", unmatched: "ไม่พบเคส", skipped: "ข้าม", ignored: "ไม่นำเข้า", error: "ผิดพลาด" };
     $app.innerHTML = `
 <div class="crumb"><a href="#/settings">ตั้งค่าระบบ</a> / อัปเดตจาก NICE</div>
-<div class="head"><div><h1>อัปเดตจาก NICE</h1><p>email จาก NICE ที่ส่งเข้า support@ ถูกบันทึกเป็น Activity ในเคสที่มี CS Number ตรงกัน</p></div></div>
+<div class="head"><div><h1>อัปเดตจาก NICE</h1><p>email จาก NICE ที่ส่งเข้า support@, nexidia@ หรือ wfm@ ถูกบันทึกเป็น Activity ในเคสที่มี CS Number ตรงกัน</p></div></div>
 <div class="grid2">
 <section class="card"><h2>ตั้งค่า</h2>
 <form id="nf" class="stack">
 <label class="chk"><input type="checkbox" id="nf-on" ${s.enabled ? "checked" : ""}> เปิดใช้ (อ่านทุก 3 นาที)</label>
-<label class="f">กล่องที่อ่าน (shared mailbox ที่เป็นสมาชิกของ support@)<input type="email" id="nf-mb" value="${esc(s.mailbox)}" placeholder="nice-sync@sinostech.co.th"><span class="hint">support@ เป็น Distribution list อ่านตรงไม่ได้ · สิทธิ์ Graph ของแอปต้องจำกัดเฉพาะกล่องนี้ (Exchange RBAC for Applications) · email อื่นที่ไม่ใช่จาก NICE ในกล่องนี้ถูกลบทันที</span></label>
+<label class="f">กล่องที่อ่าน (shared mailbox ที่รับสำเนาจาก support@, nexidia@ และ wfm@)<input type="email" id="nf-mb" value="${esc(s.mailbox)}" placeholder="nice-sync@sinostech.co.th"><span class="hint">support@ และ nexidia@ (Distribution list) มีกล่องนี้เป็นสมาชิก · wfm@ (Microsoft 365 Group) ส่งสำเนาผ่าน mail flow rule · สิทธิ์ Graph ของแอปต้องจำกัดเฉพาะกล่องนี้ (Exchange RBAC for Applications) · email อื่นที่ไม่ใช่จาก NICE ในกล่องนี้ถูกลบทันที</span></label>
 <label class="f">ผู้ส่งที่ยอมรับ<input type="text" id="nf-from" value="${esc(s.senders.join(", "))}"></label>
 <label class="f">เก็บ email NICE ในกล่องกี่วัน<input type="number" id="nf-keep" min="7" max="365" value="${s.keepDays}"><span class="hint">ข้อความถูกเก็บใน Activity ของเคสแล้ว</span></label>
 <div class="right" style="gap:8px;display:flex;justify-content:flex-end"><button class="btn" type="button" id="nf-poll">อ่านกล่องตอนนี้</button><button class="btn primary" type="submit">บันทึก</button></div>
