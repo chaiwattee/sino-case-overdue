@@ -689,7 +689,7 @@ ${r.sr.map((x) => `<a class="qs-row" href="#/sr/${x.id}"><span class="chip c-all
     for (let day = 0; day <= cfg.slaDays; day++) cols.push({ day, zone: zoneOf(day), items: data.runway.filter((c) => c.stage !== "overdue" && rwDay(c) === day) });
     const over = data.runway.filter((c) => c.stage === "overdue").sort((a, b) => b.daysOverdue - a.daysOverdue);
     const dotHtml = (c) =>
-      `<a class="rw-dot c-${c.stage}" href="#/case/${c.id}" title="${esc(`${caseRef(c)} · ${c.site || "-"} · ${c.owner || "-"} · วันที่ ${c.age}${longSla(c) ? ` จาก SLA ${c.slaDays} วัน` : ""}${c.daysOverdue ? ` (เกิน ${c.daysOverdue} วัน)` : ""}`)}" aria-label="${esc(`${caseRef(c)} ${c.site || ""} ของ ${c.owner || "-"} วันที่ ${c.age}`)}"></a>`;
+      `<a class="rw-dot c-${c.stage}${c.pendingClose ? " pc" : ""}" href="#/case/${c.id}" title="${esc(`${caseRef(c)} · ${c.site || "-"} · ${c.owner || "-"} · วันที่ ${c.age}${longSla(c) ? ` จาก SLA ${c.slaDays} วัน` : ""}${c.daysOverdue ? ` (เกิน ${c.daysOverdue} วัน)` : ""}${c.pendingClose ? " · รออนุมัติปิด" : ""}`)}" aria-label="${esc(`${caseRef(c)} ${c.site || ""} ของ ${c.owner || "-"} วันที่ ${c.age}`)}"></a>`;
     const dayLabel = (d) => (d === 0 ? "เปิดเคส" : d === cfg.alert1Day ? "แจ้งรอบ 1" : d === cfg.alert2Day ? "แจ้งรอบ 2" : d === cfg.slaDays ? "ครบ Due" : "&nbsp;");
     const runwayHtml = `<div class="runway-wrap"><div class="runway" role="img" aria-label="เคสที่ยังเปิดอยู่ แยกตามจำนวนวันนับจาก Start date">
 ${cols.map((c) => `<div class="rw-col"><div class="rw-count">${c.items.length || ""}</div><div class="rw-dots">${c.items.map(dotHtml).join("")}</div><div class="rw-band z-${c.zone}"></div><div class="rw-day"><strong>วันที่ ${c.day}</strong>${dayLabel(c.day)}</div></div>`).join("")}
@@ -720,6 +720,7 @@ ${kpi("overdue", "เกิน Due", k.overdue || 0, "แจ้งทุกว�
 ${kpi("closed", "ปิดแล้ว (30 วัน)", k.sla.closed, k.sla.pct === null ? "-" : `ทัน SLA ${k.sla.pct}%`)}
 </div>
 ${cpHtml}
+${(data.pendingClose || []).length ? `<section class="card"><div class="title"><h2>รออนุมัติปิด / ยกเลิกเคส (${data.pendingClose.length})</h2><span>User ส่งคำขอแล้ว รอ Manager อนุมัติ · วันปิดนับจากวันที่ขอ</span></div>${caseTable(data.pendingClose)}</section>` : ""}
 ${extHtml}
 ${ikHtml}
 ${srHtml}
@@ -955,7 +956,7 @@ ${list.map((c) => `<tr class="click" data-href="#/case/${c.id}">
 <td>${esc(c.product || "-")}</td>
 <td>${fd(c.startDate)}<div class="hint">Due ${c.extCount ? `<s>${fd(c.origDueDate)}</s> ${fd(c.dueDate)}` : fd(c.dueDate)}</div></td>
 <td>${c.extCount ? `<small class="muted">รวม ${c.totalAge} วัน · ขยาย ${c.extCount} ครั้ง</small>` : ageCell(c)}${c.pendingExtId ? `<div><span class="chip c-r1">รออนุมัติขยาย</span></div>` : ""}</td>
-<td>${statusSel(c)}${c.rcaPending ? `<div style="margin-top:4px">${rcaTag(c)}</div>` : ""}</td>
+<td>${statusSel(c)}${c.pendingCloseId ? `<div style="margin-top:4px"><span class="chip c-r2">รออนุมัติปิด</span></div>` : ""}${c.rcaPending ? `<div style="margin-top:4px">${rcaTag(c)}</div>` : ""}</td>
 <td style="font-size:13px" class="muted">${fdt(c.updatedAt)}</td>
 <td style="text-align:right"><a href="#/case/${c.id}" style="font-weight:600">แก้ไข</a></td></tr>${extRow(c, { before: 5, after: 3 })}`).join("")}</tbody></table></div>` : `<div class="empty">${tab === "open" ? "ไม่มีเคสที่เปิดอยู่ กด “เปิดเคสใหม่” เพื่อเริ่ม" : "ไม่มีเคส"}</div>`}
 </section>

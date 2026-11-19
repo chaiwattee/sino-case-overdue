@@ -1060,3 +1060,6 @@ tr.pj-off td { opacity: .55; }
 .nice-q { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 10px 0; border-top: 1px solid var(--row); }
 .nice-q:first-of-type { border-top: none; }
 .nice-qb { display: flex; gap: 6px; flex-wrap: wrap; align-items: flex-start; }
+
+/* runway: case waiting for close approval */
+.rw-dot.pc { box-shadow: 0 0 0 2px var(--card, #fff), 0 0 0 4px #7C3AED; }

@@ -180,9 +180,10 @@ api.get("/overview", wrap(async (req, res) => {
     owners: ownerRows,
     alertsToday: alerts.map((a) => ({ ...a, case_key: `v3:${a.case_id}` })),
     changes,
+    pendingClose: open.filter((c) => c.pendingCloseId).sort((a, b) => (b.age || 0) - (a.age || 0)).map(ser3),
     topCases: open.filter((c) => c.stage === "overdue" || c.stage === "r2").sort((a, b) => (b.age || 0) - (a.age || 0)).slice(0, 10).map(ser3),
     runway: open.filter((c) => c.age != null).map((c) => ({
-      id: c.id, caseNo: c.caseNo, csNumber: c.csNumber, site: c.site, owner: c.owner, ownerId: ownerId(c), age: c.age, stage: c.stage, daysOverdue: c.daysOverdue || 0, slaDays: c.slaDays,
+      id: c.id, caseNo: c.caseNo, csNumber: c.csNumber, site: c.site, owner: c.owner, ownerId: ownerId(c), age: c.age, stage: c.stage, daysOverdue: c.daysOverdue || 0, slaDays: c.slaDays, pendingClose: !!c.pendingCloseId,
     })),
   });
 }));
