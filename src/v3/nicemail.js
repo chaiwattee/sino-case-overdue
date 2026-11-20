@@ -83,27 +83,37 @@ function parse(m) {
     const r = text.match(new RegExp(`${name}\\s*:\\s*([^\\n]*)`, "i"));
     return r ? r[1].trim() : "";
   };
-  const upd = text.match(/has been updated by\s+(.+?)\s+on\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}(?::\d{2})?)\s*([A-Z]{2,4})?/i);
+  const upd = text.match(/has been (\w+(?: \w+)?) by\s+(.+?)\s+on\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}(?::\d{2})?)\s*([A-Z]{2,4})?/i);
   let latest = "";
   const li = text.search(/Latest Update\s*:/i);
   if (li >= 0) {
     const rest = text.slice(li).replace(/^Latest Update\s*:/i, "");
     const end = rest.search(/\n\s*(Customer Name|Instance|Case Impact|Case Description)\s*:/i);
     latest = end >= 0 ? rest.slice(0, end) : rest.slice(0, 4000);
+  } else {
+    // Resolved / closed mail: no "Latest Update" box; the notes follow the case fields, up to the portal line or sign-off.
+    const di = text.search(/Case Description\s*:[^\n]*\n/i);
+    if (di >= 0) {
+      const rest = text.slice(di).replace(/^Case Description\s*:[^\n]*\n/i, "");
+      const end = rest.search(/\n\s*(To track and view|Kind Regards|Customer Next Update\s*:)/i);
+      latest = end >= 0 ? rest.slice(0, end) : rest.slice(0, 8000);
+    }
   }
+  const action = upd ? upd[1].toLowerCase() : "updated";
   const dd = dedupe(latest.replace(/\s*\[\[URL:[^\]]*\]\]/g, ""));
   const impact = (field("Case Impact") || (subject.match(/,\s*(Critical|High|Medium|Low)\s*$/i) || [])[1] || "").slice(0, 30);
   const portal = (text.match(/Self Service Portal[\s\S]{0,60}?\[\[URL:(https?:\/\/[^\]\s]+)\]\]/i) || [])[1] || "";
   return {
     cs,
     subject: subject.slice(0, 300),
-    updatedBy: upd ? upd[1].trim().slice(0, 120) : "",
-    niceAt: upd ? niceTime(upd[2].length === 16 ? upd[2] + ":00" : upd[2], upd[3]) : null,
-    niceAtText: upd ? `${upd[2]}${upd[3] ? " " + upd[3] : ""}` : "",
+    action,
+    updatedBy: upd ? upd[2].trim().slice(0, 120) : "",
+    niceAt: upd ? niceTime(upd[3].length === 16 ? upd[3] + ":00" : upd[3], upd[4]) : null,
+    niceAtText: upd ? `${upd[3]}${upd[4] ? " " + upd[4] : ""}` : "",
     impact: impact ? impact[0].toUpperCase() + impact.slice(1).toLowerCase() : "",
     customer: field("Customer Name").slice(0, 200),
     description: field("Case Description").slice(0, 500),
-    body: dd.text.slice(0, 5000),
+    body: (action !== "updated" ? `[NICE: ${action}]\n` : "") + dd.text.replace(/\n{3,}/g, "\n\n").slice(0, 8000),
     merged: dd.merged,
     portal: /^https:\/\//i.test(portal) ? portal.slice(0, 500) : "",
   };
