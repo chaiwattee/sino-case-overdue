@@ -7266,15 +7266,15 @@ ${ms ? `<label style="display:flex;gap:8px;align-items:center"><input type="chec
 
   function openTaskForm(d, m, t) {
     if (!d.milestones.length && !t) return toast("เพิ่ม milestone ก่อน แล้วค่อยเพิ่ม task", 5000);
-    const lockTeam = t && t.kind === "sr" && t.sr && !t.srGone;
+    const lockTeam = false; // every field can be edited; a team change moves / reopens the SR
     const f = srDialog(t ? "แก้ไข task" : "เพิ่ม task", `<label class="f">ชื่องาน<input name="name" required minlength="3" maxlength="200" value="${esc(t ? t.name : "")}"></label>
 <div class="formgrid"><label class="f">Milestone<select name="ms">${d.milestones.map((x) => `<option value="${x.id}" ${t && t.milestoneId === x.id ? "selected" : ""}>${esc(x.name)} (${fd(x.due)})</option>`).join("")}</select></label>
 <label class="f">วันเริ่ม<input type="date" name="start" required value="${t ? t.start : m.today}"></label>
-${t ? "" : `<label class="f">กำหนดเสร็จ<input type="date" name="due" required></label>`}</div>
-${t ? `<p class="hint" style="margin:0">เปลี่ยนกำหนดเสร็จด้วยปุ่ม “เลื่อนกำหนด” ในรายละเอียด task (ระบบเก็บเหตุผลและแผนเดิมไว้)</p>` : `<div class="seg pj-kind"><label><input type="radio" name="kind" value="own" checked><span>PM ทำเอง</span></label><label><input type="radio" name="kind" value="sr"><span>มอบให้ทีมอื่น (เปิดคำขอบริการ)</span></label></div>`}
+<label class="f">กำหนดเสร็จ<input type="date" name="due" required value="${t ? t.due : ""}"></label></div>
+${t ? `<label class="f" id="pt-why" hidden>เหตุผลที่เปลี่ยนกำหนดเสร็จ / ทีม<input name="why" maxlength="1000" placeholder="อย่างน้อย 10 ตัวอักษร ระบบบันทึกไว้และแจ้งทีมผู้รับ"><span class="hint">${t.kind === "sr" && t.sr && !t.srGone ? "เปลี่ยนทีม: ถ้า SR ยังไม่อนุมัติ ย้ายไปทีมใหม่ (เลขเดิม) · ถ้าอนุมัติแล้ว ยกเลิก SR เดิมและเปิดใหม่ให้ทีมใหม่ · เปลี่ยนกำหนด: Target ของ SR เปลี่ยนตาม" : "ระบบเก็บแผนเดิมไว้ในประวัติ task"}</span></label>` : ""}
 <div class="formgrid" id="pt-sr" ${t ? (t.kind === "sr" ? "" : "hidden") : "hidden"}><label class="f">ทีม<select name="team" ${lockTeam ? "disabled" : ""}>${m.teams.filter((x) => !m.pmTeams.includes(x.code)).map((x) => `<option value="${x.code}" ${t && t.team === x.code ? "selected" : ""}>${esc(x.label)}</option>`).join("")}</select>${lockTeam ? `<span class="hint">เปิด SR แล้ว เปลี่ยนทีมไม่ได้</span>` : ""}</label>
 <label class="f">ความเร่งด่วน<select name="sev">${m.severities.map((x) => `<option value="${x.key}" ${(t ? t.severity : "normal") === x.key ? "selected" : ""}>${x.label}</option>`).join("")}</select></label>
-<label class="f">เปิดคำขอบริการ<select name="open" ${t && t.sr ? "disabled" : ""}><option value="now" ${t && t.srOpen === "now" ? "selected" : ""}>ตอนบันทึก</option><option value="auto" ${t && t.srOpen === "auto" ? "selected" : ""}>อัตโนมัติ ${m.autoOpenDays} วันทำการก่อนวันเริ่ม</option></select></label></div>
+<label class="f">เปิดคำขอบริการ<select name="open"><option value="now" ${t && t.srOpen === "now" ? "selected" : ""}>ตอนบันทึก</option><option value="auto" ${t && t.srOpen === "auto" ? "selected" : ""}>อัตโนมัติ ${m.autoOpenDays} วันทำการก่อนวันเริ่ม</option></select></label></div>
 <div class="formgrid"><label class="f">ประมาณการ man-day<input type="number" name="md" min="0" step="0.5" value="${t ? t.mdEst : 1}"></label>
 <label class="f">Predecessors<input name="pred" maxlength="100" inputmode="numeric" placeholder="เช่น 4,5" value="${esc(t ? t.pred : "")}"><span class="hint">ลำดับ (No.) ของ task ที่ต้องเสร็จก่อน</span></label></div>
 ${(d.siblings || []).length ? `<label class="f">รอ task ในโปรเจกต์ย่อยอื่น (ไม่บังคับ)<select name="xpred"><option value="">ไม่มี</option>${d.siblings.map((g) => `<optgroup label="${esc(g.project)}">${g.tasks.map((x) => `<option value="${x.id}" ${t && t.xpred.includes(x.id) ? "selected" : ""}>${x.no ? x.no + ". " : ""}${esc(x.name)} (${esc(g.project)})</option>`).join("")}</optgroup>`).join("")}</select><span class="hint">task นี้เริ่มได้เมื่อ task ที่เลือกเสร็จ · โปรเจกต์ใหญ่แสดงเส้นเชื่อม และแจ้ง PM ทั้ง 2 ฝั่งเมื่อมีความเสี่ยง</span></label>` : ""}
@@ -7285,7 +7285,7 @@ ${(d.siblings || []).length ? `<label class="f">รอ task ในโปรเ�
         const body = { name: f.name.value, milestoneId: f.ms.value, start: f.start.value, mdEst: f.md.value, detail: f.detail.value, team: f.team.value, severity: f.sev.value, srOpen: f.open.value, pred: f.pred.value, ownerText: f.owner.value, pct: Number(f.pct.value) || 0,
           ...(f.xpred ? { xpred: f.xpred.value ? [Number(f.xpred.value)] : [] } : {}) };
         if (t) {
-          await post(`/project-tasks/${t.id}`, body, "PUT");
+          await post(`/project-tasks/${t.id}`, { ...body, due: f.due.value, reason: f.why ? f.why.value : "" }, "PUT");
           toast("บันทึกแล้ว");
           route();
         } else {
@@ -7294,6 +7294,16 @@ ${(d.siblings || []).length ? `<label class="f">รอ task ในโปรเ�
           route();
         }
       }, t ? "บันทึก" : "เพิ่ม task");
+    if (t) {
+      const why = () => {
+        const ch = f.due.value !== t.due || (t.kind === "sr" && f.team.value !== t.team);
+        f.querySelector("#pt-why").hidden = !ch;
+        f.why.required = ch;
+        if (ch) f.why.minLength = 10;
+      };
+      f.due.onchange = why;
+      f.team.onchange = why;
+    }
     if (!t) {
       f.querySelectorAll("input[name=kind]").forEach((r) => {
         r.onchange = () => {
@@ -7311,7 +7321,7 @@ ${(d.siblings || []).length ? `<label class="f">รอ task ในโปรเ�
     }
   }
 
-  const PT_EV = { created: "สร้าง task", note: "บันทึก", status: "เปลี่ยนสถานะ", due: "เลื่อนกำหนด", sr_opened: "เปิดคำขอบริการ" };
+  const PT_EV = { created: "สร้าง task", note: "บันทึก", status: "เปลี่ยนสถานะ", due: "เลื่อนกำหนด", sr_opened: "เปิดคำขอบริการ", team: "เปลี่ยนทีม" };
   async function openTask(tid, d, m) {
     const r = await api(`/project-tasks/${tid}`).catch((e) => (toast(e.message, 6000), null));
     if (!r) return;

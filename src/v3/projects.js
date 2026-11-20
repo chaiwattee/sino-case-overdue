@@ -464,9 +464,26 @@ async function updateTask(user, t, p, b) {
   const live = t.kind === "sr" ? await one("SELECT id FROM service_requests WHERE project_task_id = $1 AND status NOT IN ('rejected','cancelled')", [t.id]) : null;
   let team = t.team;
   if (t.kind === "sr" && b.team && b.team !== t.team) {
-    if (live) throw bad("มอบงานไปแล้ว เปลี่ยนทีมไม่ได้ ยกเลิกคำขอบริการเดิมก่อน หรือใช้การเปลี่ยนผู้รับผิดชอบใน SR");
     if (!(await one("SELECT 1 FROM teams WHERE code = $1", [b.team]))) throw bad("เลือกทีม");
     team = b.team;
+  }
+  // Every field can change. A new due date or team also moves the service request (see sr.projectChange).
+  const oldDue = isoDay(t.due_date);
+  const due = b.due ? validDate(b.due, "กำหนดเสร็จ") : oldDue;
+  if (due < start) throw bad("กำหนดเสร็จต้องไม่ก่อนวันเริ่ม");
+  const why = clean(b.reason, 1000);
+  if ((due !== oldDue || team !== t.team) && why.length < 10) throw bad("เปลี่ยนกำหนดเสร็จหรือทีม ใส่เหตุผลอย่างน้อย 10 ตัวอักษร");
+  if (due !== oldDue) {
+    const early = todayIso() <= oldDue;
+    await tx(async (c) => {
+      await c.query(`UPDATE project_tasks SET due_date=$2, ${early ? "kpi_due=$2," : ""} reminded='{}'::jsonb, updated_at=now() WHERE id=$1`, [t.id, due]);
+      await addEvent(c, t.id, "due", why, { from: oldDue, to: due, kpi: early }, user.id);
+    });
+  }
+  let reopen = false;
+  if (live) {
+    const r = await sr.projectChange(user, live.id, { team: team !== t.team ? team : null, due: due !== oldDue ? due : null, reason: why });
+    reopen = !!r.reopen;
   }
   await q(
     `UPDATE project_tasks SET name=$2, detail=$3, milestone_id=$4, start_date=$5, md_est=$6, team=$7, severity=$8, sr_open=$9, owner_text=$10, pred=$11, pct=$12, updated_at=now() WHERE id=$1`,
@@ -474,6 +491,8 @@ async function updateTask(user, t, p, b) {
       t.kind === "own" ? (b.ownerText === undefined ? t.owner_text : clean(b.ownerText, 200) || null) : null, b.pred === undefined ? t.pred : predOf(b.pred), t.kind === "own" ? (b.pct === undefined ? t.pct : pctOf(b.pct)) : 0]
   );
   if (b.xpred !== undefined) await q("UPDATE project_tasks SET xpred = $2 WHERE id = $1", [t.id, await xpredOf(p, b.xpred)]);
+  if (team !== t.team) await tx(async (c) => addEvent(c, t.id, "team", why, { from: t.team, to: team }, user.id)).catch(() => {});
+  if (reopen) await openSr(user, t.id); // approved SR was cancelled: the new team gets a new one
 }
 
 /** The project as the Sinostech standard plan sheet. Predecessors keep pointing at the right line after tasks move. */

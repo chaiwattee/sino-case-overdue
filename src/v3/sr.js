@@ -892,4 +892,48 @@ function mount(api, { wrap }) {
 /** Requests a requester-only account may make (everything else is refused). */
 const REQUESTER_PATHS = [/^\/me$/, /^\/departments$/, /^\/profile(\/avatar|\/lang)?$/, /^\/push(\/subscribe|\/unsubscribe|\/test)?$/, /^\/avatar\/\d+$/, /^\/sr(\/|$)/, /^\/sr-files\//, /^\/kpi\/response$/];
 
-module.exports = { mount, runReminders, kpiByAssignee, createFromProject, REQUESTER_PATHS, SEV, STATUS, OUTCOME, isWorkday, addWorkdays, workdaysBetween, holidays, profileMissing };
+/** PM changed a project task: move its SR to another team and/or a new date.
+ *  - team, not approved yet → the SR moves to the new team (same number), new managers asked to approve;
+ *  - team, already approved → the SR is cancelled (assignee and managers told) and the caller opens a new one;
+ *  - date → requested date (and Target when approved) follow, the assignee is told. */
+async function projectChange(user, srId, { team, due, reason }) {
+  const s = await load(srId);
+  if (!s || ["rejected", "cancelled", "done"].includes(s.status)) return {};
+  const why = clean(reason, 1000) || "PM แก้ task ในโปรเจกต์";
+  if (team && team !== s.team) {
+    const t = await one("SELECT code, label FROM teams WHERE code = $1", [team]);
+    if (!t) throw bad("เลือกทีม");
+    if (["pending", "info"].includes(s.status)) {
+      await tx(async (c) => {
+        await c.query("UPDATE service_requests SET team=$2, status='pending', forwarded_at=now(), forwarded_by=$3, forwarded_from=$4, reminded='{}'::jsonb, updated_at=now() WHERE id=$1", [s.id, t.code, user.id, s.team]);
+        await addEvent(c, s.id, "team_changed", why, { from: s.team_label, to: t.label }, user.id);
+      });
+      const n = await load(s.id);
+      notifyTeamChanged(n, { from: s.team, fromLabel: s.team_label, to: t.code, toLabel: t.label }).catch(() => {});
+    } else {
+      await tx(async (c) => {
+        await c.query("UPDATE service_requests SET status='cancelled', closed_by=$2, closed_at=now(), resolution=$3, updated_at=now() WHERE id=$1", [s.id, user.id, `ย้ายงานไปทีม ${t.label}: ${why}`]);
+        await addEvent(c, s.id, "cancelled", `PM ย้ายงานไปทีม ${t.label} · ${why}`, null, user.id);
+      });
+      const mgrs = await teamManagers(s.team);
+      send([s.assignee_email].filter(Boolean), emails(mgrs), { no: s.sr_no, text: `ยกเลิก: งานย้ายไปทีม ${t.label} · ${s.title}` }, "#5B6675",
+        body(s, `${esc(user.display_name)} (PM) ย้ายงานนี้ไปให้ทีม ${esc(t.label)} คำขอนี้ยกเลิกแล้ว ไม่ต้องทำต่อ`, [["เหตุผล", why]])).catch(() => {});
+      return { reopen: true };
+    }
+  }
+  if (due) {
+    const n = await load(s.id);
+    const approved = !["pending", "info"].includes(n.status);
+    const old = isoDay(approved ? n.target_date : n.requested_date);
+    if (old !== due) {
+      await tx(async (c) => {
+        await c.query(`UPDATE service_requests SET requested_date=$2, ${approved ? "target_date=$2, reminded='{}'::jsonb," : ""} updated_at=now() WHERE id=$1`, [n.id, due]);
+        if (approved) await addEvent(c, n.id, "ext_approved", `PM เลื่อนกำหนดจากโปรเจกต์ · ${why}`, { from: old, to: due }, user.id);
+      });
+      if (approved && n.assignee_email) send([n.assignee_email], [], { no: n.sr_no, text: `Target ใหม่ ${thai(due)} · ${n.title}` }, "#1F5FBF",
+        body(n, `${esc(user.display_name)} (PM) เปลี่ยนกำหนดส่งงานนี้จาก ${thaiDay(old)} เป็น <strong>${thaiDay(due)}</strong>`, [["เหตุผล", why]])).catch(() => {});
+    }
+  }
+  return {};
+}
+module.exports = { projectChange, mount, runReminders, kpiByAssignee, createFromProject, REQUESTER_PATHS, SEV, STATUS, OUTCOME, isWorkday, addWorkdays, workdaysBetween, holidays, profileMissing };
