@@ -1072,3 +1072,7 @@ tr.pj-off td { opacity: .55; }
   .pc-table td { border: 0; padding: 0; }
   .pc-table td:nth-child(2) { grid-column: 1 / -1; }
 }
+
+/* in-app back button */
+.nav-back { width: auto; align-self: flex-start; justify-self: start; display: inline-flex; align-items: center; gap: 6px; margin: 0 0 12px; padding: 6px 12px; min-height: 36px; border: 1px solid var(--line); border-radius: 999px; background: var(--card, #fff); color: var(--fg, inherit); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+.nav-back:hover { border-color: var(--accent, #2563EB); color: var(--accent, #2563EB); }

@@ -7276,7 +7276,38 @@ ${r.reminders.length ? `<h3 style="margin:8px 0 0;font-size:15px">การแ�
 ${rows.slice(0, 12).map(([p, t]) => `<tr class="click" data-href="#/projects/${p.id}?task=${t.id}"><td style="font-weight:600">${esc(t.name)}</td><td>${esc(p.name)}</td><td>${ptDue(t)}</td><td>${ptChip(t)}</td></tr>`).join("")}</tbody></table></div></section>`;
   }
 
+  // In-app history for the "ย้อนกลับ" button (installed app / phone has no browser back button).
+  const NAV_HIST = (() => { try { return JSON.parse(sessionStorage.getItem("navHist") || "[]"); } catch (e) { return []; } })();
+  let navBack = false;
+  function trackNav() {
+    const h = location.hash || "#/";
+    if (navBack) navBack = false;
+    else if (NAV_HIST.length > 1 && NAV_HIST[NAV_HIST.length - 2] === h) NAV_HIST.pop(); // browser / phone back
+    else if (NAV_HIST[NAV_HIST.length - 1] !== h) NAV_HIST.push(h);
+    if (NAV_HIST.length > 50) NAV_HIST.splice(0, NAV_HIST.length - 50);
+    try { sessionStorage.setItem("navHist", JSON.stringify(NAV_HIST)); } catch (e) {}
+  }
+  function addBackButton() {
+    if (NAV_HIST.length < 2 || document.getElementById("nav-back")) return;
+    const b = document.createElement("button");
+    b.type = "button"; b.id = "nav-back"; b.className = "nav-back";
+    b.innerHTML = `<span aria-hidden="true">←</span> ย้อนกลับ`;
+    b.title = "กลับไปหน้าก่อนหน้า";
+    b.onclick = () => {
+      NAV_HIST.pop();
+      const prev = NAV_HIST[NAV_HIST.length - 1] || "#/";
+      navBack = true;
+      try { sessionStorage.setItem("navHist", JSON.stringify(NAV_HIST)); } catch (e) {}
+      if (location.hash === prev) { navBack = false; route(); } else location.hash = prev;
+    };
+    $app.prepend(b);
+  }
   async function route() {
+    trackNav();
+    await routeView();
+    addBackButton();
+  }
+  async function routeView() {
     const { parts, params } = (() => {
       const h = location.hash.replace(/^#/, "") || "/";
       const [path, query] = h.split("?");
