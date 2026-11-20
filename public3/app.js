@@ -603,16 +603,17 @@ ${showOwner ? `<td><a href="#/owner/${encodeURIComponent(c.ownerId)}">${esc(c.ow
       .join("")}</tbody></table></div>`;
   }
 
-  /** Compact list (no horizontal scroll): cases waiting for close/cancel approval on the overview. */
-  function pendingCloseTable(cases) {
-    const age = (c) => (c.daysOverdue ? `<span class="t-over">วันที่ ${c.age} · เกิน ${c.daysOverdue} วัน</span>` : `วันที่ ${c.age ?? "-"}`);
-    return `<table class="pc-table"><thead><tr><th style="width:24%">เลขเคส / ลูกค้า</th><th>งาน</th><th style="width:18%">User / ทีม</th><th style="width:16%">Due / อายุเคส</th><th style="width:14%">สถานะ</th></tr></thead><tbody>
+  /** Compact case list that fits the screen (no horizontal scroll), used on the overview. */
+  function compactCaseTable(cases) {
+    const age = (c) => (c.daysOverdue ? `<span class="t-over">วันที่ ${c.totalAge ?? c.age} · เกิน ${c.daysOverdue} วัน</span>` : `วันที่ ${c.totalAge ?? c.age ?? "-"}`);
+    const due = (c) => (c.extCount ? `<s class="muted">${fd(c.origDueDate)}</s> ${fd(c.dueDate)}` : fd(c.dueDate));
+    return `<table class="pc-table"><thead><tr><th style="width:22%">เลขเคส / ลูกค้า</th><th>งาน</th><th style="width:17%">User / ทีม</th><th style="width:16%">Due / อายุเคส</th><th style="width:15%">สถานะ</th></tr></thead><tbody>
 ${cases.map((c) => `<tr class="click" data-href="#/case/${c.id}">
-<td><a href="#/case/${c.id}" class="mono">${esc(caseRef(c))}</a><div style="font-weight:600">${esc(c.site || "-")}</div></td>
+<td><a href="#/case/${c.id}" class="mono">${esc(caseRef(c))}</a>${c.csNumber ? `<div class="muted" style="font-size:12px">${esc(c.csNumber)}</div>` : ""}<div style="font-weight:600">${esc(c.site || "-")}</div></td>
 <td>${sevChip(c.severity)} <span style="font-size:13px">${esc(c.task || "")}</span></td>
 <td><a href="#/owner/${encodeURIComponent(c.ownerId)}">${esc(c.owner || "-")}</a><div class="muted" style="font-size:12px">${esc(c.sourceLabel || "")}</div></td>
-<td>${fd(c.dueDate)}<div style="font-size:12px">${age(c)}</div></td>
-<td><span class="chip c-r2">รออนุมัติปิด</span><div class="muted" style="font-size:12px;margin-top:4px">${esc(c.status || "")}</div></td></tr>`).join("")}</tbody></table>`;
+<td>${due(c)}<div style="font-size:12px">${age(c)}</div></td>
+<td>${chip(c.stage)}${extTag(c)}${rcaTag(c)}${c.pendingCloseId ? ` <span class="chip c-r2">รออนุมัติปิด</span>` : ""}<div class="muted" style="font-size:12px;margin-top:4px">${esc(c.status || "")}</div></td></tr>`).join("")}</tbody></table>`;
   }
 
   const FIELD = { extension: "ขยายเวลา (Due)", severity: "Severity", start_date: "Start date", target_date: "Target date", status: "Status", owner: "User", deleted: "ลบเคส", resolution: "Resolution", team: "ทีม" };
@@ -732,7 +733,7 @@ ${kpi("overdue", "เกิน Due", k.overdue || 0, "แจ้งทุกว�
 ${kpi("closed", "ปิดแล้ว (30 วัน)", k.sla.closed, k.sla.pct === null ? "-" : `ทัน SLA ${k.sla.pct}%`)}
 </div>
 ${cpHtml}
-${(data.pendingClose || []).length ? `<section class="card"><div class="title"><h2>รออนุมัติปิด / ยกเลิกเคส (${data.pendingClose.length})</h2><span>User ส่งคำขอแล้ว รอ Manager อนุมัติ · วันปิดนับจากวันที่ขอ</span></div>${pendingCloseTable(data.pendingClose)}</section>` : ""}
+${(data.pendingClose || []).length ? `<section class="card"><div class="title"><h2>รออนุมัติปิด / ยกเลิกเคส (${data.pendingClose.length})</h2><span>User ส่งคำขอแล้ว รอ Manager อนุมัติ · วันปิดนับจากวันที่ขอ</span></div>${compactCaseTable(data.pendingClose)}</section>` : ""}
 ${extHtml}
 ${ikHtml}
 ${srHtml}
@@ -747,7 +748,7 @@ ${data.owners.map((o) => `<tr class="click" data-href="#/owner/${encodeURICompon
 <td class="n" style="font-weight:600">${o.open}</td><td class="n">${o.normal}</td><td class="n t-r1">${o.r1}</td><td class="n t-r2">${o.r2}</td><td class="n t-over">${o.overdue}</td>
 <td class="n">${o.sla.pct === null ? "-" : `${o.sla.pct}% <span class="muted">(${o.sla.onTime}/${o.sla.closed})</span>`}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">ยังไม่มีเคส</div>`}
 </section>
-${data.topCases.length ? `<section class="card"><div class="title"><h2>เคสที่ต้องตามด่วน</h2><span>แจ้งรอบ 2 และเกิน Due · 10 อันดับแรก</span></div>${caseTable(data.topCases)}</section>` : ""}
+${data.topCases.length ? `<section class="card"><div class="title"><h2>เคสที่ต้องตามด่วน</h2><span>แจ้งรอบ 2 และเกิน Due · 10 อันดับแรก</span></div>${compactCaseTable(data.topCases)}</section>` : ""}
 <section class="card"><div class="title"><h2>Email แจ้งเตือนที่ส่งวันนี้</h2><span>${(() => { const r = cfg.alertRules || {}; const t = (r.ccTypes || []).map((x) => ALERT[x]); return r.cc && t.length ? `ถึง User · CC ${esc(r.cc)} เฉพาะ${esc(t.join(", "))}` : "ถึง User เท่านั้น"; })()}</span></div>
 ${data.alertsToday.length ? `<div class="tablewrap"><table style="min-width:720px"><thead><tr><th>เวลา</th><th>เลขเคส</th><th>ลูกค้า</th><th>User</th><th>ประเภท</th><th>ผล</th></tr></thead><tbody>
 ${data.alertsToday.map((a) => `<tr><td>${fdt(a.sent_at)}</td><td>${caseCell(a, `#/case/${a.case_id}`)}</td><td style="font-weight:600">${esc(a.site || "-")}</td><td>${esc(a.owner || "-")}</td>
