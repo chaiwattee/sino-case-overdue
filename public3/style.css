@@ -1117,3 +1117,8 @@ main, .topbar-in, .foot { max-width: 1880px; }
 .side > section.fold .fold-sum { display: block; }
 .side > section.fold h2::before { content: "▸ "; }
 .dates-card { grid-template-columns: 1fr 1fr !important; }
+
+/* our reply to NICE (taken from the engineer's email) */
+.d-nice-out { background: #0E7C86; }
+.act.nice-out .k { color: #0E7C86; }
+.act.nice-out .x { background: color-mix(in srgb, #0E7C86 7%, transparent); border: 1px solid color-mix(in srgb, #0E7C86 24%, transparent); border-radius: 10px; padding: 10px 12px; margin-top: 4px; }

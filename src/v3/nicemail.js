@@ -14,6 +14,9 @@ const { q, one, all, getSetting, setSetting, audit } = require("./db");
 
 const KEY = "nice_mail";
 const KIND = "อัปเดตจาก NICE";
+const KIND_OUT = "ตอบ NICE"; // our engineer's own reply to NICE (copied to the mailbox by a mail flow rule / the DL)
+const OUR_DOMAIN = "sinostech.co.th";
+const NICE_RCPT = /@(?:[\w-]+\.)*(nice\.com|service-now\.com)$/i;
 const DEFAULTS = { enabled: false, mailbox: "", senders: ["nice.customer.support@nice.com"], keepDays: 30, folder: "Sino Case - NICE ประมวลผลแล้ว" };
 const CS_RE = /\bCS\d{6,9}\b/i;
 
@@ -142,6 +145,15 @@ function detailOf(r) {
 /** Add a stored NICE mail row to a case as an activity, update the case's NICE fields and tell the owner. */
 async function importInto(row, kase, { notify = true, user = null } = {}) {
   const at = row.nice_at ? new Date(row.nice_at) : new Date(row.received_at || Date.now());
+  if (lower(row.sender).endsWith("@" + OUR_DOMAIN)) {
+    // Our reply: a team activity under the engineer's name (clears "รอฝั่งเรา"); nobody is notified.
+    const u = await one("SELECT id FROM users WHERE lower(email) = $1", [lower(row.sender)]);
+    await q("INSERT INTO case_activities (case_id, activity_date, kind, detail, is_system, created_by) VALUES ($1,$2,$3,$4,false,$5)", [
+      kase.id, bkkDate(at), KIND_OUT, `${bkkTime(at)} น. · ส่งถึง NICE ทาง email\n\n${row.body || "(ไม่มีข้อความ)"}`, u ? u.id : user ? user.id : null,
+    ]);
+    await q("UPDATE nice_mails SET status = 'imported', case_id = $2, reason = NULL WHERE id = $1", [row.id, kase.id]);
+    return;
+  }
   await q("INSERT INTO case_activities (case_id, activity_date, kind, detail, is_system, created_by) VALUES ($1,$2,$3,$4,true,$5)", [
     kase.id, bkkDate(at), KIND, detailOf(row), user ? user.id : null,
   ]);
@@ -186,6 +198,7 @@ function headerMap(m) {
 async function processMessage(s, m) {
   const from = lower(m.from && m.from.emailAddress && m.from.emailAddress.address);
   const mid = m.internetMessageId || `graph-${m.id}`;
+  if (from.endsWith("@" + OUR_DOMAIN)) return processReply(m, from, mid);
   if (!s.senders.includes(from)) {
     // Looks like a NICE case mail from an address not in the list: keep it and show it to the admin instead of deleting.
     if (!CS_RE.test(String(m.subject || "")) || !/nice/i.test(`${m.subject || ""} ${from}`)) return "deleted";
@@ -202,15 +215,55 @@ async function processMessage(s, m) {
   const h = headerMap(m);
   const authFail = /\b(dmarc=fail|spf=fail|compauth=fail)\b/i.test(h["authentication-results"] || "");
   const p = parse(m);
-  const status = authFail ? "ignored" : !p.cs ? "ignored" : "unmatched";
-  const reason = authFail ? "ไม่ผ่านการตรวจผู้ส่ง (SPF/DMARC)" : !p.cs ? "ไม่พบเลข CS" : null;
+  // NICE echoes an update made by one of us ("updated by Pipat …"). With no text it adds nothing; with text it is a
+  // copy of the reply we already took from the engineer's own mail (or one posted on the portal): skip it when that
+  // reply is already in the case, otherwise keep it as our reply.
+  let echo = null;
+  if (p.updatedBy) echo = await one("SELECT id, email FROM users WHERE lower(display_name) = lower($1) AND active LIMIT 1", [p.updatedBy]).catch(() => null);
+  let status = authFail ? "ignored" : !p.cs ? "ignored" : "unmatched";
+  let reason = authFail ? "ไม่ผ่านการตรวจผู้ส่ง (SPF/DMARC)" : !p.cs ? "ไม่พบเลข CS" : null;
+  let sender = from;
+  if (echo && status === "unmatched") {
+    const recent = await one(
+      `SELECT 1 FROM nice_mails WHERE lower(cs_number) = lower($1) AND lower(sender) = lower($2) AND coalesce(nice_at, received_at) > now() - interval '6 hours'`,
+      [p.cs, echo.email]
+    );
+    if (!p.body.trim() || recent) { status = "ignored"; reason = `แจ้งเตือนซ้ำของการตอบจากทีมเรา (${p.updatedBy})`; }
+    else sender = lower(echo.email); // posted on the portal: record it as our reply
+  }
   const row = await one(
     `INSERT INTO nice_mails (message_id, cs_number, status, reason, sender, subject, updated_by, nice_at, impact, customer, description, body, portal_url, received_at)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT (message_id) DO NOTHING RETURNING *`,
-    [mid, p.cs || null, status, reason, from, p.subject, p.updatedBy || null, p.niceAt, p.impact || null, p.customer || null, p.description || null, p.body, p.portal || null, m.receivedDateTime || new Date().toISOString()]
+    [mid, p.cs || null, status, reason, sender, p.subject, p.updatedBy || null, p.niceAt, p.impact || null, p.customer || null, p.description || null, p.body, p.portal || null, m.receivedDateTime || new Date().toISOString()]
   );
   if (!row || status !== "unmatched") return row ? status : "duplicate";
   const kase = await findCase(p.cs);
+  if (!kase) return "unmatched";
+  await importInto(row, kase);
+  return "imported";
+}
+
+/** Text the engineer typed: cut the quoted history and the usual sign-off block. */
+function replyText(text) {
+  const lines = text.split("\n");
+  const cut = lines.findIndex((l) => /^\s*(From|จาก|Sent|ส่ง)\s*:/i.test(l) || /^\s*On .+wrote:\s*$/i.test(l) || /^-{2,}\s*Original Message/i.test(l) || /^_{8,}\s*$/.test(l));
+  return dedupe((cut >= 0 ? lines.slice(0, cut) : lines).join("\n")).text;
+}
+/** Our engineer's mail to NICE (CS number in the subject, NICE among the recipients). Anything else from us is deleted. */
+async function processReply(m, from, mid) {
+  const subject = String(m.subject || "");
+  const cs = ((subject.match(CS_RE) || [])[0] || "").toUpperCase();
+  const rcpts = [...(m.toRecipients || []), ...(m.ccRecipients || [])].map((r) => lower(r.emailAddress && r.emailAddress.address));
+  if (!cs || !rcpts.some((a) => NICE_RCPT.test(a))) return "deleted";
+  if (await one("SELECT id FROM nice_mails WHERE message_id = $1", [mid])) return "duplicate";
+  const body = replyText(toText(m)).slice(0, 8000);
+  const row = await one(
+    `INSERT INTO nice_mails (message_id, cs_number, status, sender, subject, updated_by, nice_at, body, received_at)
+     VALUES ($1,$2,'unmatched',$3,$4,(SELECT display_name FROM users WHERE lower(email) = $3),$5,$6,$5) ON CONFLICT (message_id) DO NOTHING RETURNING *`,
+    [mid, cs, from, subject.slice(0, 300), m.receivedDateTime || new Date().toISOString(), body]
+  );
+  if (!row) return "duplicate";
+  const kase = await findCase(cs);
   if (!kase) return "unmatched";
   await importInto(row, kase);
   return "imported";
@@ -243,7 +296,7 @@ async function ensureFolder(s) {
   folderCache = { mb: s.mailbox, id };
   return id;
 }
-const SELECT = "id,internetMessageId,subject,from,receivedDateTime,body,internetMessageHeaders";
+const SELECT = "id,internetMessageId,subject,from,toRecipients,ccRecipients,receivedDateTime,body,internetMessageHeaders";
 
 let running = false;
 async function poll({ manual = false } = {}) {
@@ -394,4 +447,4 @@ function mount(api, { wrap, need, loadVisible }) {
   }));
 }
 
-module.exports = { KIND, settings, saveSettings, parse, dedupe, poll, cleanup, forCase, matchWaiting, mount };
+module.exports = { KIND, KIND_OUT, processMessage, settings, saveSettings, parse, dedupe, poll, cleanup, forCase, matchWaiting, mount };

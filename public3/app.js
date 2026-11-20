@@ -1127,9 +1127,9 @@ ${allowNew ? `<span class="hint">${newHint}</span>` : ""}</div>`;
     return `<div class="acts">${acts
       .map((a) => {
         const t = new Date(a.created_at);
-        const nice = a.kind === "อัปเดตจาก NICE";
-        return `<div class="act ${nice ? "nice" : a.is_system ? "sys" : ""}"><div class="dt"><strong>${fd(a.activity_date)}</strong>${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}</div>
-<span class="dot ${nice ? "d-nice" : dotFor(a)}" aria-hidden="true"></span>
+        const nice = a.kind === "อัปเดตจาก NICE", niceOut = a.kind === "ตอบ NICE";
+        return `<div class="act ${nice ? "nice" : niceOut ? "nice-out" : a.is_system ? "sys" : ""}"><div class="dt"><strong>${fd(a.activity_date)}</strong>${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}</div>
+<span class="dot ${nice ? "d-nice" : niceOut ? "d-nice-out" : dotFor(a)}" aria-hidden="true"></span>
 <div><div class="k">${esc(a.kind)}</div><div class="x">${esc(a.detail)}</div><div class="by">${esc(nice ? "NICE (จาก email)" + (a.by ? " · ผูกโดย " + a.by : "") : a.by || (a.is_system ? "ระบบ" : "-"))}${
           a.activity_date !== isoDay(t) ? ` · บันทึกเมื่อ ${fdt(a.created_at)}` : ""
         }</div></div></div>`;
