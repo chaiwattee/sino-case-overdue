@@ -1192,7 +1192,9 @@ ${isNew ? "" : closeCardHtml(closeData)}
 ${isNew ? "" : extCard(c, extData.extensions, closed, permsC)}
 ${!isNew && (c.csNumber || data.nice) ? niceCard(data.nice, c) : ""}
 ${isNew ? `<section class="card"><h2>ก่อนเปิดเคส</h2><p class="muted" style="margin:0;font-size:14px">กรอก Site, Task และ Status ให้ครบ ระบบจะส่ง email เตือน User ในวันที่ ${cfg.alert1Day}, ${cfg.alert2Day} และทุกวันหลังเกิน Due ถ้ายังไม่ปิดเคส</p></section>` : `
-<section class="card"><div><h2>Activity / Detail</h2><div class="hint" style="margin-top:4px">ทุกบันทึกมีวันที่และชื่อผู้บันทึก แก้หรือลบย้อนหลังไม่ได้</div></div>
+`}
+</aside></div>
+${isNew ? "" : `<section class="card act-wide"><div><h2>Activity / Detail</h2><div class="hint" style="margin-top:4px">ทุกบันทึกมีวันที่และชื่อผู้บันทึก แก้หรือลบย้อนหลังไม่ได้</div></div>
 ${permsC.edit ? `<form id="af" class="stack">
 <div style="display:grid;grid-template-columns:150px minmax(0,1fr);gap:8px">
 <label class="f">วันที่ทำ<input type="date" name="date" value="${daysAgo(0)}" max="${daysAgo(0)}" required></label>
@@ -1202,7 +1204,6 @@ ${permsC.edit ? `<form id="af" class="stack">
 <p class="hint" id="af-meet" hidden style="margin:-4px 0 0">สรุป Meeting: ผู้เข้าร่วมฝั่งลูกค้า หัวข้อ ข้อตกลง และขั้นต่อไป อย่างน้อย 30 ตัวอักษร จึงนับเป็นงานใน KPI · Onsite (ไปที่ลูกค้า) นับมากกว่า Online · นับสูงสุด 2 ครั้งต่อเคส</p>
 <div class="right"><button class="btn primary" type="submit">เพิ่ม Activity</button></div></form>` : ""}
 ${actsHtml(data.activities)}</section>`}
-</aside></div>
 <dialog id="dlg"></dialog>`;
 
     if (!isNew) {

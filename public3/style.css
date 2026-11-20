@@ -1080,3 +1080,22 @@ tr.pj-off td { opacity: .55; }
 .cm-add { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 10px; }
 .cm-table { width: 100%; min-width: 0; }
 .cm-table td, .cm-table th { overflow-wrap: anywhere; }
+
+/* case page: Activity as a full-width list under the case form */
+.act-wide { margin-top: 18px; }
+.act-wide #af { display: grid; grid-template-columns: 150px 200px minmax(0, 1fr) auto; gap: 10px; align-items: end; }
+.act-wide #af > div:first-child { display: contents !important; }
+.act-wide #af .hint { grid-column: 1 / -1; }
+.act-wide #af .right { align-self: end; }
+.act-wide #af textarea { min-height: 44px; }
+.act-wide .act { grid-template-columns: 90px 14px minmax(0, 1fr); }
+.act-wide .act > div:last-child { display: grid; grid-template-columns: 210px minmax(0, 1fr); grid-template-rows: auto 1fr; column-gap: 18px; }
+.act-wide .act > div:last-child .k { grid-column: 1; grid-row: 1; }
+.act-wide .act > div:last-child .by { grid-column: 1; grid-row: 2; margin-top: 2px; }
+.act-wide .act > div:last-child .x { grid-column: 2; grid-row: 1 / span 2; }
+@media (max-width: 760px) {
+  .act-wide #af { grid-template-columns: 1fr 1fr; }
+  .act-wide #af > label, .act-wide #af .right { grid-column: 1 / -1; }
+  .act-wide .act { grid-template-columns: 64px 14px minmax(0, 1fr); }
+  .act-wide .act > div:last-child { display: block; }
+}
