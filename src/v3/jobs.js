@@ -486,6 +486,8 @@ function startJobs() {
   const niceMail = require("./nicemail");
   job("nice-mail", "*/3 * * * *", true, () => niceMail.poll());
   job("nice-mail-cleanup", "55 2 * * *", true, () => niceMail.cleanup());
+  // NICE / Sino response past the target: tell the case owner once.
+  job("nice-response", "17 * * * *", true, () => require("./niceresp").remind());
   console.log("[v3 jobs]", Object.entries(j).map(([k, v]) => `${k}=${v ? "on" : "off"}`).join(" "));
 }
 

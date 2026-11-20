@@ -81,6 +81,7 @@ require("./custreport").mount(api, { wrap, need, perms });
 require("./pm").mount(api, { wrap, loadVisible });
 require("./transfer").mount(api, { wrap, loadVisible });
 require("./nicemail").mount(api, { wrap, need, loadVisible });
+require("./niceresp").mount(api, { wrap, need, loadVisible });
 require("./projects").mount(api, { wrap });
 require("./push").mount(api, { wrap });
 require("./casefiles").mount(api, { wrap, loadVisible, perms, jsonFile });
@@ -381,6 +382,7 @@ api.get("/case/:id", wrap(async (req, res) => {
     files: await require("./casefiles").list(c.id),
     activities: acts,
     nice: await require("./nicemail").forCase(c.id),
+    niceResp: await require("./niceresp").forCase(c.id).catch((e) => (console.warn("[niceresp]", e.message), null)),
     alerts,
     changes,
     transfer: await require("./transfer").forCaseView(u, c),

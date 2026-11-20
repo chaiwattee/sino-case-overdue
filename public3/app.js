@@ -369,6 +369,7 @@ ${edit || !csOf(c) ? "" : `<div class="rca-sec" id="rca-sec"></div>`}
       ["rank", "#/rank", "อันดับ KPI", !!(ME.leaderboard && ME.leaderboard.visible)],
       ["workload", "#/workload", "ภาระงาน", ["admin", "manager", "observer"].includes(ME.user.role)],
       ["csat", "#/csat", "ความพึงพอใจลูกค้า", ["admin", "manager", "observer", "viewer"].includes(ME.user.role)],
+      ["niceresp", "#/nice-response", "NICE / Sino Response", !["viewer", "requester"].includes(ME.user.role)],
       ["reports", "#/reports", "Report &amp; Export", lvl("export") !== "none" || lvl("reports_manage") !== "none"],
       ["audit", "#/audit", "ประวัติแก้ไข", lvl("audit_view") !== "none"],
       ["users", "#/users", "จัดการผู้ใช้", lvl("users_manage") !== "none"],
@@ -431,7 +432,7 @@ ${edit || !csOf(c) ? "" : `<div class="rca-sec" id="rca-sec"></div>`}
     ["work", "งานของฉัน", ["mine", "intake", "sr", "projects", "pm"]],
     ["view", "ภาพรวม", ["overview", "team", "owner", "customer"]],
     ["team", "ทีมและผลงาน", ["kpi", "response", "rank", "skills", "workload"]],
-    ["report", "Report", ["reports", "csat"]],
+    ["report", "Report", ["reports", "csat", "niceresp"]],
     ["admin", "ผู้ดูแลระบบ", ["users", "settings", "audit"]],
   ];
   /** Opening a menu group that shows a number: list what the number is made of (each REQ / SR), with links. */
@@ -1241,7 +1242,7 @@ ${custFiles.files.length ? `<section class="card"><div class="title"><h2>รู�
 ${data ? teamFilesCard(data.files || [], c, permsC) : ""}
 ${isNew ? "" : closeCardHtml(closeData)}
 ${isNew ? "" : extCard(c, extData.extensions, closed, permsC)}
-${!isNew && (c.csNumber || data.nice) ? niceCard(data.nice, c) : ""}
+${!isNew && (c.csNumber || data.nice) ? niceCard(data.nice, c, data.niceResp) : ""}
 ${isNew ? `<section class="card"><h2>ก่อนเปิดเคส</h2><p class="muted" style="margin:0;font-size:14px">กรอก Site, Task และ Status ให้ครบ ระบบจะส่ง email เตือน User ในวันที่ ${cfg.alert1Day}, ${cfg.alert2Day} และทุกวันหลังเกิน Due ถ้ายังไม่ปิดเคส</p></section>` : `
 `}
 </aside></div>
@@ -3340,15 +3341,28 @@ ${prior.length ? `<div class="k">คำขอก่อนหน้าจาก L
   }
 
   // ---------------------------------------------------------- NICE updates by email
-  function niceCard(n, c) {
-    const wait = n && n.waitingSince ? Math.max(0, Math.round((Date.now() - new Date(n.waitingSince)) / 3600000)) : null;
+  const fmtH = (h) => (h == null ? "-" : h < 1 ? `${Math.round(h * 60)} นาที` : h < 24 ? `${Math.round(h * 10) / 10} ชม.` : `${Math.floor(h / 24)} วัน${Math.round(h % 24) ? ` ${Math.round(h % 24)} ชม.` : ""}`);
+  function niceCard(n, c, r) {
     const imp = n && n.impact ? `<span class="chip ${/critical|high/i.test(n.impact) ? "c-overdue" : "c-r1"}">${esc(n.impact)}</span>` : "-";
+    const now = r && r.now;
+    const ball = now ? `<div class="nr-ball ${now.late ? "late" : now.near ? "near" : "ok"}"><span>ลูกบอลอยู่ฝั่ง <b>${now.ball === "nice" ? "NICE" : "ทีมเรา"}</b></span>
+<strong>${now.ball === "nice" ? "รอ NICE" : "รอฝั่งเรา"} · ${fmtH(now.hours)}</strong>
+<span>${now.ball === "nice" ? "เราตอบล่าสุด" : "NICE ตอบเมื่อ"} ${fdt(now.since)}${now.by ? ` (${esc(now.by)})` : ""} · เป้า ${fmtH(now.target)}${now.ball === "sino" || r.niceMode === "business" ? ` (เวลาทำงาน ${esc(r.hours)})` : ""}${now.late ? ` · <b>เกินเป้า ${fmtH(now.hours - now.target)}</b>` : ""}</span>
+<i style="--w:${Math.min(100, Math.round((now.hours / now.target) * 100))}%"></i></div>` : "";
+    const tl = r && r.timeline.length ? `<div class="nr-tl"><b>ไทม์ไลน์การตอบ</b>${r.timeline.map((x) => `<div><span>${fdt(x.to)}</span><span class="${x.side === "nice" ? "in" : "out"}">${x.side === "nice" ? "NICE ตอบ" : "เราตอบ"}${x.by ? " · " + esc(x.by) : ""}</span><span class="${x.late ? "t-over" : ""}">${fmtH(x.hours)}</span></div>`).join("")}</div>` : "";
     return `<section class="card nice-card"><div class="title"><h2>อัปเดตจาก NICE</h2><button class="btn" type="button" id="nice-pull">⟳ ดึงจาก NICE ตอนนี้</button></div>
-${n ? `<div class="nice-strip"><div><span>NICE Impact</span><b>${imp}</b></div><div><span>NICE ตอบล่าสุด</span><b>${fdt(n.lastAt)}</b></div><div><span>รอฝั่งเรา</span><b class="${wait != null ? "t-over" : ""}">${wait != null ? `ใช่ · ${wait < 1 ? "เพิ่งตอบ" : wait < 24 ? wait + " ชม." : Math.floor(wait / 24) + " วัน"}` : "ไม่"}</b></div></div>
-<p class="hint" style="margin:8px 0 0">"รอฝั่งเรา" = NICE ตอบมาแล้วยังไม่มี Activity จากทีมหลังจากนั้น</p>` : `<p class="muted" style="margin:0;font-size:14px">ยังไม่มี email จาก NICE สำหรับ ${esc(c.csNumber)} ระบบตรวจกล่องจดหมายทุก 3 นาที</p>`}
+${ball}
+${n ? `<div class="nice-strip"><div><span>NICE Impact</span><b>${imp}</b></div><div><span>NICE ตอบล่าสุด</span><b>${fdt(n.lastAt)}</b></div>
+${r ? `<div><span>NICE ตอบเฉลี่ยในเคสนี้</span><b>${fmtH(r.nice.avg)}${r.nice.n ? ` · ${r.nice.n} ครั้ง` : ""}${r.nice.late ? ` <span class="t-over">(เกินเป้า ${r.nice.late})</span>` : ""}</b></div>
+<div><span>เราตอบเฉลี่ยในเคสนี้</span><b>${fmtH(r.sino.avg)}${r.sino.n ? ` · ${r.sino.n} ครั้ง` : ""}${r.sino.late ? ` <span class="t-over">(เกินเป้า ${r.sino.late})</span>` : ""}</b></div>` : ""}</div>` : `<p class="muted" style="margin:0;font-size:14px">ยังไม่มี email จาก NICE สำหรับ ${esc(c.csNumber)} ระบบตรวจกล่องจดหมายทุก 3 นาที</p>`}
+${tl}
+${c.csNumber ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"><button class="btn" type="button" id="nice-manual">NICE ตอบแล้ว (นอก email)</button></div>` : ""}
 <p class="hint" id="nice-msg" style="margin:6px 0 0"></p></section>`;
   }
   function bindNiceCard(c, id) {
+    const mb = document.getElementById("nice-manual");
+    if (mb) mb.onclick = () => srDialog("NICE ตอบแล้ว (นอก email)", `<p class="hint" style="margin:0 0 8px">ใช้เมื่อคุยกับ NICE ทางโทรศัพท์หรือ Teams ระบบหยุดนับเวลารอ NICE และบันทึกเป็น Activity</p>
+<label class="f">NICE ตอบว่าอะไร<textarea name="note" rows="3" required minlength="5" maxlength="1000"></textarea></label>`, async (f) => { await post(`/case/${Number(id)}/nice-manual`, { note: f.note.value }); viewCase(id); }, "บันทึก");
     const b = document.getElementById("nice-pull");
     if (!b) return;
     b.addEventListener("click", async () => {
@@ -3366,10 +3380,48 @@ ${n ? `<div class="nice-strip"><div><span>NICE Impact</span><b>${imp}</b></div><
     });
   }
 
+  async function viewNiceResponse(params) {
+    setNav("niceresp");
+    const $ = (id) => document.getElementById(id);
+    const tab = params.tab === "sino" ? "sino" : "nice";
+    const d = await api(`/reports/nice-response?${qs({ month: params.month || "", team: params.team || "" })}`);
+    const x = d[tab];
+    const tgt = tab === "nice" ? d.settings.niceTargets : d.settings.sinoTargets;
+    const chipImp = (i) => `<span class="chip ${/critical|high/i.test(i) ? "c-overdue" : /medium/i.test(i) ? "c-r1" : "c-normal"}">${esc(i)}</span>`;
+    const maxW = Math.max(1, ...x.weeks.map((w) => w.avg || 0));
+    const note = tab === "nice" ? (d.settings.niceMode === "business" ? `นับเฉพาะเวลาทำงาน (${esc(d.hours)}, ไม่รวมเสาร์-อาทิตย์และวันหยุด)` : "นับ 24 ชม.") : `นับเฉพาะเวลาทำงาน ${esc(d.hours)} ไม่รวมเสาร์-อาทิตย์และวันหยุด`;
+    $app.innerHTML = `
+<div class="head"><div><h1>NICE / Sino Response</h1><p>เวลาตอบระหว่างทีมเรากับ NICE ในเคสที่มี CS Number · ${note} · ข้อมูลประกอบ ไม่นับใน KPI</p></div>
+<div class="actions"><input type="month" id="nr-m" value="${d.month}"><button class="btn" type="button" id="nr-x">Export Excel</button></div></div>
+<div class="nr-tabs"><a href="#/nice-response?${qs({ month: d.month, tab: "nice", team: params.team || "" })}" class="${tab === "nice" ? "on" : ""}">NICE Response <span>เวลาที่ NICE ใช้ตอบเรา</span></a><a href="#/nice-response?${qs({ month: d.month, tab: "sino", team: params.team || "" })}" class="${tab === "sino" ? "on" : ""}">Sino Response <span>เวลาที่ทีมเราใช้ตอบ NICE</span></a></div>
+<div class="kpis nr-k"><div class="kpi"><span>${tab === "nice" ? "NICE" : "ทีมเรา"} ตอบเฉลี่ย</span><b>${fmtH(x.avg)}</b><small>เดือนก่อน ${fmtH(x.prevAvg)}</small></div>
+<div class="kpi"><span>ตอบทันเป้า</span><b class="${x.onTime != null && x.onTime < 80 ? "t-over" : ""}">${x.onTime == null ? "-" : x.onTime + "%"}</b><small>${x.n - x.late} / ${x.n} ครั้ง</small></div>
+<div class="kpi"><span>${tab === "nice" ? "กำลังรอ NICE" : "NICE กำลังรอเรา"}</span><b>${x.waiting.length} เคส</b><small>เกินเป้า ${x.waiting.filter((w) => w.late).length} เคส</small></div>
+<div class="kpi"><span>รอนานสุด</span><b class="${x.waiting[0] && x.waiting[0].late ? "t-over" : ""}">${x.waiting[0] ? fmtH(x.waiting[0].hours) : "-"}</b><small>${x.waiting[0] ? esc(x.waiting[0].cs + " · " + (x.waiting[0].site || "")) : ""}</small></div></div>
+<section class="card"><h2>${tab === "nice" ? "กำลังรอ NICE" : "NICE กำลังรอเรา"} (เรียงจากรอนานสุด)</h2>
+${x.waiting.length ? `<table class="pc-table"><thead><tr><th style="width:24%">เคส / CS</th><th>ลูกค้า</th><th>Impact</th><th>${tab === "nice" ? "เราตอบล่าสุด" : "NICE ตอบเมื่อ"}</th><th>Owner</th><th class="n">รอมาแล้ว</th><th>สถานะ</th></tr></thead><tbody>
+${x.waiting.map((w) => `<tr class="click" data-href="#/case/${w.caseId}"><td><a class="mono" href="#/case/${w.caseId}">${esc(w.caseNo || "#" + w.caseId)}</a><div class="muted" style="font-size:12px">${esc(w.cs)}</div></td><td>${esc(w.site || "-")}</td><td>${chipImp(w.impact)}</td><td>${fdt(w.since)}${w.by ? `<div class="muted" style="font-size:12px">${esc(w.by)}</div>` : ""}</td><td>${esc(w.owner || "-")}</td><td class="n"><b class="${w.late ? "t-over" : ""}">${fmtH(w.hours)}</b></td><td>${w.late ? `<span class="chip c-overdue">เกินเป้า ${fmtH(w.hours - w.target)}</span>` : w.near ? `<span class="chip c-r1">ใกล้เป้า</span>` : `<span class="chip c-normal">ในเป้า</span>`}</td></tr>`).join("")}</tbody></table>` : `<p class="muted" style="margin:0">ไม่มีเคสที่${tab === "nice" ? "รอ NICE" : "NICE รอเรา"}อยู่</p>`}</section>
+<div class="grid2"><section class="card"><h2>ตาม Impact (เดือนนี้)</h2><table class="pc-table"><thead><tr><th>Impact</th><th class="n">ครั้ง</th><th class="n">เฉลี่ย</th><th class="n">เป้า</th><th class="n">ทันเป้า</th></tr></thead><tbody>
+${x.byImpact.map((i) => `<tr><td>${chipImp(i.impact)}</td><td class="n">${i.n}</td><td class="n">${fmtH(i.avg)}</td><td class="n">${fmtH(tgt[i.impact])}</td><td class="n">${i.onTime == null ? "-" : `<span class="chip ${i.onTime >= 80 ? "c-normal" : i.onTime >= 60 ? "c-r1" : "c-overdue"}">${i.onTime}%</span>`}</td></tr>`).join("")}</tbody></table></section>
+<section class="card"><h2>เฉลี่ยรายสัปดาห์</h2>${x.weeks.length ? `<div class="nr-bars">${x.weeks.map((w) => `<div><small>${fmtH(w.avg)}</small><i style="height:${Math.max(4, Math.round(((w.avg || 0) / maxW) * 110))}px"></i><span>${fd(w.week)}</span></div>`).join("")}</div>` : `<p class="muted" style="margin:0">ยังไม่มีข้อมูล</p>`}</section></div>
+${tab === "sino" ? `<section class="card"><h2>ราย engineer (เดือนนี้)</h2>${x.people.length ? `<table class="pc-table"><thead><tr><th>ผู้ตอบ</th><th class="n">ครั้ง</th><th class="n">เฉลี่ย</th><th class="n">เกินเป้า</th></tr></thead><tbody>${x.people.map((p) => `<tr><td>${esc(p.name)}</td><td class="n">${p.n}</td><td class="n">${fmtH(p.avg)}</td><td class="n ${p.late ? "t-over" : ""}">${p.late}</td></tr>`).join("")}</tbody></table>` : `<p class="muted" style="margin:0">ยังไม่มีข้อมูล</p>`}</section>` : ""}`;
+    bindRowLinks();
+    $("nr-m").onchange = () => (location.hash = "#/nice-response?" + qs({ month: $("nr-m").value, tab, team: params.team || "" }));
+    $("nr-x").onclick = () => {
+      const rows = [["ฝั่ง", "เคส", "CS", "ลูกค้า", "ทีม", "Impact", "เริ่มรอ", "ตอบเมื่อ", "ผู้ตอบ", "ชั่วโมง", "เป้า (ชม.)", "เกินเป้า"]].concat(
+        x.rows.map((r) => [tab === "nice" ? "NICE" : "Sino", r.caseNo, r.cs, r.site, r.team, r.impact, new Date(r.from).toLocaleString("th-TH"), new Date(r.to).toLocaleString("th-TH"), r.by || "", r.hours, r.target, r.late ? "Y" : ""]));
+      const csv = "﻿" + rows.map((r) => r.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\r\n");
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+      a.download = `${tab}-response-${d.month}.csv`;
+      a.click();
+    };
+  }
+
   async function viewNiceAdmin() {
     setNav("settings");
     const $ = (id) => document.getElementById(id);
-    const [d, um] = await Promise.all([api("/nice-admin"), api("/nice/unmatched")]);
+    const [d, um, rs] = await Promise.all([api("/nice-admin"), api("/nice/unmatched"), api("/nice-response/settings")]);
     const s = d.settings, st = d.status || {};
     const STL = { imported: "นำเข้าแล้ว", unmatched: "ไม่พบเคส", skipped: "ข้าม", ignored: "ไม่นำเข้า", error: "ผิดพลาด" };
     $app.innerHTML = `
@@ -3389,6 +3441,13 @@ ${n ? `<div class="nice-strip"><div><span>NICE Impact</span><b>${imp}</b></div><
 ${um.items.map((x) => `<div class="nice-q"><div><strong class="mono">${esc(x.cs_number)}</strong> · ${esc(x.customer || "-")} ${x.impact ? `<span class="chip c-r1">${esc(x.impact)}</span>` : ""}<div style="font-size:13px">${esc(x.description || x.subject || "")}</div><div class="muted" style="font-size:12px">${fdt(x.nice_at || x.received_at)} · ${esc(x.updated_by || "NICE")}</div></div>
 <div class="nice-qb"><button class="btn primary" type="button" data-nlink="${x.id}">ผูกกับเคส…</button><button class="btn" type="button" data-nnew="${x.id}">เปิดเคสใหม่จากนี้</button><button class="btn" type="button" data-nskip="${x.id}">ข้าม</button></div></div>`).join("") || `<p class="muted" style="margin:0">ไม่มีรายการ</p>`}
 </section></div>
+<section class="card"><h2>เป้าเวลาตอบ (NICE / Sino Response)</h2><p class="hint" style="margin-top:0">ชั่วโมง · ฝั่ง Sino นับเฉพาะเวลาทำงาน ${esc(rs.hours)} ไม่รวมเสาร์-อาทิตย์และวันหยุด (1 วันทำการ = ${(() => { const [a, b] = rs.hours.split("–").map((t) => t.split(":").map(Number)); return Math.round(((b[0] * 60 + b[1]) - (a[0] * 60 + a[1])) / 6) / 10; })()} ชม.)</p>
+<form id="nr-f"><div class="nr-tg"><b>NICE</b>${["Critical", "High", "Medium", "Low"].map((k) => `<label class="f">${k}<input type="number" min="0.5" max="720" step="0.5" name="n-${k}" value="${rs.settings.niceTargets[k]}"></label>`).join("")}
+<label class="f">นับแบบ<select name="mode"><option value="24h" ${rs.settings.niceMode === "24h" ? "selected" : ""}>24 ชม.</option><option value="business" ${rs.settings.niceMode === "business" ? "selected" : ""}>เวลาทำงาน</option></select></label></div>
+<div class="nr-tg"><b>Sino</b>${["Critical", "High", "Medium", "Low"].map((k) => `<label class="f">${k}<input type="number" min="0.5" max="720" step="0.5" name="s-${k}" value="${rs.settings.sinoTargets[k]}"></label>`).join("")}
+<label class="chk" style="align-self:end"><input type="checkbox" name="notify" ${rs.settings.notify ? "checked" : ""}> แจ้ง owner เมื่อเกินเป้า</label></div>
+<div class="nr-tg"><b>เวลาทำงาน</b><label class="f">เริ่ม<input type="time" name="ws" value="${rs.settings.workStart}"></label><label class="f">เลิก<input type="time" name="we" value="${rs.settings.workEnd}"></label></div>
+<div class="right" style="display:flex;justify-content:flex-end;gap:8px"><a class="btn" href="#/nice-response">ดูรายงาน</a><button class="btn primary" type="submit">บันทึกเป้า</button></div><p class="hint" id="nr-msg"></p></form></section>
 <section class="card"><h2>ทดสอบกับ email ตัวอย่าง</h2><p class="hint">วางหัวเรื่องและเนื้อหา email จาก NICE เพื่อดูว่าระบบอ่านได้อย่างไร (ไม่แตะกล่องจริง)</p>
 <label class="f">หัวเรื่อง<input type="text" id="ns-subj" placeholder="NICE Customer Support - Customer update for Case CS5089477, High"></label>
 <label class="f">เนื้อหา<textarea id="ns-body" rows="6"></textarea></label>
@@ -3398,6 +3457,14 @@ ${um.items.map((x) => `<div class="nice-q"><div><strong class="mono">${esc(x.cs_
 ${d.recent.map((r) => `<tr><td>${fdt(r.nice_at || r.received_at)}</td><td class="mono">${esc(r.cs_number || "-")}</td><td>${esc(STL[r.status] || r.status)}${r.reason ? ` <span class="muted" style="font-size:12px">${esc(r.reason)}</span>` : ""}</td><td>${r.case_id ? `<a href="#/case/${r.case_id}" class="mono">${esc(r.case_no || "#" + r.case_id)}</a>` : "-"}</td><td>${esc(r.updated_by || "")}</td></tr>`).join("") || `<tr><td colspan="5" class="muted">ยังไม่มี</td></tr>`}
 </tbody></table></div></section>`;
     const msg = (t) => ($("nf-msg").textContent = t);
+    $("nr-f").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const f = e.target, K = ["Critical", "High", "Medium", "Low"];
+      try {
+        await post("/nice-response/settings", { niceMode: f.mode.value, notify: f.notify.checked, workStart: f.ws.value, workEnd: f.we.value, niceTargets: Object.fromEntries(K.map((k) => [k, f["n-" + k].value])), sinoTargets: Object.fromEntries(K.map((k) => [k, f["s-" + k].value])) }, "PUT");
+        $("nr-msg").textContent = "บันทึกแล้ว";
+      } catch (err) { $("nr-msg").textContent = err.message; }
+    });
     $("nf").addEventListener("submit", async (e) => {
       e.preventDefault();
       try {
@@ -7486,6 +7553,7 @@ ${rows.slice(0, 12).map(([p, t]) => `<tr class="click" data-href="#/projects/${p
         case "intake": return parts[1] ? await viewIntakeItem(parts[1]) : await viewIntake(params);
         case "intake-admin": return await viewIntakeAdmin();
         case "nice-admin": return await viewNiceAdmin();
+        case "nice-response": return await viewNiceResponse(params);
         case "skills": return await viewSkills(params);
         case "kpi": return await viewKpi(params);
         case "workload": return await viewWorkload(params);
