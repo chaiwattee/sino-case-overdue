@@ -4482,7 +4482,7 @@ ${fileBox(m)}
 
   const SR_EV = {
     submitted: "ส่งคำขอ", edited: "แก้ไขคำขอ", resubmitted: "แก้ไขและส่งใหม่", info: "ขอข้อมูลเพิ่ม", approved: "อนุมัติ", rejected: "ไม่อนุมัติ", cancelled: "ยกเลิก",
-    update: "ผู้ขอเพิ่มข้อมูล", note: "บันทึกจากทีม", reassigned: "เปลี่ยนผู้รับผิดชอบ", ext_asked: "ขอเลื่อน Target", ext_approved: "อนุมัติเลื่อน Target", ext_rejected: "ไม่อนุมัติการเลื่อน", closed: "ปิดคำขอ", reopened: "ขอเปิดใหม่", confirmed: "ยืนยันรับงาน",
+    team_changed: "ผู้ขอเปลี่ยนทีม", update: "ผู้ขอเพิ่มข้อมูล", note: "บันทึกจากทีม", reassigned: "เปลี่ยนผู้รับผิดชอบ", ext_asked: "ขอเลื่อน Target", ext_approved: "อนุมัติเลื่อน Target", ext_rejected: "ไม่อนุมัติการเลื่อน", closed: "ปิดคำขอ", reopened: "ขอเปิดใหม่", confirmed: "ยืนยันรับงาน",
   };
   function srEventLine(e, files) {
     const dd = e.data || {};
@@ -4490,7 +4490,7 @@ ${fileBox(m)}
       e.kind === "approved" ? `Target ${dlong(dd.target)}${dd.target !== dd.requested ? ` (ผู้ขอต้องการ ${dlong(dd.requested)}${dd.reason ? ` · ${esc(dd.reason)}` : ""})` : ""}${dd.category ? ` · ประเภทงาน ${esc(dd.category)}` : ""}`
       : e.kind === "submitted" ? `ต้องการภายใน ${dlong(dd.requestedDate)}`
       : ["ext_asked", "ext_approved", "ext_rejected"].includes(e.kind) ? `${dlong(dd.from)} → ${dlong(dd.to)}`
-      : e.kind === "reassigned" ? `${esc(dd.from || "-")} → ${esc(dd.to)}`
+      : e.kind === "reassigned" || e.kind === "team_changed" ? `${esc(dd.from || "-")} → ${esc(dd.to)}`
       : e.kind === "reopened" ? `Target ${dlong(dd.target)}`
       : e.kind === "confirmed" ? (dd.rating ? `ให้คะแนน ${"★".repeat(dd.rating)}${"☆".repeat(5 - dd.rating)} ${dd.rating}/5` : "")
       : e.kind === "closed" ? esc({ delivered: "ส่งงานแล้ว", not_possible: "ทำไม่ได้", duplicate: "ซ้ำกับคำขออื่น" }[dd.outcome] || "") : "";
@@ -4697,14 +4697,15 @@ ${r.noRating ? `<p class="hint" style="margin:0">ทีม ${esc(r.teamLabel)} �
       };
     else if ($("b-edit"))
       $("b-edit").onclick = () => {
-        const f = srDialog(r.status === "info" ? "แก้ไขและส่งใหม่" : "แก้ไขคำขอ", `<label class="f">หัวข้อ<input name="title" value="${esc(r.title)}" required minlength="5" maxlength="200"></label>
+        const f = srDialog(r.status === "info" ? "แก้ไขและส่งใหม่" : "แก้ไขคำขอ", `<label class="f">ทีมที่ขอ<select name="team">${m.teams.map((t) => `<option value="${esc(t.code)}" ${t.code === r.team ? "selected" : ""}>${esc(t.label)}</option>`).join("")}</select><span class="hint">ส่งผิดทีม เปลี่ยนได้ที่นี่ เลข SR ประวัติ และไฟล์แนบเดิมย้ายไปด้วย ระบบแจ้ง Manager ทีมใหม่ให้อนุมัติ</span></label>
+<label class="f">หัวข้อ<input name="title" value="${esc(r.title)}" required minlength="5" maxlength="200"></label>
 <label class="f">รายละเอียด<textarea name="detail" rows="5" required minlength="20" maxlength="5000">${esc(r.detail)}</textarea></label>
 <div class="formgrid" style="grid-template-columns:1fr 1fr"><label class="f">Severity<select name="severity">${m.severities.map((s) => `<option value="${s.key}" ${s.key === r.severity ? "selected" : ""}>${s.label}</option>`).join("")}</select></label>
 <label class="f">ต้องการภายใน<input type="date" name="d" value="${r.requestedDate}" required></label></div>
 ${r.status === "info" ? `<label class="f">ข้อความถึง Manager (ไม่บังคับ)<input name="note" maxlength="1000"></label>` : ""}${fileBox(m)}`,
           async (f) => {
-            await post(`/sr/${r.id}`, { title: f.title.value, detail: f.detail.value, severity: f.severity.value, requestedDate: f.d.value, note: f.note ? f.note.value : "", files: await fp.get() }, "PUT");
-            toast(r.status === "info" ? "ส่งกลับให้ Manager แล้ว" : "บันทึกแล้ว", 4500);
+            await post(`/sr/${r.id}`, { team: f.team.value, title: f.title.value, detail: f.detail.value, severity: f.severity.value, requestedDate: f.d.value, note: f.note ? f.note.value : "", files: await fp.get() }, "PUT");
+            toast(f.team.value !== r.team ? "ย้ายคำขอไปทีมใหม่แล้ว ระบบแจ้ง Manager ทีมใหม่" : r.status === "info" ? "ส่งกลับให้ Manager แล้ว" : "บันทึกแล้ว", 4500);
             done();
           }, r.status === "info" ? "ส่งใหม่" : "บันทึก");
         const fp = filePicker(f, m);

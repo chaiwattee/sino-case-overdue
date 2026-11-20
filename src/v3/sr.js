@@ -279,6 +279,13 @@ async function notifyInfo(s, by, note) {
 async function notifyRejected(s, by, reason) {
   await send([s.requester_email], [], { no: s.sr_no, text: `ไม่อนุมัติ · ${s.title}` }, "#5B6675", body(s, `${esc(by.display_name)} ไม่อนุมัติคำขอนี้`, [["เหตุผล", reason]]));
 }
+async function notifyTeamChanged(n, moved) {
+  const oldM = await teamManagers(moved.from);
+  if (oldM.length) await send(emails(oldM), [], { no: n.sr_no, text: `ย้ายไปทีม ${moved.toLabel} แล้ว · ${n.title}` }, "#5B6675",
+    body(n, `${esc(n.requester_name)} เปลี่ยนทีมของคำขอนี้จาก ${esc(moved.fromLabel)} เป็น <strong>${esc(moved.toLabel)}</strong> ทีมของคุณไม่ต้องอนุมัติคำขอนี้แล้ว`, []));
+  // The new team sees it like a new request.
+  await notifySubmitted(n);
+}
 async function notifyResubmitted(s) {
   const mgrs = await teamManagers(s.team);
   await send(emails(mgrs), [], { no: s.sr_no, text: `[รออนุมัติ] ผู้ขอแก้ไขแล้ว · ${s.title}` }, "#C07A00", body(s, `${esc(s.requester_name)} แก้ไขคำขอตามที่ขอข้อมูลเพิ่มแล้ว`, [["วันที่ต้องการ", thaiDay(s.requested_date)]], { button: "ตรวจและอนุมัติ" }));
@@ -446,13 +453,28 @@ async function edit(user, s, b) {
   const date = b.requestedDate ? validDate(b.requestedDate, "วันที่ต้องการ") : isoDay(s.requested_date);
   if (date !== isoDay(s.requested_date) && date < addWorkdays(todayIso(), 1, hol) && !(sev === "urgent_high" && date === todayIso())) throw bad("วันที่ต้องการต้องเป็นวันทำการถัดไปเป็นต้นไป (ด่วนมาก เลือกวันนี้ได้)");
   const wasInfo = s.status === "info";
+  // Sent to the wrong team: the requester moves it (same SR, history and files). The new team's managers get the approval
+  // email and their response time counts from the move.
+  let moved = null;
+  if (b.team && b.team !== s.team) {
+    const t = await one("SELECT code, label FROM teams WHERE code = $1", [clean(b.team, 40)]);
+    if (!t) throw bad("เลือกทีมที่ต้องการขอ");
+    moved = { from: s.team, fromLabel: s.team_label, to: t.code, toLabel: t.label };
+  }
   await tx(async (c) => {
+    if (moved) {
+      await c.query("UPDATE service_requests SET team=$2, forwarded_at=now(), forwarded_by=$3, forwarded_from=$4, reminded='{}'::jsonb WHERE id=$1", [s.id, moved.to, user.id, moved.from]);
+      await addEvent(c, s.id, "team_changed", clean(b.note, 1000) || null, { from: moved.fromLabel, to: moved.toLabel }, user.id);
+    }
     await c.query(`UPDATE service_requests SET title=$2, detail=$3, severity=$4, requested_date=$5, customer=$6, request_kind=$7, meeting_mode=$8, meeting_reason=$9, status='pending', updated_at=now() WHERE id=$1`, [s.id, title, detail, sev, date, clean(b.customer ?? s.customer, 120) || null, mt.kind, mt.mode, mt.reason]);
     const ev = await addEvent(c, s.id, wasInfo ? "resubmitted" : "edited", clean(b.note, 1000) || null, null, user.id);
     await storeFiles(c, s.id, ev, b.files, user.id);
   });
   const n = await load(s.id);
-  if (wasInfo) notifyResubmitted(n).catch(() => {});
+  if (moved) {
+    await audit(user, "sr_team_change", s.sr_no, { from: moved.from, to: moved.to });
+    notifyTeamChanged(n, moved).catch((e) => console.error("[sr] notify team change:", e.message));
+  } else if (wasInfo) notifyResubmitted(n).catch(() => {});
   return n;
 }
 async function addUpdate(user, s, b) {
@@ -630,7 +652,7 @@ async function runReminders() {
 
   // Waiting for approval for more than one working day.
   for (const s of await all(`SELECT ${SR_COLS} FROM ${SR_FROM} WHERE s.status = 'pending'`)) {
-    const since = d.toISODate(new Date(s.updated_at));
+    const since = d.toISODate(new Date(s.updated_at)); // forwarding sets updated_at, so the new team gets a full working day
     if (workdaysBetween(since, t, hol) < 1 || s.reminded.approval === t) continue;
     const mgrs = await teamManagers(s.team);
     await send(emails(mgrs), [], { no: s.sr_no, text: `[ค้างอนุมัติ ${workdaysBetween(since, t, hol)} วันทำการ] ${s.title}` }, "#C07A00", body(s, "คำขอนี้ยังรออนุมัติ", [["วันที่ต้องการ", thaiDay(s.requested_date)]], { button: "ตรวจและอนุมัติ" }));

@@ -207,10 +207,11 @@ async function managerResponse(from, to) {
       FROM case_extensions e JOIN cases c ON c.id = e.case_id WHERE e.requested_at >= $1 AND e.requested_at < $2 AND e.status <> 'cancelled'`, [f, t])) {
     add([e.approver_id], { kind: "ขยายเวลา", ref: e.case_no, ...judge(e.requested_at, e.answered) });
   }
-  for (const s of await all(`SELECT s.created_at, coalesce(s.approved_at, CASE WHEN s.status = 'rejected' THEN s.closed_at END) AS answered, s.approved_by, s.closed_by, s.team, s.sr_no
+  // Moved to another team by the requester (sent to the wrong team): the new team counts from the move.
+  for (const s of await all(`SELECT s.created_at, s.forwarded_at, s.forwarded_by, coalesce(s.approved_at, CASE WHEN s.status = 'rejected' THEN s.closed_at END) AS answered, s.approved_by, s.closed_by, s.team, s.sr_no
       FROM service_requests s WHERE s.created_at >= $1 AND s.created_at < $2 AND s.status <> 'cancelled'`, [f, t])) {
     const by = s.approved_by || (s.answered ? s.closed_by : null);
-    add(by && acc.has(by) ? [by] : by ? [] : byTeam.get(s.team) || [], { kind: "คำขอบริการ", ref: s.sr_no, ...judge(s.created_at, s.answered) });
+    add(by && acc.has(by) ? [by] : by ? [] : byTeam.get(s.team) || [], { kind: "คำขอบริการ", ref: s.sr_no, ...judge(s.forwarded_at || s.created_at, s.answered) });
   }
   return [...acc.values()].filter((a) => a.total).map((a) => ({
     ...a, score: Math.round(((a.total - a.late) / a.total) * 100), avgLate: a.late ? Math.round((a.lateDays / a.late) * 10) / 10 : 0, items: a.items.slice(0, 20),
