@@ -7376,6 +7376,9 @@ ${rows.slice(0, 12).map(([p, t]) => `<tr class="click" data-href="#/projects/${p
     await routeView();
     addBackButton();
   }
+  // Views that re-render themselves (after closing a case, saving, approving…) replace the whole page without route():
+  // put the back button back whenever the page content is replaced.
+  new MutationObserver(() => addBackButton()).observe($app, { childList: true });
   async function routeView() {
     const { parts, params } = (() => {
       const h = location.hash.replace(/^#/, "") || "/";
