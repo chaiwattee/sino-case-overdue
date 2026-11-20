@@ -82,7 +82,7 @@
       if (location.hash !== "#/password") location.hash = "#/password";
       throw new Error(body.error);
     }
-    if (!res.ok) throw new Error((body && body.error) || res.statusText);
+    if (!res.ok) throw Object.assign(new Error((body && body.error) || res.statusText), { data: body, status: res.status });
     return body;
   }
   const post = (path, body, method = "POST") => api(path, { method, body: JSON.stringify(body || {}) });
@@ -5473,17 +5473,84 @@ ${p.updatedAt ? `<p class="hint" style="margin:10px 0 0">แก้ล่าส�
     };
   }
 
+  // ---------------------------------------------------------- customer list management (customer_manage)
+  async function loadCustManage() {
+    const box = document.getElementById("cm-card");
+    if (!box) return;
+    const { list } = await api("/customers/list");
+    let filter = "", showAll = false;
+    const ST = (l) => (l.pending ? `<span class="chip c-r1">รออนุมัติ</span>` : l.active ? `<span class="chip c-normal">ใช้งาน</span>` : `<span class="chip c-closed">ปิดใช้</span>`);
+    const shown = () => { const f = list.filter((l) => !filter || l.value.toLowerCase().includes(filter)); return filter || showAll ? f.slice(0, 300) : f.filter((l, i) => l.pending || i < 10); };
+    const more = () => (!filter && !showAll && list.length > shown().length ? `<button class="btn" type="button" id="cm-all">แสดงทั้งหมด (${list.length})</button>` : "");
+    const rows = () => shown().map((l) => `<tr>
+<td style="font-weight:600">${esc(l.value)}${l.pending && l.team ? `<div class="muted" style="font-size:12px;font-weight:400">จากเคสทีม ${esc(teamLabel(l.team))}</div>` : ""}</td>
+<td class="n">${l.cases}</td><td>${ST(l)}</td><td class="muted" style="font-size:13px">${esc(l.created_by || "-")}</td>
+<td style="text-align:right">${l.pending ? `<button class="btn" type="button" data-cmok="${l.id}">อนุมัติ</button>` : `<button class="btn" type="button" data-cmact="${l.id}" data-on="${l.active ? 0 : 1}">${l.active ? "ปิดใช้" : "เปิดใช้"}</button>`}</td></tr>`).join("");
+    const render = () => {
+      box.innerHTML = `<div class="title"><h2>จัดการรายชื่อลูกค้า</h2><span>${list.filter((l) => l.active && !l.pending).length} ใช้งาน · ${list.filter((l) => l.pending).length} รออนุมัติ · ${list.filter((l) => !l.active).length} ปิดใช้</span></div>
+<form id="cm-add" class="cm-add" ${box.dataset.open ? "" : "hidden"}><label class="f" style="flex:1 1 260px">ชื่อลูกค้าใหม่<input type="text" id="cm-name" maxlength="120" placeholder="เช่น Siam Commercial Bank" autocomplete="off"></label>
+<button class="btn primary" type="submit">เพิ่ม</button><button class="btn" type="button" id="cm-cancel">ยกเลิก</button></form>
+<div id="cm-msg"></div>
+<label class="f" style="max-width:320px">ค้นหาในรายชื่อ<input type="search" id="cm-q" value="${esc(filter)}" placeholder="พิมพ์ชื่อลูกค้า"></label>
+<div class="tablewrap"><table class="cm-table"><thead><tr><th>ลูกค้า</th><th class="n">เคส</th><th>สถานะ</th><th>เพิ่มโดย</th><th></th></tr></thead><tbody id="cm-rows">${rows()}</tbody></table></div><div id="cm-more" style="margin-top:8px">${more()}</div>
+<p class="hint">ลูกค้าที่ปิดใช้จะไม่ขึ้นในรายการตอนเปิดเคส เคสเก่ายังอยู่ครบ</p>`;
+      bind();
+    };
+    const msg = (html, cls = "") => (document.getElementById("cm-msg").innerHTML = html ? `<div class="banner ${cls}" style="margin:8px 0">${html}</div>` : "");
+    const add = async (force) => {
+      const name = document.getElementById("cm-name").value.trim();
+      if (!name) return msg("พิมพ์ชื่อลูกค้า", "err");
+      try {
+        const r = await post("/customers", { name, force: !!force });
+        list.unshift({ id: r.customer.id, value: r.customer.value, active: true, pending: false, cases: 0, created_by: ME.user.display_name });
+        box.dataset.open = "";
+        render();
+        msg(`เพิ่มลูกค้า <strong>${esc(r.customer.value)}</strong> แล้ว ใช้ได้ทันทีตอนเปิดเคส`, "ok");
+      } catch (e) {
+        if (e.data && e.data.similar) {
+          msg(`ชื่อนี้คล้ายลูกค้าที่มีอยู่: <strong>${e.data.similar.map((x) => esc(x.value)).join(", ")}</strong> ถ้าเป็นลูกค้าเดียวกัน ใช้ชื่อเดิม ถ้าเป็นคนละรายจริง <button class="btn" type="button" id="cm-force">ยืนยันเพิ่ม "${esc(name)}"</button>`, "warn");
+          document.getElementById("cm-force").onclick = () => add(true);
+        } else msg(esc(e.message), "err");
+      }
+    };
+    const bind = () => {
+      document.getElementById("cm-add").onsubmit = (e) => { e.preventDefault(); add(false); };
+      document.getElementById("cm-cancel").onclick = () => { box.dataset.open = ""; render(); };
+      const qi = document.getElementById("cm-q");
+      qi.oninput = () => { filter = qi.value.trim().toLowerCase(); document.getElementById("cm-rows").innerHTML = rows(); document.getElementById("cm-more").innerHTML = more(); bindRows(); };
+      bindRows();
+    };
+    const bindRows = () => {
+      const ab = document.getElementById("cm-all");
+      if (ab) ab.onclick = () => { showAll = true; render(); };
+      box.querySelectorAll("[data-cmact]").forEach((b) => (b.onclick = async () => {
+        const l = list.find((x) => String(x.id) === b.dataset.cmact);
+        try { await post(`/customers/${l.id}`, { active: b.dataset.on === "1" }, "PUT"); l.active = b.dataset.on === "1"; render(); } catch (e) { msg(esc(e.message), "err"); }
+      }));
+      box.querySelectorAll("[data-cmok]").forEach((b) => (b.onclick = async () => {
+        const l = list.find((x) => String(x.id) === b.dataset.cmok);
+        try { await post(`/customers/${l.id}/decide`, { action: "approve" }); l.pending = false; l.active = true; render(); msg(`อนุมัติ <strong>${esc(l.value)}</strong> แล้ว`, "ok"); } catch (e) { msg(esc(e.message), "err"); }
+      }));
+    };
+    render();
+    const ob = document.getElementById("cm-open");
+    if (ob) ob.onclick = () => { box.dataset.open = "1"; render(); box.scrollIntoView({ behavior: "smooth", block: "start" }); document.getElementById("cm-name").focus(); };
+  }
+
   async function viewCustomer(params) {
     setNav("customer");
     const site = params.site || "";
     const list = (await api("/customer")).list;
     if (!site) {
       $app.innerHTML = `
-<div class="head"><div><h1>ราย ลูกค้า</h1><p>ภาพรวมของลูกค้าแต่ละราย จากเคสที่คุณเห็นได้ (12 เดือนล่าสุด) เรียงจากเคสเกิน Due มากสุด</p></div></div>
+<div class="head"><div><h1>ราย ลูกค้า</h1><p>ภาพรวมของลูกค้าแต่ละราย จากเคสที่คุณเห็นได้ (12 เดือนล่าสุด) เรียงจากเคสเกิน Due มากสุด</p></div>
+${lvl("customer_manage") === "all" ? `<div class="actions"><button class="btn primary" type="button" id="cm-open">+ เพิ่มลูกค้า</button></div>` : ""}</div>
+${lvl("customer_manage") === "all" ? `<section class="card" id="cm-card"></section>` : ""}
 <section class="card">${list.length ? `<div class="tablewrap"><table style="min-width:520px"><thead><tr><th>ลูกค้า</th><th style="text-align:right">ยังไม่ปิด</th><th style="text-align:right">เกิน Due</th><th style="text-align:right">เคสทั้งหมด</th></tr></thead><tbody>
 ${list.map((x) => `<tr class="click" data-href="#/customer?site=${encodeURIComponent(x.site)}"><td style="font-weight:600"><a href="#/customer?site=${encodeURIComponent(x.site)}">${esc(x.site)}</a></td><td style="text-align:right">${x.open}</td><td style="text-align:right">${x.overdue ? `<span class="chip c-overdue">${x.overdue}</span>` : "0"}</td><td style="text-align:right">${x.total}</td></tr>`).join("")}
 </tbody></table></div>` : `<div class="empty">ยังไม่มีเคส</div>`}</section>`;
       bindRowLinks();
+      if (lvl("customer_manage") === "all") loadCustManage();
       return;
     }
     const x = await api(`/customer?site=${encodeURIComponent(site)}`);

@@ -17,13 +17,14 @@ const PERMS = [
   { key: "settings_manage", label: "ตั้งค่าระบบ", hint: "รายการ dropdown, การเก็บข้อมูล, รายงานรายปี" },
   { key: "sr_create", label: "ส่งคำขอบริการ (Service Request)", hint: "ขอให้ทีมอื่นทำงานให้ และติดตามคำขอของตัวเอง", binary: true },
   { key: "pm_manage", label: "ตั้งและแก้งาน PM ตามรอบ", hint: "เพิ่ม แก้ หยุด งาน PM, แบบฟอร์ม MA, เปิดเคสรอบนี้เลย", binary: true, perUser: true },
+  { key: "customer_manage", label: "จัดการรายชื่อลูกค้า", hint: "เพิ่มลูกค้าใหม่ได้ทันที อนุมัติ / แก้ชื่อ / รวมลูกค้าที่รออนุมัติทุกทีม และปิดใช้ชื่อที่เลิกใช้", binary: true, perUser: true },
   { key: "customer_edit", label: "แก้ข้อมูลลูกค้า (Customer information)", hint: "ผู้ติดต่อ สัญญา วิธี remote และ Product ที่ติดตั้ง ในหน้าลูกค้า", binary: true, perUser: true },
   { key: "hotline_edit", label: "แก้เบอร์ Hotline", hint: "เบอร์ใน email ตอบลูกค้าที่แจ้งเคสนอกเวลาทำการ", perUser: true },
 ];
 
 const ROLES = ["admin", "manager", "observer", "engineer", "viewer"];
 // Observer: sees all teams and all pages (KPI, reports, history) but can never change data.
-const OBSERVER_LOCKED = ["case_create", "case_edit", "case_close", "case_reassign", "case_edit_start", "case_delete", "reports_manage", "users_manage", "settings_manage", "hotline_edit", "pm_manage", "customer_edit"];
+const OBSERVER_LOCKED = ["case_create", "case_edit", "case_close", "case_reassign", "case_edit_start", "case_delete", "reports_manage", "users_manage", "settings_manage", "hotline_edit", "pm_manage", "customer_edit", "customer_manage"];
 /** Roles that see every team without being a member. */
 // Viewer: read-only, every team (no export / KPI / editing by default).
 const seesAllTeams = (user) => !!user && (user.role === "admin" || user.role === "observer" || user.role === "viewer");
@@ -33,7 +34,7 @@ const DEFAULTS = {
   manager: {
     view: "all", case_create: "all", case_edit: "all", case_close: "all", case_reassign: "all",
     case_edit_start: "none", case_delete: "none", export: "all", reports_manage: "all",
-    audit_view: "all", users_manage: "none", settings_manage: "none", hotline_edit: "all", sr_create: "all", pm_manage: "none", customer_edit: "all",
+    audit_view: "all", users_manage: "none", settings_manage: "none", hotline_edit: "all", sr_create: "all", pm_manage: "none", customer_edit: "all", customer_manage: "none",
   },
   engineer: {
     view: "all", case_create: "all", case_edit: "own", case_close: "own", case_reassign: "none",

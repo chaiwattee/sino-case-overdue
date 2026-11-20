@@ -14,7 +14,10 @@ async function approvers(team) {
   );
   return rows.length ? rows : all("SELECT id, email, display_name FROM users WHERE active AND role = 'admin' AND email IS NOT NULL");
 }
-const canDecide = (user, team) => user.role === "admin" || (user.role === "manager" && (user.teams || []).includes(team));
+// `manage` = the user holds "จัดการรายชื่อลูกค้า" (customer_manage), which covers every team.
+const canDecide = (user, team, manage = false) => manage || user.role === "admin" || (user.role === "manager" && (user.teams || []).includes(team));
+const canManage = async (user) => (await perms.level(user, "customer_manage")) === "all";
+const cleanName = (v) => String(v || "").replace(/\s+/g, " ").trim().slice(0, 120);
 
 /** Names in the list that look like `name` (shared word of 3+ letters, or one inside the other). */
 async function similar(name, limit = 5) {
@@ -82,14 +85,52 @@ async function remindAll() {
 }
 
 function mount(api, { wrap }) {
+  // ---- customer list management (customer_manage, can be granted to named users)
+  const needManage = async (req) => {
+    if (!(await canManage(req.user))) throw bad("ต้องมีสิทธิ์ \"จัดการรายชื่อลูกค้า\"", 403);
+  };
+  api.get("/customers/list", wrap(async (req, res) => {
+    await needManage(req);
+    const rows = await all(
+      `SELECT l.id, l.value, l.active, l.pending, l.team, l.created_at, u.display_name AS created_by,
+              (SELECT count(*)::int FROM cases c WHERE lower(c.site) = lower(l.value)) AS cases
+         FROM lookups l LEFT JOIN users u ON u.id = l.created_by WHERE l.kind = 'site' ORDER BY l.pending DESC, l.active DESC, lower(l.value)`
+    );
+    res.json({ list: rows });
+  }));
+  api.post("/customers", wrap(async (req, res) => {
+    await needManage(req);
+    const name = cleanName(req.body?.name);
+    if (name.length < 2) throw bad("พิมพ์ชื่อลูกค้า");
+    const dup = await one("SELECT id, value, active, pending FROM lookups WHERE kind = 'site' AND lower(value) = lower($1)", [name]);
+    if (dup) throw bad(dup.active ? `มีลูกค้า "${dup.value}" อยู่แล้ว` : `มีลูกค้า "${dup.value}" อยู่แล้วแต่ปิดใช้ไว้ เปิดใช้จากรายการแทน`, 409);
+    const sim = await similar(name);
+    if (sim.length && !req.body?.force) return res.status(409).json({ error: "ชื่อนี้คล้ายลูกค้าที่มีอยู่", similar: sim });
+    const r = await one("INSERT INTO lookups (kind, value, created_by, sort) VALUES ('site', $1, $2, 500) RETURNING id, value", [name, req.user.id]);
+    await audit(req.user, "customer_add", name, { similar: sim.map((x) => x.value) });
+    res.json({ ok: true, customer: r });
+  }));
+  api.put("/customers/:id(\\d+)", wrap(async (req, res) => {
+    await needManage(req);
+    const l = await one("SELECT * FROM lookups WHERE id = $1 AND kind = 'site' AND NOT pending", [Number(req.params.id)]);
+    if (!l) throw bad("ไม่พบลูกค้า (ลูกค้าที่รออนุมัติ ให้ใช้ปุ่มอนุมัติ / แก้ชื่อ / รวม)", 404);
+    const b = req.body || {};
+    if (b.active !== undefined && !!b.active !== l.active) {
+      await q("UPDATE lookups SET active = $2 WHERE id = $1", [l.id, !!b.active]);
+      await audit(req.user, b.active ? "customer_enable" : "customer_disable", l.value, {});
+    }
+    res.json({ ok: true });
+  }));
+
   // Pending names the viewer can decide on, with their cases and look-alike names.
   api.get("/customers/pending", wrap(async (req, res) => {
     const rows = await all("SELECT l.id, l.value, l.team, l.created_at, u.display_name AS created_by FROM lookups l LEFT JOIN users u ON u.id = l.created_by WHERE l.kind = 'site' AND l.pending ORDER BY l.created_at");
-    const mine = rows.filter((r) => canDecide(req.user, r.team) || req.user.role === "observer");
+    const cm = await canManage(req.user);
+    const mine = rows.filter((r) => canDecide(req.user, r.team, cm) || req.user.role === "observer");
     for (const r of mine) {
       r.cases = await all("SELECT id, case_no AS \"caseNo\", task FROM cases WHERE site = $1 ORDER BY id", [r.value]);
       r.similar = await similar(r.value);
-      r.canDecide = canDecide(req.user, r.team);
+      r.canDecide = canDecide(req.user, r.team, cm);
     }
     res.json({ list: mine });
   }));
@@ -97,14 +138,14 @@ function mount(api, { wrap }) {
   api.get("/customers/pending/by-name", wrap(async (req, res) => {
     const l = await one("SELECT id, value, team, created_at FROM lookups WHERE kind = 'site' AND pending AND lower(value) = lower($1)", [String(req.query.site || "")]);
     if (!l) return res.json({ pending: null });
-    res.json({ pending: { ...l, similar: await similar(l.value), canDecide: canDecide(req.user, l.team), all: (await all("SELECT id, value FROM lookups WHERE kind = 'site' AND active AND NOT pending ORDER BY lower(value)")) } });
+    res.json({ pending: { ...l, similar: await similar(l.value), canDecide: canDecide(req.user, l.team, await canManage(req.user)), all: (await all("SELECT id, value FROM lookups WHERE kind = 'site' AND active AND NOT pending ORDER BY lower(value)")) } });
   }));
 
   // action: approve | rename (value) | merge (into = lookup id)
   api.post("/customers/:id(\\d+)/decide", wrap(async (req, res) => {
     const l = await one("SELECT * FROM lookups WHERE id = $1 AND kind = 'site' AND pending", [Number(req.params.id)]);
     if (!l) throw bad("รายการนี้ถูกจัดการไปแล้ว รีเฟรชหน้า", 409);
-    if (!canDecide(req.user, l.team)) throw bad("อนุมัติได้เฉพาะ Manager ของทีมเคสนี้หรือ Admin", 403);
+    if (!canDecide(req.user, l.team, await canManage(req.user))) throw bad("อนุมัติได้เฉพาะ Manager ของทีมเคสนี้, Admin หรือผู้มีสิทธิ์จัดการรายชื่อลูกค้า", 403);
     const b = req.body || {};
     let final = l.value;
     let note;
