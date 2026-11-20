@@ -1099,3 +1099,21 @@ tr.pj-off td { opacity: .55; }
   .act-wide .act { grid-template-columns: 64px 14px minmax(0, 1fr); }
   .act-wide .act > div:last-child { display: block; }
 }
+
+/* wider app + case page layout */
+main, .topbar-in, .foot { max-width: 1880px; }
+.cf-stack { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+@media (min-width: 1100px) {
+  .cols:has(> .main > .cf-stack) { flex-wrap: nowrap; }
+  .cols:has(> .main > .cf-stack) > .side { flex: 0 0 400px; max-width: 400px; }
+}
+.cols > .main > .act-wide { margin-top: 0; }
+.cf-stack textarea[name=note] { min-height: 44px; }
+.fold-head { cursor: pointer; user-select: none; }
+.side > section h2::before { content: "▾ "; color: var(--muted); font-size: .8em; }
+.side > section:first-child h2::before { content: none; }
+.side > section.fold > :not(.title):not(h2):not(.fold-sum) { display: none !important; }
+.fold-sum { display: none; font-size: 13px; color: var(--muted); margin-top: 2px; }
+.side > section.fold .fold-sum { display: block; }
+.side > section.fold h2::before { content: "▸ "; }
+.dates-card { grid-template-columns: 1fr 1fr !important; }

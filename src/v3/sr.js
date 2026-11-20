@@ -443,7 +443,10 @@ async function edit(user, s, b) {
   // From a project task: the task's name, detail and due date are kept (they change on the project page); the PM can
   // still answer "ขอข้อมูลเพิ่ม" with a note and files and send it back.
   if (s.project_task_id) b = { note: b.note, files: b.files };
-  if (!["pending", "info"].includes(s.status)) throw bad("แก้คำขอได้เฉพาะตอนรออนุมัติหรือถูกขอข้อมูลเพิ่ม เพิ่มข้อมูลด้วยช่อง \"เพิ่มข้อมูล\" แทน");
+  // After approval (in progress) the requester may still correct the title, details and customer, and add files.
+  // Team, severity and dates stay as approved (ask the assignee / manager to move the Target).
+  if (s.status === "in_progress") return editAssigned(user, s, b);
+  if (!["pending", "info"].includes(s.status)) throw bad("แก้คำขอได้เฉพาะคำขอที่ยังไม่ปิด เพิ่มข้อมูลด้วยช่อง \"เพิ่มข้อมูล\" แทน");
   const hol = await holidays();
   const title = clean(b.title ?? s.title, 200);
   const detail = clean(b.detail ?? s.detail, 5000);
@@ -475,6 +478,27 @@ async function edit(user, s, b) {
     await audit(user, "sr_team_change", s.sr_no, { from: moved.from, to: moved.to });
     notifyTeamChanged(n, moved).catch((e) => console.error("[sr] notify team change:", e.message));
   } else if (wasInfo) notifyResubmitted(n).catch(() => {});
+  return n;
+}
+async function editAssigned(user, s, b) {
+  const title = clean(b.title ?? s.title, 200);
+  const detail = clean(b.detail ?? s.detail, 5000);
+  if (title.length < 5 || detail.length < 20) throw bad("หัวข้ออย่างน้อย 5 ตัวอักษร และรายละเอียดอย่างน้อย 20 ตัวอักษร");
+  const customer = clean(b.customer ?? s.customer, 120) || null;
+  const changed = [title !== s.title && "หัวข้อ", detail !== s.detail && "รายละเอียด", customer !== (s.customer || null) && "ลูกค้า"].filter(Boolean);
+  const files = Array.isArray(b.files) ? b.files : [];
+  if (!changed.length && !files.length) throw bad("ยังไม่มีอะไรเปลี่ยน");
+  await tx(async (c) => {
+    await c.query("UPDATE service_requests SET title=$2, detail=$3, customer=$4, updated_at=now() WHERE id=$1", [s.id, title, detail, customer]);
+    const ev = await addEvent(c, s.id, "edited", clean(b.note, 1000) || null, { fields: changed, before: changed.includes("รายละเอียด") ? s.detail.slice(0, 2000) : undefined }, user.id);
+    await storeFiles(c, s.id, ev, files, user.id);
+  });
+  await audit(user, "sr_edit_assigned", s.sr_no, { fields: changed, files: files.length });
+  const n = await load(s.id);
+  const to = n.assignee_email ? [n.assignee_email] : emails(await teamManagers(n.team));
+  send(to, [], { no: n.sr_no, text: `ผู้ขอแก้ไขคำขอ · ${n.title}` }, "#1F5FBF",
+    body(n, `${esc(n.requester_name)} แก้ไขคำขอที่คุณรับผิดชอบ: ${esc(changed.join(", ") || "แนบไฟล์เพิ่ม")}${files.length ? ` · แนบไฟล์ ${files.length} ไฟล์` : ""}`, [["รายละเอียดล่าสุด", n.detail.slice(0, 600)], ...(b.note ? [["ข้อความจากผู้ขอ", clean(b.note, 1000)]] : [])], { button: "ดูคำขอ" })).catch(() => {});
+  if (n.assignee_id) require("./push").send([n.assignee_id], { title: `ผู้ขอแก้ไขคำขอ · ${n.sr_no}`, body: n.title, url: `/#/sr/${n.id}`, tag: `sr-${n.id}` }).catch(() => {});
   return n;
 }
 async function addUpdate(user, s, b) {
@@ -719,7 +743,7 @@ function mount(api, { wrap }) {
       sr: ser(fresh, hol, req.user, noKpi), events: ev, files,
       can: {
         manage,
-        edit: fresh.requester_id === req.user.id && ["pending", "info"].includes(fresh.status),
+        edit: fresh.requester_id === req.user.id && ["pending", "info", "in_progress"].includes(fresh.status),
         cancel: fresh.requester_id === req.user.id && ["pending", "info"].includes(fresh.status),
         update: !["rejected", "cancelled"].includes(fresh.status),
         approve: manage && ["pending", "info"].includes(fresh.status),

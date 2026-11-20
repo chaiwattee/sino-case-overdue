@@ -1070,6 +1070,57 @@ ${allowNew ? `<span class="hint">${newHint}</span>` : ""}</div>`;
     input.addEventListener("blur", () => setTimeout(close, 120));
   }
 
+  // ---------------------------------------------------------- case page layout: Activity under the form, side cards fold
+  function caseLayout() {
+    const form = document.getElementById("cf"), side = document.querySelector(".cols > .side"), act = document.querySelector(".act-wide");
+    if (!form || !side) return;
+    const col = document.createElement("div");
+    col.className = "main";
+    form.classList.remove("main");
+    form.classList.add("cf-stack");
+    form.before(col);
+    col.append(form);
+    if (act) col.append(act);
+    const secs = [...form.querySelectorAll(":scope > section.card")];
+    const dates = secs.find((x) => /วันที่ \(ระบบกรอกให้\)/.test(x.textContent));
+    const sla = side.querySelector(":scope > section");
+    if (dates && sla) { dates.classList.add("dates-card"); sla.after(dates); }
+    const hist = secs.find((x) => /ประวัติแก้ไขของเคสนี้/.test(x.textContent));
+    if (hist) side.append(hist);
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem("caseFold") || "{}"); } catch (e) {}
+    const urgent = (sec) => !!sec.querySelector(".chip.c-r1, .chip.c-r2, .t-over, .banner.warn, [data-cldec], [data-clok]");
+    side.querySelectorAll(":scope > section.card").forEach((sec, i) => {
+      if (i === 0 || sec.dataset.fold) return;
+      const h = sec.querySelector("h2");
+      if (!h) return;
+      const key = h.textContent.trim();
+      sec.dataset.fold = "1";
+      const sum = document.createElement("div");
+      sum.className = "fold-sum";
+      (sec.querySelector(":scope > .title") || h).after(sum);
+      const summary = () => {
+        const t = [...sec.children].filter((x) => x !== sum && !x.contains(h)).map((x) => x.innerText || "").join(" ").replace(/\s+/g, " ").trim();
+        sum.textContent = t ? (t.length > 90 ? t.slice(0, 90) + "…" : t) : "";
+      };
+      const set = (open) => sec.classList.toggle("fold", !open);
+      set(saved[key] !== undefined ? saved[key] : false);
+      const head = sec.querySelector(":scope > .title") || h;
+      head.classList.add("fold-head");
+      head.addEventListener("click", (e) => {
+        if (e.target.closest("button, a, input, select")) return;
+        const open = sec.classList.contains("fold");
+        set(open);
+        saved[key] = open;
+        try { localStorage.setItem("caseFold", JSON.stringify(saved)); } catch (err) {}
+      });
+      // Cards fill in after loading: refresh the summary, and open a card that has something waiting.
+      const check = () => { summary(); if (urgent(sec) && saved[key] !== false) set(true); };
+      check();
+      new MutationObserver(check).observe(sec, { childList: true, subtree: true });
+    });
+  }
+
   function actsHtml(acts) {
     if (!acts.length) return `<div class="empty">ยังไม่มี Activity</div>`;
     const dotFor = (a) => (a.kind === "ปิดเคส" ? "d-normal" : a.is_system ? "d-closed" : "d-all");
@@ -1213,6 +1264,7 @@ ${actsHtml(data.activities)}</section>`}
       bindChecklist(c);
       bindTeamFiles(c);
       bindNiceCard(c, id);
+      caseLayout();
     }
     const f = document.getElementById("cf");
     if (isNew) {
@@ -4492,6 +4544,7 @@ ${fileBox(m)}
       e.kind === "approved" ? `Target ${dlong(dd.target)}${dd.target !== dd.requested ? ` (ผู้ขอต้องการ ${dlong(dd.requested)}${dd.reason ? ` · ${esc(dd.reason)}` : ""})` : ""}${dd.category ? ` · ประเภทงาน ${esc(dd.category)}` : ""}`
       : e.kind === "submitted" ? `ต้องการภายใน ${dlong(dd.requestedDate)}`
       : ["ext_asked", "ext_approved", "ext_rejected"].includes(e.kind) ? `${dlong(dd.from)} → ${dlong(dd.to)}`
+      : e.kind === "edited" && dd.fields && dd.fields.length ? `แก้ ${esc(dd.fields.join(", "))}`
       : e.kind === "reassigned" || e.kind === "team_changed" ? `${esc(dd.from || "-")} → ${esc(dd.to)}`
       : e.kind === "reopened" ? `Target ${dlong(dd.target)}`
       : e.kind === "confirmed" ? (dd.rating ? `ให้คะแนน ${"★".repeat(dd.rating)}${"☆".repeat(5 - dd.rating)} ${dd.rating}/5` : "")
@@ -4699,6 +4752,20 @@ ${r.noRating ? `<p class="hint" style="margin:0">ทีม ${esc(r.teamLabel)} �
       };
     else if ($("b-edit"))
       $("b-edit").onclick = () => {
+        if (!["pending", "info"].includes(r.status)) {
+          const g = srDialog("แก้ไขคำขอ", `<p class="hint" style="margin:0 0 8px">คำขอนี้มอบหมายแล้ว แก้หัวข้อ รายละเอียด ลูกค้า และแนบไฟล์เพิ่มได้ ระบบแจ้งผู้รับผิดชอบ · ทีม ความเร่งด่วน และ Target date คงตามที่อนุมัติ</p>
+<label class="f">หัวข้อ<input name="title" value="${esc(r.title)}" required minlength="5" maxlength="200"></label>
+<label class="f">รายละเอียด<textarea name="detail" rows="6" required minlength="20" maxlength="5000">${esc(r.detail)}</textarea></label>
+<label class="f">ลูกค้า<input name="customer" value="${esc(r.customer || "")}" maxlength="120"></label>
+<label class="f">ข้อความถึงผู้รับผิดชอบ (ไม่บังคับ)<input name="note" maxlength="1000" placeholder="เช่น แก้ชื่อเครื่องให้ถูกต้อง"></label>${fileBox(m)}`,
+            async (f) => {
+              await post(`/sr/${r.id}`, { title: f.title.value, detail: f.detail.value, customer: f.customer.value, note: f.note.value, files: await gp.get() }, "PUT");
+              toast("บันทึกแล้ว ระบบแจ้งผู้รับผิดชอบ", 4500);
+              done();
+            }, "บันทึก");
+          const gp = filePicker(g, m);
+          return;
+        }
         const f = srDialog(r.status === "info" ? "แก้ไขและส่งใหม่" : "แก้ไขคำขอ", `<label class="f">ทีมที่ขอ<select name="team">${m.teams.map((t) => `<option value="${esc(t.code)}" ${t.code === r.team ? "selected" : ""}>${esc(t.label)}</option>`).join("")}</select><span class="hint">ส่งผิดทีม เปลี่ยนได้ที่นี่ เลข SR ประวัติ และไฟล์แนบเดิมย้ายไปด้วย ระบบแจ้ง Manager ทีมใหม่ให้อนุมัติ</span></label>
 <label class="f">หัวข้อ<input name="title" value="${esc(r.title)}" required minlength="5" maxlength="200"></label>
 <label class="f">รายละเอียด<textarea name="detail" rows="5" required minlength="20" maxlength="5000">${esc(r.detail)}</textarea></label>
