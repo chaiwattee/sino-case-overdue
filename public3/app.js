@@ -3434,7 +3434,7 @@ ${tab === "sino" ? `<section class="card"><h2>ราย engineer (เดือ�
 <label class="f">กล่องที่อ่าน (shared mailbox ที่รับสำเนาจาก support@, nexidia@ และ wfm@)<input type="email" id="nf-mb" value="${esc(s.mailbox)}" placeholder="nice-sync@sinostech.co.th"><span class="hint">support@ และ nexidia@ (Distribution list) มีกล่องนี้เป็นสมาชิก · wfm@ (Microsoft 365 Group) ส่งสำเนาผ่าน mail flow rule · สิทธิ์ Graph ของแอปต้องจำกัดเฉพาะกล่องนี้ (Exchange RBAC for Applications) · email อื่นที่ไม่ใช่จาก NICE ในกล่องนี้ถูกลบทันที</span></label>
 <label class="f">ผู้ส่งที่ยอมรับ<input type="text" id="nf-from" value="${esc(s.senders.join(", "))}"></label>
 <label class="f">เก็บ email NICE ในกล่องกี่วัน<input type="number" id="nf-keep" min="7" max="365" value="${s.keepDays}"><span class="hint">ข้อความถูกเก็บใน Activity ของเคสแล้ว</span></label>
-<div class="right" style="gap:8px;display:flex;justify-content:flex-end"><button class="btn" type="button" id="nf-poll">อ่านกล่องตอนนี้</button><button class="btn primary" type="submit">บันทึก</button></div>
+<div class="right" style="gap:8px;display:flex;justify-content:flex-end"><button class="btn" type="button" id="nf-reread" title="email ที่บันทึกไว้แบบไม่มีข้อความ อ่านใหม่จากกล่อง (เก็บไว้ตามจำนวนวันที่ตั้ง)">อ่าน email ที่ไม่มีข้อความใหม่</button><button class="btn" type="button" id="nf-poll">อ่านกล่องตอนนี้</button><button class="btn primary" type="submit">บันทึก</button></div>
 <p class="hint" id="nf-msg"></p></form>
 <p class="hint" style="margin-top:10px">${d.mock ? "โหมดข้อมูลจำลอง: ไม่อ่านกล่องจริง · " : ""}อ่านล่าสุด ${st.at ? fdt(st.at) : "-"}${st.error ? ` · <span class="t-over">${esc(st.error)}</span>` : ""} · 7 วัน: นำเข้า ${d.stats.imported || 0} · ไม่พบเคส ${d.stats.unmatched || 0} · ไม่นำเข้า ${d.stats.ignored || 0}</p></section>
 <section class="card"><div class="title"><h2>NICE ที่ยังไม่ตรงกับเคส (${um.items.length})</h2></div>
@@ -3470,6 +3470,12 @@ ${d.recent.map((r) => `<tr><td>${fdt(r.nice_at || r.received_at)}</td><td class=
       try {
         await post("/nice-admin", { enabled: $("nf-on").checked, mailbox: $("nf-mb").value.trim(), senders: $("nf-from").value, keepDays: $("nf-keep").value }, "PUT");
         msg("บันทึกแล้ว");
+      } catch (err) { msg(err.message); }
+    });
+    $("nf-reread").addEventListener("click", async () => {
+      try {
+        const r = await post("/nice-admin/reread");
+        msg(`ตรวจ ${r.checked} ฉบับ · ได้ข้อความแล้ว ${r.fixed} · ไม่พบในกล่อง ${r.notFound} · ยังไม่มีข้อความ ${r.stillEmpty}`);
       } catch (err) { msg(err.message); }
     });
     $("nf-poll").addEventListener("click", async () => {

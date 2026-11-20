@@ -93,6 +93,11 @@ function parse(m) {
     const rest = text.slice(li).replace(/^Latest Update\s*:/i, "");
     const end = rest.search(/\n\s*(Customer Name|Instance|Case Impact|Case Description)\s*:/i);
     latest = end >= 0 ? rest.slice(0, end) : rest.slice(0, 4000);
+  } else if (/Customer Note\s*:/i.test(text)) {
+    // "Wiser - Case … has been updated by customer": our engineer wrote on the NICE portal; the text is the Customer Note.
+    const rest = text.slice(text.search(/Customer Note\s*:/i)).replace(/^Customer Note\s*:/i, "");
+    const end = rest.search(/\n\s*(Click here to view the ticket|Kind Regards|If you wish to unsubscribe)/i);
+    latest = end >= 0 ? rest.slice(0, end) : rest.slice(0, 8000);
   } else {
     // Resolved / closed mail: no "Latest Update" box; the notes follow the case fields, up to the portal line or sign-off.
     const di = text.search(/Case Description\s*:[^\n]*\n/i);
@@ -114,9 +119,10 @@ function parse(m) {
     niceAt: upd ? niceTime(upd[3].length === 16 ? upd[3] + ":00" : upd[3], upd[4]) : null,
     niceAtText: upd ? `${upd[3]}${upd[4] ? " " + upd[4] : ""}` : "",
     impact: impact ? impact[0].toUpperCase() + impact.slice(1).toLowerCase() : "",
-    customer: field("Customer Name").slice(0, 200),
-    description: field("Case Description").slice(0, 500),
-    body: (action !== "updated" ? `[NICE: ${action}]\n` : "") + dd.text.replace(/\n{3,}/g, "\n\n").slice(0, 8000),
+    customer: (field("Customer Name") || field("Customer")).slice(0, 200),
+    description: (field("Case Description") || field("Description")).slice(0, 500),
+    byCustomer: /updated by customer/i.test(subject) || /Customer Note\s*:/i.test(text),
+    body: (!["updated"].includes(action) && !/updated by customer/i.test(subject) ? `[NICE: ${action}]\n` : "") + dd.text.replace(/\n{3,}/g, "\n\n").slice(0, 8000),
     merged: dd.merged,
     portal: /^https:\/\//i.test(portal) ? portal.slice(0, 500) : "",
   };
@@ -149,7 +155,7 @@ async function importInto(row, kase, { notify = true, user = null } = {}) {
     // Our reply: a team activity under the engineer's name (clears "รอฝั่งเรา"); nobody is notified.
     const u = await one("SELECT id FROM users WHERE lower(email) = $1", [lower(row.sender)]);
     await q("INSERT INTO case_activities (case_id, activity_date, kind, detail, is_system, created_by) VALUES ($1,$2,$3,$4,false,$5)", [
-      kase.id, bkkDate(at), KIND_OUT, `${bkkTime(at)} น. · ส่งถึง NICE ทาง email\n\n${row.body || "(ไม่มีข้อความ)"}`, u ? u.id : user ? user.id : null,
+      kase.id, bkkDate(at), KIND_OUT, `${bkkTime(at)} น. · ${/updated by customer/i.test(row.subject || "") ? "อัปเดตบน NICE Portal" : "ส่งถึง NICE ทาง email"}${!u && row.updated_by ? ` · ${row.updated_by}` : ""}\n\n${row.body || "(ไม่มีข้อความ)"}`, u ? u.id : user ? user.id : null,
     ]);
     await q("UPDATE nice_mails SET status = 'imported', case_id = $2, reason = NULL WHERE id = $1", [row.id, kase.id]);
     return;
@@ -219,17 +225,28 @@ async function processMessage(s, m) {
   // copy of the reply we already took from the engineer's own mail (or one posted on the portal): skip it when that
   // reply is already in the case, otherwise keep it as our reply.
   let echo = null;
-  if (p.updatedBy) echo = await one("SELECT id, email FROM users WHERE lower(display_name) = lower($1) AND active LIMIT 1", [p.updatedBy]).catch(() => null);
+  if (p.updatedBy) {
+    echo = await one("SELECT id, email FROM users WHERE lower(display_name) = lower($1) AND active LIMIT 1", [p.updatedBy]).catch(() => null);
+    // Name on NICE differs from ours (e.g. Thai display name): try the first name against the email (pipat@…).
+    if (!echo && p.byCustomer) {
+      const first = lower(p.updatedBy.split(/\s+/)[0]).replace(/[^a-z]/g, "");
+      if (first.length >= 3) echo = await one(`SELECT id, email FROM users WHERE lower(email) LIKE $1 AND active LIMIT 1`, [`${first}%@${OUR_DOMAIN}`]).catch(() => null);
+    }
+  }
   let status = authFail ? "ignored" : !p.cs ? "ignored" : "unmatched";
   let reason = authFail ? "ไม่ผ่านการตรวจผู้ส่ง (SPF/DMARC)" : !p.cs ? "ไม่พบเลข CS" : null;
   let sender = from;
-  if (echo && status === "unmatched") {
-    const recent = await one(
-      `SELECT 1 FROM nice_mails WHERE lower(cs_number) = lower($1) AND lower(sender) = lower($2) AND coalesce(nice_at, received_at) > now() - interval '6 hours'`,
-      [p.cs, echo.email]
-    );
-    if (!p.body.trim() || recent) { status = "ignored"; reason = `แจ้งเตือนซ้ำของการตอบจากทีมเรา (${p.updatedBy})`; }
-    else sender = lower(echo.email); // posted on the portal: record it as our reply
+  if ((echo || p.byCustomer) && status === "unmatched") {
+    const who = echo ? lower(echo.email) : `customer@${OUR_DOMAIN}`;
+    // Same text already in (the engineer's own email reached us too): keep one copy.
+    const key = norm(p.body).slice(0, 160);
+    const dup = key && (await one(
+      `SELECT 1 FROM nice_mails WHERE lower(cs_number) = lower($1) AND sender LIKE $2 AND status IN ('imported','unmatched') AND left(regexp_replace(lower(body), '\\s+', ' ', 'g'), 160) = $3`,
+      [p.cs, `%@${OUR_DOMAIN}`, key]
+    ));
+    if (!p.body.trim()) { status = "ignored"; reason = `แจ้งเตือนการอัปเดตจากทีมเรา (${p.updatedBy}) ไม่มีข้อความ`; }
+    else if (dup) { status = "ignored"; reason = `ข้อความเดียวกับที่บันทึกแล้ว (${p.updatedBy})`; }
+    else sender = who; // our engineer's update (portal note or echo): record it as our reply
   }
   const row = await one(
     `INSERT INTO nice_mails (message_id, cs_number, status, reason, sender, subject, updated_by, nice_at, impact, customer, description, body, portal_url, received_at)
@@ -360,6 +377,35 @@ async function cleanup() {
   return { removed };
 }
 
+/** Read again the NICE mails stored with no text (formats the reader did not know yet), from the mailbox copy
+ *  (kept keepDays). The empty activity is replaced by the real text. */
+async function reread(user) {
+  const s = await settings();
+  if (!s.enabled || !s.mailbox) throw bad("ยังไม่ได้เปิดใช้");
+  if (!live()) throw bad("โหมดข้อมูลจำลอง อ่านกล่องจริงไม่ได้");
+  const rows = await all(`SELECT * FROM nice_mails WHERE coalesce(length(body),0) = 0 AND message_id NOT LIKE 'sim-%' AND created_at > now() - ($1 || ' days')::interval ORDER BY id`, [String(s.keepDays)]);
+  const out = { checked: rows.length, fixed: 0, notFound: 0, stillEmpty: 0 };
+  for (const r of rows) {
+    const id = r.message_id.replace(/'/g, "''");
+    const found = await graph.graph("get", `${mbPath(s.mailbox)}/messages?$filter=internetMessageId eq '${encodeURIComponent(id)}'&$select=${SELECT}`).catch(() => ({ value: [] }));
+    const m = (found.value || [])[0];
+    if (!m) { out.notFound++; continue; }
+    if (!parse(m).body.trim()) { out.stillEmpty++; continue; }
+    if (r.case_id) {
+      const a = await one(
+        `SELECT id FROM case_activities WHERE case_id = $1 AND kind IN ($2, $3) AND detail LIKE '%(ไม่มีข้อความ)%' AND ($4::text IS NULL OR detail LIKE $4 || '%') ORDER BY abs(extract(epoch FROM created_at - $5::timestamptz)) LIMIT 1`,
+        [r.case_id, KIND, KIND_OUT, r.updated_by, r.created_at]
+      );
+      if (a) await q("DELETE FROM case_activities WHERE id = $1", [a.id]);
+    }
+    await q("DELETE FROM nice_mails WHERE id = $1", [r.id]);
+    await processMessage(s, m);
+    out.fixed++;
+  }
+  await audit(user, "nice_mail_reread", null, out);
+  return out;
+}
+
 // ------------------------------------------------------------ case page
 /** NICE summary for one case: impact, last update and whether NICE is waiting for us (no team activity since). */
 async function forCase(caseId) {
@@ -388,6 +434,7 @@ function mount(api, { wrap, need, loadVisible }) {
     res.json({ settings: s, status: await getSetting("nice_mail_status", null), stats: Object.fromEntries(stats.map((x) => [x.status, x.n])), recent, mock: !live() });
   }));
   api.put("/nice-admin", admin, wrap(async (req, res) => res.json({ ok: true, settings: await saveSettings(req.user, req.body || {}) })));
+  api.post("/nice-admin/reread", admin, wrap(async (req, res) => res.json({ ok: true, ...(await reread(req.user)) })));
   api.post("/nice-admin/poll", admin, wrap(async (req, res) => res.json({ ok: true, ...(await poll({ manual: true })) })));
   // Admin test: run a pasted NICE email through the same parser (nothing is read from the real mailbox).
   api.post("/nice-admin/simulate", admin, wrap(async (req, res) => {
