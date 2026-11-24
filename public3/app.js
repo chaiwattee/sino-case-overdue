@@ -5631,14 +5631,16 @@ ${r.accounts.length ? `<div class="tablewrap"><table><thead><tr><th>Username</th
 ${r.accounts.map((a) => `<tr><td class="mono">${esc(a.username)}</td><td>${esc(a.name)}</td><td>${esc(a.email || "-")}</td><td>${a.active === undefined ? "" : st(a)}</td><td>${a.lastLoginAt ? fdt(a.lastLoginAt) : "-"}</td>
 ${r.canManage ? `<td class="right" style="white-space:nowrap">${a.locked ? `<button class="btn" type="button" data-pa-unlock="${a.id}">ปลดล็อก</button> ` : ""}<button class="btn" type="button" data-pa-reset="${a.id}">รีเซ็ตรหัสผ่าน</button> <button class="btn" type="button" data-pa-act="${a.id}" data-on="${a.active ? 0 : 1}">${a.active ? "ปิดใช้" : "เปิดใช้"}</button></td>` : ""}</tr>`).join("")}</tbody></table></div>` : `<div class="empty">ยังไม่มีบัญชี</div>`}`;
     const showTemp = (u, pw) => {
-      const d = document.getElementById("dlg") || document.body.appendChild(Object.assign(document.createElement("dialog"), { id: "dlg" }));
+      // Its own dialog: reusing #dlg right after the create form closed it let that "close" event empty this one.
+      document.getElementById("pa-pw")?.remove();
+      const d = document.body.appendChild(Object.assign(document.createElement("dialog"), { id: "pa-pw" }));
       d.innerHTML = `<form method="dialog" class="card stack"><h2 style="margin:0">รหัสผ่านเริ่มต้นของ ${esc(u)}</h2>
 <p class="mono" style="font-size:22px;margin:4px 0;user-select:all">${esc(pw)}</p>
 <div class="banner warn">แสดงครั้งเดียว ปิดหน้าต่างนี้แล้วดูอีกไม่ได้ · ส่งให้ลูกค้าผ่านช่องทางที่ปลอดภัย แยกจาก username (เช่น โทรบอก หรือ SMS) ไม่ส่งในแชทหรือ email ฉบับเดียวกัน · ลูกค้าต้องตั้งรหัสใหม่เมื่อเข้าครั้งแรก</div>
 <div class="right"><button class="btn" type="button" id="pa-copy">คัดลอก</button> <button class="btn primary">ปิด</button></div></form>`;
       d.showModal();
       d.querySelector("#pa-copy").onclick = () => navigator.clipboard.writeText(pw).then(() => toast("คัดลอกแล้ว")).catch(() => toast("คัดลอกไม่ได้ กรุณาเลือกข้อความเอง"));
-      d.addEventListener("close", () => { d.innerHTML = ""; loadPortalAccounts(host, site); }, { once: true });
+      d.addEventListener("close", () => { d.remove(); loadPortalAccounts(host, site); }, { once: true });
     };
     const add = host.querySelector("#pa-add");
     if (add) add.onclick = () => {
