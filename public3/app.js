@@ -3397,6 +3397,8 @@ ${c.csNumber ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"
     $app.innerHTML = `
 <div class="head"><div><h1>NICE / Sino Response</h1><p>เวลาตอบระหว่างทีมเรากับ NICE ในเคสที่มี CS Number · ${note} · ข้อมูลประกอบ ไม่นับใน KPI</p></div>
 <div class="actions"><input type="month" id="nr-m" value="${d.month}"><button class="btn" type="button" id="nr-x">Export Excel</button></div></div>
+<form class="nr-search" id="nr-sf"><input type="search" id="nr-q" placeholder="ค้นหา CS Number หรือเลขเคส เช่น CS5100020 · CASE-2026-11-0169" value="${esc(params.q || "")}"><button class="btn primary">ค้นหา</button>${params.q ? `<a class="btn" href="#/nice-response?${qs({ month: d.month, tab })}">ล้าง</a>` : ""}</form>
+<div id="nr-res"></div>
 <div class="nr-tabs"><a href="#/nice-response?${qs({ month: d.month, tab: "nice", team: params.team || "" })}" class="${tab === "nice" ? "on" : ""}">NICE Response <span>เวลาที่ NICE ใช้ตอบเรา</span></a><a href="#/nice-response?${qs({ month: d.month, tab: "sino", team: params.team || "" })}" class="${tab === "sino" ? "on" : ""}">Sino Response <span>เวลาที่ทีมเราใช้ตอบ NICE</span></a></div>
 <div class="kpis nr-k"><div class="kpi"><span>${tab === "nice" ? "NICE" : "ทีมเรา"} ตอบเฉลี่ย</span><b>${fmtH(x.avg)}</b><small>เดือนก่อน ${fmtH(x.prevAvg)}</small></div>
 <div class="kpi"><span>ตอบทันเป้า</span><b class="${x.onTime != null && x.onTime < 80 ? "t-over" : ""}">${x.onTime == null ? "-" : x.onTime + "%"}</b><small>${x.n - x.late} / ${x.n} ครั้ง</small></div>
@@ -3410,6 +3412,8 @@ ${x.byImpact.map((i) => `<tr><td>${chipImp(i.impact)}</td><td class="n">${i.n}</
 <section class="card"><h2>เฉลี่ยรายสัปดาห์</h2>${x.weeks.length ? `<div class="nr-bars">${x.weeks.map((w) => `<div><small>${fmtH(w.avg)}</small><i style="height:${Math.max(4, Math.round(((w.avg || 0) / maxW) * 110))}px"></i><span>${fd(w.week)}</span></div>`).join("")}</div>` : `<p class="muted" style="margin:0">ยังไม่มีข้อมูล</p>`}</section></div>
 ${tab === "sino" ? `<section class="card"><h2>ราย engineer (เดือนนี้)</h2>${x.people.length ? `<table class="pc-table"><thead><tr><th>ผู้ตอบ</th><th class="n">ครั้ง</th><th class="n">เฉลี่ย</th><th class="n">เกินเป้า</th></tr></thead><tbody>${x.people.map((p) => `<tr><td>${esc(p.name)}</td><td class="n">${p.n}</td><td class="n">${fmtH(p.avg)}</td><td class="n ${p.late ? "t-over" : ""}">${p.late}</td></tr>`).join("")}</tbody></table>` : `<p class="muted" style="margin:0">ยังไม่มีข้อมูล</p>`}</section>` : ""}`;
     bindRowLinks();
+    $("nr-sf").onsubmit = (e) => { e.preventDefault(); location.hash = "#/nice-response?" + qs({ month: d.month, tab, q: $("nr-q").value.trim() }); };
+    if (params.q) niceSearch($("nr-res"), params.q);
     $("nr-m").onchange = () => (location.hash = "#/nice-response?" + qs({ month: $("nr-m").value, tab, team: params.team || "" }));
     $("nr-x").onclick = () => {
       const rows = [["ฝั่ง", "เคส", "CS", "ลูกค้า", "ทีม", "Impact", "เริ่มรอ", "ตอบเมื่อ", "ผู้ตอบ", "ชั่วโมง", "เป้า (ชม.)", "เกินเป้า"]].concat(
@@ -3420,6 +3424,24 @@ ${tab === "sino" ? `<section class="card"><h2>ราย engineer (เดือ�
       a.download = `${tab}-response-${d.month}.csv`;
       a.click();
     };
+  }
+
+  async function niceSearch(host, q) {
+    host.innerHTML = `<section class="card"><p class="muted" style="margin:0">กำลังค้นหา…</p></section>`;
+    let d;
+    try { d = await api(`/reports/nice-response/search?${qs({ q })}`); }
+    catch (err) { host.innerHTML = `<section class="card"><div class="banner err">${esc(err.message)}</div></section>`; return; }
+    if (!d.items.length) { host.innerHTML = `<section class="card"><p class="muted" style="margin:0">ไม่พบเคสที่มี CS Number หรือเลขเคส “${esc(q)}” ในทีมที่คุณเห็น</p></section>`; return; }
+    const box = (lbl, x, t) => `<div class="kpi"><span>${lbl}</span><b>${x.n ? fmtH(x.avg) : "-"}</b><small>${x.n} ครั้ง · เป้า ${fmtH(t)}${x.late ? ` · <span class="t-over">เกินเป้า ${x.late}</span>` : ""}</small></div>`;
+    host.innerHTML = d.items.map((c) => {
+      const r = c.resp;
+      const now = r && r.now;
+      return `<section class="card nr-hit"><div class="title"><h2><a class="mono" href="#/case/${c.caseId}">${esc(c.caseNo)}</a> · <span class="mono">${esc(c.cs)}</span></h2><span class="muted">${esc(c.site || "-")} · ทีม ${esc(teamLabel(c.team || ""))} · ${esc(c.owner || "-")} · ${esc(c.status || "")}</span></div>
+<p style="margin:0 0 10px">${esc(c.task || "")} <span class="chip ${/critical|high/i.test(c.impact) ? "c-overdue" : /medium/i.test(c.impact) ? "c-r1" : "c-normal"}">${esc(c.impact)}</span></p>
+${!r ? `<p class="muted" style="margin:0">ยังไม่มีการตอบระหว่าง NICE กับทีมเราในเคสนี้</p>` : `<div class="kpis nr-k">${box("NICE ตอบเฉลี่ย", r.nice, r.targets.nice)}${box("ทีมเราตอบเฉลี่ย", r.sino, r.targets.sino)}
+<div class="kpi"><span>ตอนนี้</span><b class="${now && now.late ? "t-over" : ""}">${now ? (now.ball === "nice" ? "รอ NICE" : "รอฝั่งเรา") : "ปิดแล้ว / ไม่มีรอ"}</b><small>${now ? `${fmtH(now.hours)} · เป้า ${fmtH(now.target)}` : ""}</small></div></div>
+<div class="nr-tl"><b>ไทม์ไลน์การตอบทั้งหมด (${r.timeline.length})</b>${r.timeline.map((x) => `<div><span>${fdt(x.to)}</span><span class="${x.side === "nice" ? "in" : "out"}">${x.side === "nice" ? "NICE ตอบ" : "เราตอบ"}${x.by ? " · " + esc(x.by) : ""}</span><span class="${x.late ? "t-over" : ""}">${fmtH(x.hours)}</span></div>`).join("")}</div>`}</section>`;
+    }).join("");
   }
 
   async function viewNiceAdmin() {

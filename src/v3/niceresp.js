@@ -122,7 +122,7 @@ async function actsFor(ids) {
 const OPEN_SQL = `lower(coalesce(c.status,'')) NOT IN (${config.closedStatuses.map((x) => `'${String(x).toLowerCase().replace(/'/g, "''")}'`).join(",")})`;
 
 /** NICE card on one case. */
-async function forCase(caseId) {
+async function forCase(caseId, { full = false } = {}) {
   const c = await one(`SELECT c.id, c.cs_number, c.nice_impact, c.end_date, ${OPEN_SQL} AS open FROM cases c WHERE c.id = $1`, [caseId]);
   if (!c || !c.cs_number) return null;
   const [s, cal] = [await settings(), await calendar()];
@@ -134,7 +134,8 @@ async function forCase(caseId) {
     now: c.open ? current(x, cal, s, c.nice_impact) : null,
     nice: { avg: avg(nice), n: nice.length, late: nice.filter((r) => r.late).length },
     sino: { avg: avg(sino), n: sino.length, late: sino.filter((r) => r.late).length },
-    timeline: x.rows.slice(-8).reverse(),
+    timeline: (full ? x.rows : x.rows.slice(-8)).slice().reverse(),
+    targets: { nice: s.niceTargets[c.nice_impact || "Medium"], sino: s.sinoTargets[c.nice_impact || "Medium"] },
     niceMode: s.niceMode, hours: cal.label,
   };
 }
@@ -230,6 +231,21 @@ function fmt(h) {
 function mount(api, { wrap, need, loadVisible }) {
   api.get("/nice-response/settings", need("settings_manage"), wrap(async (req, res) => res.json({ settings: await settings(), hours: (await calendar()).label })));
   api.put("/nice-response/settings", need("settings_manage"), wrap(async (req, res) => res.json({ ok: true, settings: await saveSettings(req.user, req.body || {}) })));
+  // Search one case by CS Number or our case number: the whole back-and-forth with NICE.
+  api.get("/reports/nice-response/search", wrap(async (req, res) => {
+    if (["viewer", "requester"].includes(req.user.role)) throw bad("ไม่มีสิทธิ์ดูรายงานนี้", 403);
+    const t = String(req.query.q || "").trim().slice(0, 60);
+    if (t.length < 3) throw bad("พิมพ์อย่างน้อย 3 ตัวอักษร");
+    const params = [`%${t.toLowerCase()}%`];
+    let where = "(lower(c.cs_number) LIKE $1 OR lower(c.case_no) LIKE $1) AND coalesce(c.cs_number,'') <> ''";
+    if (!["admin", "observer"].includes(req.user.role)) { params.push(req.user.teams || []); where += ` AND c.team = ANY($2)`; }
+    const cases = await all(
+      `SELECT c.id, c.case_no, c.cs_number, c.site, c.team, c.task, c.status, c.nice_impact, u.display_name AS owner
+         FROM cases c LEFT JOIN users u ON u.id = c.owner_id WHERE ${where} ORDER BY c.id DESC LIMIT 10`, params);
+    const items = [];
+    for (const c of cases) items.push({ caseId: c.id, caseNo: c.case_no, cs: c.cs_number, site: c.site, team: c.team, task: c.task, status: c.status, impact: c.nice_impact || "Medium", owner: c.owner, resp: await forCase(c.id, { full: true }) });
+    res.json({ items });
+  }));
   api.get("/reports/nice-response", wrap(async (req, res) => {
     if (["viewer", "requester"].includes(req.user.role)) throw bad("ไม่มีสิทธิ์ดูรายงานนี้", 403);
     res.json(await report(req.user, { month: req.query.month, team: req.query.team || "" }));

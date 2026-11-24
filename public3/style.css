@@ -1150,3 +1150,6 @@ main, .topbar-in, .foot { max-width: 1880px; }
 @media (max-width: 760px) { .nr-k { grid-template-columns: 1fr 1fr; } .nr-tg { grid-template-columns: 1fr 1fr; } }
 .nq-dim{opacity:.6}
 .nq-dim:hover{opacity:1}
+.nr-search{display:flex;gap:8px;margin:0 0 14px;max-width:720px}
+.nr-search input{flex:1}
+.nr-hit .title{flex-wrap:wrap;gap:6px}
