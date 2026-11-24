@@ -21,7 +21,7 @@ async function get(site) {
   ]);
   const iso = (x) => (x instanceof Date ? `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}` : x || null);
   return {
-    profile: profile ? { ...Object.fromEntries(FIELDS.map((f) => [f, profile[f] || ""])), slaDays: profile.sla_days || null, updatedBy: profile.updated_by_name || "", updatedAt: profile.updated_at } : null,
+    profile: profile ? { ...Object.fromEntries(FIELDS.map((f) => [f, profile[f] || ""])), updatedBy: profile.updated_by_name || "", updatedAt: profile.updated_at } : null,
     products: products.map((p) => ({ id: p.id, product: p.product, category: p.category || "", version: p.version || "", modules: p.modules || [], supportKind: p.support_kind || "", supportUntil: iso(p.support_until), team: p.team || "", notes: p.notes || "" })),
     aliases: aliases.map((a) => a.alias),
   };
@@ -33,9 +33,6 @@ async function save(user, b) {
   if (!site) throw bad("ไม่ระบุลูกค้า");
   const p = b.profile || {};
   const vals = FIELDS.map((f) => clip(p[f], f === "notes" ? 2000 : 400));
-  const slaRaw = String(p.slaDays ?? "").trim();
-  const slaDays = slaRaw ? Number(slaRaw) : null;
-  if (slaRaw && !(Number.isInteger(slaDays) && slaDays >= 1 && slaDays <= 90)) throw bad("SLA (วัน) ต้องเป็นเลข 1–90 หรือเว้นว่าง");
   const products = (Array.isArray(b.products) ? b.products : []).slice(0, 40).map((x, i) => {
     const product = clip(x.product, 120);
     if (!product) throw bad(`แถวที่ ${i + 1}: ใส่ชื่อ Product`);
@@ -49,10 +46,10 @@ async function save(user, b) {
   });
   await tx(async (c) => {
     await c.query(
-      `INSERT INTO customer_profiles (site, ${FIELDS.join(", ")}, sla_days, updated_by, updated_at)
-       VALUES ($1, ${FIELDS.map((_, i) => "$" + (i + 2)).join(", ")}, $${FIELDS.length + 2}, $${FIELDS.length + 3}, now())
-       ON CONFLICT (site) DO UPDATE SET ${FIELDS.map((f) => `${f} = EXCLUDED.${f}`).join(", ")}, sla_days = EXCLUDED.sla_days, updated_by = EXCLUDED.updated_by, updated_at = now()`,
-      [site, ...vals, slaDays, user.id]
+      `INSERT INTO customer_profiles (site, ${FIELDS.join(", ")}, updated_by, updated_at)
+       VALUES ($1, ${FIELDS.map((_, i) => "$" + (i + 2)).join(", ")}, $${FIELDS.length + 2}, now())
+       ON CONFLICT (site) DO UPDATE SET ${FIELDS.map((f) => `${f} = EXCLUDED.${f}`).join(", ")}, updated_by = EXCLUDED.updated_by, updated_at = now()`,
+      [site, ...vals, user.id]
     );
     await c.query("DELETE FROM customer_products WHERE lower(site) = lower($1)", [site]);
     for (const r of products)

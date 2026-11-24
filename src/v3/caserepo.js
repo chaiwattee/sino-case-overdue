@@ -221,11 +221,6 @@ const clean = (s, max = 2000) => (s === undefined || s === null ? null : String(
 
 async function createCase(user, body, { ownerId, startDate, slaDays } = {}) {
   const today = d.today();
-  // No SLA given (PM passes its own): use the customer's SLA from the customer page, if one is set.
-  if (!(Number(slaDays) > 0) && body.site && !body.customer_unconfirmed) {
-    const prof = await one("SELECT sla_days FROM customer_profiles WHERE lower(site) = lower($1)", [String(body.site).trim()]).catch(() => null);
-    if (prof?.sla_days) slaDays = prof.sla_days;
-  }
   const start = startDate ? d.fromISODate(startDate) : today;
   const sla = Number(slaDays) > 0 && Number(slaDays) !== config.slaDays ? Number(slaDays) : null; // null = the default SLA
   const due = d.addDays(start, sla || config.slaDays);

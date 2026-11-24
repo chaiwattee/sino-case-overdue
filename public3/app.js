@@ -5560,10 +5560,10 @@ ${s.comment ? `<div class="resol">${esc(s.comment)}</div>` : ""}
       const left = Math.round((new Date(x.supportUntil + "T00:00:00") - new Date()) / 86400000);
       return `${esc(x.supportKind || "สัญญา")} ถึง ${new Date(x.supportUntil + "T00:00:00").toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" })}${left < 0 ? ` <span class="chip c-overdue">หมดแล้ว</span>` : left <= 60 ? ` <span class="chip c-r1">อีก ${left} วัน</span>` : ""}`;
     };
-    const empty = !filled.length && !p.slaDays && !r.products.length;
+    const empty = !filled.length && !r.products.length;
     host.innerHTML = `<section class="card"><div class="title"><h2>ข้อมูลลูกค้าและ Solution ที่ติดตั้ง</h2>${r.canEdit ? `<button class="btn" type="button" data-ci-edit>${empty ? "เพิ่มข้อมูล" : "แก้ไข"}</button>` : ""}</div>
 ${empty ? `<div class="empty" style="padding:12px">ยังไม่มีข้อมูลลูกค้าและรายการ Product${r.aliases.length ? ` · ชื่อเรียกอื่น: ${esc(r.aliases.join(", "))}` : ""}${r.canEdit ? " · กด เพิ่มข้อมูล" : ""}</div>` : `<div class="ci-grid">
-<div>${filled.length || p.slaDays || r.aliases.length ? `<dl class="ci-dl">${p.slaDays ? `<dt>SLA เคสใหม่</dt><dd>${p.slaDays} วัน · แจ้งเตือนปรับตาม SLA นี้</dd>` : ""}${filled.map(([k, l]) => `<dt>${l}</dt><dd>${esc(p[k])}</dd>`).join("")}${r.aliases.length ? `<dt>ชื่อเรียกอื่น</dt><dd>${esc(r.aliases.join(", "))}</dd>` : ""}</dl>` : `<div class="hint">ยังไม่มีข้อมูลลูกค้า</div>`}
+<div>${filled.length || r.aliases.length ? `<dl class="ci-dl">${filled.map(([k, l]) => `<dt>${l}</dt><dd>${esc(p[k])}</dd>`).join("")}${r.aliases.length ? `<dt>ชื่อเรียกอื่น</dt><dd>${esc(r.aliases.join(", "))}</dd>` : ""}</dl>` : `<div class="hint">ยังไม่มีข้อมูลลูกค้า</div>`}
 </div>
 <div><h3 class="ci-h">Solution ที่ติดตั้ง <span class="muted" style="font-weight:400">${r.products.length} Product</span></h3>
 ${r.products.length ? r.products.map((x) => `<div class="ci-prod"><div><div class="nm">${esc(x.product)}</div><div class="sub">${esc(x.category)}</div></div>
@@ -5587,7 +5587,7 @@ ${p.updatedAt ? `<p class="hint" style="margin:10px 0 0">แก้ล่าส�
 <label class="f" style="grid-column:span 3">หมายเหตุ<input name="notes" value="${esc(x.notes || "")}" maxlength="500"></label>
 <div class="ci-rm"><button class="btn" type="button" data-rm>ลบ</button></div></div>`;
     host.innerHTML = `<form class="card" id="ci-form"><div class="title"><h2>ข้อมูลลูกค้า ${esc(site)}</h2></div>
-<div class="formgrid"><label class="f">SLA เคสใหม่ (วัน)<input type="number" name="slaDays" min="1" max="90" step="1" value="${esc(p.slaDays || "")}" placeholder="เว้นว่าง = ค่าปกติของระบบ"><span class="hint">เคสใหม่ของลูกค้านี้ใช้ SLA นี้ แจ้งเตือนรอบ 1/2 ปรับตามความยาว SLA</span></label>${CI_FIELDS.map(([k, l, ph]) => `<label class="f" ${k === "notes" ? 'style="grid-column:1/-1"' : ""}>${l}${k === "notes" ? `<textarea name="${k}" rows="2" maxlength="2000">${esc(p[k] || "")}</textarea>` : `<input name="${k}" value="${esc(p[k] || "")}" placeholder="${esc(ph)}" maxlength="400">`}</label>`).join("")}</div>
+<div class="formgrid">${CI_FIELDS.map(([k, l, ph]) => `<label class="f" ${k === "notes" ? 'style="grid-column:1/-1"' : ""}>${l}${k === "notes" ? `<textarea name="${k}" rows="2" maxlength="2000">${esc(p[k] || "")}</textarea>` : `<input name="${k}" value="${esc(p[k] || "")}" placeholder="${esc(ph)}" maxlength="400">`}</label>`).join("")}</div>
 <h2 style="margin-top:18px">Solution ที่ติดตั้ง</h2><div id="ci-rows">${(r.products.length ? r.products : [{}]).map(prodRow).join("")}</div>
 <datalist id="ci-prod-list">${(LK.product || []).map((x) => `<option value="${esc(x)}">`).join("")}</datalist>
 <div class="right" style="justify-content:space-between"><button class="btn" type="button" id="ci-add">+ เพิ่ม Product</button><span><button class="btn" type="button" id="ci-cancel">ยกเลิก</button> <button class="btn primary">บันทึก</button></span></div></form>`;
@@ -5603,7 +5603,6 @@ ${p.updatedAt ? `<p class="hint" style="margin:10px 0 0">แก้ล่าส�
       e.preventDefault();
       const f = e.target;
       const profile = Object.fromEntries(CI_FIELDS.map(([k]) => [k, f.elements[k].value]));
-      profile.slaDays = f.elements.slaDays.value;
       const products = [...rows.querySelectorAll(".ci-erow")]
         .map((row) => Object.fromEntries([...row.querySelectorAll("input,select")].map((i) => [i.name, i.value])))
         .filter((x) => x.product.trim() || x.version.trim() || x.modules.trim());
