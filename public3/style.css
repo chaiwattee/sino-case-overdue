@@ -915,9 +915,9 @@ tr.pj-off td { opacity: .55; }
 
 /* Service requests: one card per list (to my team / assigned / I asked) with its numbers */
 .sr-scopes { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-bottom: 14px; }
-.sr-scope { display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); color: var(--ink); text-decoration: none; min-width: 0; }
+.sr-scope { display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); color: var(--ink); text-decoration: none; min-width: 0; }
 .sr-scope:hover { border-color: var(--accent); }
-.sr-scope.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--card)); }
+.sr-scope.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
 .sr-scope-l { font-weight: 700; font-size: 16px; }
 .sr-scope-h { font-size: 12.5px; color: var(--muted); }
 .sr-scope-n { margin-top: 6px; font-size: 14px; display: flex; align-items: baseline; gap: 5px; flex-wrap: wrap; }
@@ -1062,7 +1062,7 @@ tr.pj-off td { opacity: .55; }
 .nice-qb { display: flex; gap: 6px; flex-wrap: wrap; align-items: flex-start; }
 
 /* runway: case waiting for close approval */
-.rw-dot.pc { box-shadow: 0 0 0 2px var(--card, #fff), 0 0 0 4px #7C3AED; }
+.rw-dot.pc { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px #7C3AED; }
 
 .pc-table { width: 100%; table-layout: fixed; }
 .pc-table td, .pc-table th { overflow-wrap: anywhere; vertical-align: top; }
@@ -1074,7 +1074,7 @@ tr.pj-off td { opacity: .55; }
 }
 
 /* in-app back button */
-.nav-back { width: auto; align-self: flex-start; justify-self: start; display: inline-flex; align-items: center; gap: 6px; margin: 0 0 12px; padding: 6px 12px; min-height: 36px; border: 1px solid var(--line); border-radius: 999px; background: var(--card, #fff); color: var(--fg, inherit); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+.nav-back { width: auto; align-self: flex-start; justify-self: start; display: inline-flex; align-items: center; gap: 6px; margin: 0 0 12px; padding: 6px 12px; min-height: 36px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--fg, inherit); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
 .nav-back:hover { border-color: var(--accent, #2563EB); color: var(--accent, #2563EB); }
 
 .cm-add { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 10px; }
@@ -1140,7 +1140,7 @@ main, .topbar-in, .foot { max-width: 1880px; }
 .nr-tabs a span { display: block; font-size: 12px; font-weight: 400; }
 .nr-tabs a.on { color: var(--accent, #2563EB); border-color: var(--accent, #2563EB); }
 .nr-k { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
-.nr-k .kpi { background: var(--card, #fff); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; display: grid; gap: 2px; }
+.nr-k .kpi { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; display: grid; gap: 2px; }
 .nr-k .kpi span, .nr-k .kpi small { color: var(--muted); font-size: 13px; } .nr-k .kpi b { font-size: 26px; }
 .nr-bars { display: flex; gap: 14px; align-items: flex-end; min-height: 150px; border-bottom: 1px solid var(--line); padding-top: 8px; }
 .nr-bars > div { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; font-size: 12px; color: var(--muted); }
