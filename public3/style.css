@@ -1148,3 +1148,5 @@ main, .topbar-in, .foot { max-width: 1880px; }
 .nr-tg { display: grid; grid-template-columns: 60px repeat(5, minmax(0, 1fr)); gap: 10px; align-items: end; margin-bottom: 8px; }
 .nr-tg > b { align-self: center; }
 @media (max-width: 760px) { .nr-k { grid-template-columns: 1fr 1fr; } .nr-tg { grid-template-columns: 1fr 1fr; } }
+.nq-dim{opacity:.6}
+.nq-dim:hover{opacity:1}

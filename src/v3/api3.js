@@ -416,7 +416,13 @@ api.post("/case", wrap(async (req, res) => {
   const closedStatus = config.closedStatuses.includes(String(b.status || "").toLowerCase());
   if (closedStatus && !(await perms.can(u, "case_close"))) throw bad("ไม่มีสิทธิ์ปิดเคส", 403);
   if (closedStatus && require("./closereq").needsApproval(u, {})) throw bad("ปิดเคสต้องให้ Manager อนุมัติ: เปิดเคสก่อน แล้วกด “ขอปิดเคส”");
+  const niceId = Number(b.nice_id) || null;
+  if (niceId && String(b.cs_number || "").trim()) {
+    const dup = await one("SELECT case_no, team FROM cases WHERE lower(cs_number) = lower($1) LIMIT 1", [String(b.cs_number).trim()]);
+    if (dup) throw bad(`มีเคส ${dup.case_no} (ทีม ${dup.team || "-"}) ใช้ CS Number นี้อยู่แล้ว · ให้ผูกกับเคสนั้นแทน`, 409);
+  }
   const r = await repo.createCase(u, { ...b, team }, { ownerId: ownerIdNum });
+  if (niceId) await require("./nicemail").openedFrom(u, niceId, { id: r.id, team, cs_number: String(b.cs_number || "").trim(), case_no: (await one("SELECT case_no FROM cases WHERE id = $1", [r.id])).case_no }).catch((e) => console.warn("[nice-mail] openedFrom:", e.message));
   if (r.newSite) await require("./customers").onNewSite(u, r.newSite, { id: r.id, case_no: (await one("SELECT case_no FROM cases WHERE id = $1", [r.id])).case_no, team });
   await audit(u, "case_create", String(r.id), { cs: b.cs_number, site: b.site });
   res.json({ ok: true, id: r.id, newSite: r.newSite });

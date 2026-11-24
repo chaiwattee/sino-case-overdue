@@ -369,6 +369,7 @@ ${edit || !csOf(c) ? "" : `<div class="rca-sec" id="rca-sec"></div>`}
       ["rank", "#/rank", "อันดับ KPI", !!(ME.leaderboard && ME.leaderboard.visible)],
       ["workload", "#/workload", "ภาระงาน", ["admin", "manager", "observer"].includes(ME.user.role)],
       ["csat", "#/csat", "ความพึงพอใจลูกค้า", ["admin", "manager", "observer", "viewer"].includes(ME.user.role)],
+      ["nicequeue", "#/nice-queue", "NICE รอผูกเคส", ["admin", "manager"].includes(ME.user.role)],
       ["niceresp", "#/nice-response", "NICE / Sino Response", !["viewer", "requester"].includes(ME.user.role)],
       ["reports", "#/reports", "Report &amp; Export", lvl("export") !== "none" || lvl("reports_manage") !== "none"],
       ["audit", "#/audit", "ประวัติแก้ไข", lvl("audit_view") !== "none"],
@@ -432,7 +433,7 @@ ${edit || !csOf(c) ? "" : `<div class="rca-sec" id="rca-sec"></div>`}
     ["work", "งานของฉัน", ["mine", "intake", "sr", "projects", "pm"]],
     ["view", "ภาพรวม", ["overview", "team", "owner", "customer"]],
     ["team", "ทีมและผลงาน", ["kpi", "response", "rank", "skills", "workload"]],
-    ["report", "Report", ["reports", "csat", "niceresp"]],
+    ["report", "Report", ["reports", "csat", "nicequeue", "niceresp"]],
     ["admin", "ผู้ดูแลระบบ", ["users", "settings", "audit"]],
   ];
   /** Opening a menu group that shows a number: list what the number is made of (each REQ / SR), with links. */
@@ -1274,6 +1275,8 @@ ${actsHtml(data.activities)}</section>`}
       if (pre && f) {
         if (f.cs_number && pre.cs) f.cs_number.value = pre.cs;
         if (f.task && pre.task) f.task.value = pre.task;
+        if (f.site && pre.site && !f.site.value) f.site.value = pre.site;
+        if (pre.niceId) f.dataset.niceId = pre.niceId;
       }
     }
     bindCombo(f, "site", lk.site, { newLabel: (v) => `+ ใช้ชื่อใหม่ “${esc(v)}” (ต้องให้ Manager อนุมัติ)` });
@@ -1317,6 +1320,7 @@ ${actsHtml(data.activities)}</section>`}
           body.detail = f.detail.value.trim();
           const rcaFile = body.rcaFile;
           delete body.rcaFile;
+          if (f.dataset.niceId) body.nice_id = Number(f.dataset.niceId);
           const r = await post("/case", body);
           if (rcaFile) await post(`/case/${r.id}/rca`, { ...body.rca, file: rcaFile }, "PUT").catch((err) => toast("เปิดเคสแล้ว แต่แนบไฟล์ RCA ไม่สำเร็จ: " + err.message, 6000));
           toast(r.newSite ? `เปิดเคสแล้ว และเพิ่มลูกค้าใหม่ “${r.newSite}” เข้า dropdown` : "เปิดเคสแล้ว", 5000);
@@ -3437,9 +3441,9 @@ ${tab === "sino" ? `<section class="card"><h2>ราย engineer (เดือ�
 <div class="right" style="gap:8px;display:flex;justify-content:flex-end"><button class="btn" type="button" id="nf-reread" title="email ที่บันทึกไว้แบบไม่มีข้อความ อ่านใหม่จากกล่อง (เก็บไว้ตามจำนวนวันที่ตั้ง)">อ่าน email ที่ไม่มีข้อความใหม่</button><button class="btn" type="button" id="nf-poll">อ่านกล่องตอนนี้</button><button class="btn primary" type="submit">บันทึก</button></div>
 <p class="hint" id="nf-msg"></p></form>
 <p class="hint" style="margin-top:10px">${d.mock ? "โหมดข้อมูลจำลอง: ไม่อ่านกล่องจริง · " : ""}อ่านล่าสุด ${st.at ? fdt(st.at) : "-"}${st.error ? ` · <span class="t-over">${esc(st.error)}</span>` : ""} · 7 วัน: นำเข้า ${d.stats.imported || 0} · ไม่พบเคส ${d.stats.unmatched || 0} · ไม่นำเข้า ${d.stats.ignored || 0}</p></section>
-<section class="card"><div class="title"><h2>NICE ที่ยังไม่ตรงกับเคส (${um.items.length})</h2></div>
-${um.items.map((x) => `<div class="nice-q"><div><strong class="mono">${esc(x.cs_number)}</strong> · ${esc(x.customer || "-")} ${x.impact ? `<span class="chip c-r1">${esc(x.impact)}</span>` : ""}<div style="font-size:13px">${esc(x.description || x.subject || "")}</div><div class="muted" style="font-size:12px">${fdt(x.nice_at || x.received_at)} · ${esc(x.updated_by || "NICE")}</div></div>
-<div class="nice-qb"><button class="btn primary" type="button" data-nlink="${x.id}">ผูกกับเคส…</button><button class="btn" type="button" data-nnew="${x.id}">เปิดเคสใหม่จากนี้</button><button class="btn" type="button" data-nskip="${x.id}">ข้าม</button></div></div>`).join("") || `<p class="muted" style="margin:0">ไม่มีรายการ</p>`}
+<section class="card"><div class="title"><h2>NICE ที่ยังไม่ตรงกับเคส (${um.items.length})</h2><a class="btn primary" href="#/nice-queue">เปิดรายการ</a></div>
+<p class="hint" style="margin:0">Manager ผูกได้เฉพาะเคสในทีมตัวเอง · ยกเลิกการผูกได้ภายใน 7 วัน</p>
+${um.items.slice(0, 5).map((x) => `<div class="nice-q"><div><strong class="mono">${esc(x.cs_number)}</strong> · ${esc(x.customer || "-")}<div class="muted" style="font-size:12px">${fdt(x.nice_at || x.received_at)} · ${x.guess.teams.length ? "น่าจะเป็นทีม " + esc(x.guess.teams.map(teamLabel).join(", ")) : "ยังเดาทีมไม่ได้"}</div></div></div>`).join("") || `<p class="muted" style="margin:0">ไม่มีรายการ</p>`}
 </section></div>
 <section class="card"><h2>เป้าเวลาตอบ (NICE / Sino Response)</h2><p class="hint" style="margin-top:0">ชั่วโมง · ฝั่ง Sino นับเฉพาะเวลาทำงาน ${esc(rs.hours)} ไม่รวมเสาร์-อาทิตย์และวันหยุด (1 วันทำการ = ${(() => { const [a, b] = rs.hours.split("–").map((t) => t.split(":").map(Number)); return Math.round(((b[0] * 60 + b[1]) - (a[0] * 60 + a[1])) / 6) / 10; })()} ชม.)</p>
 <form id="nr-f"><div class="nr-tg"><b>NICE</b>${["Critical", "High", "Medium", "Low"].map((k) => `<label class="f">${k}<input type="number" min="0.5" max="720" step="0.5" name="n-${k}" value="${rs.settings.niceTargets[k]}"></label>`).join("")}
@@ -3494,23 +3498,63 @@ ${d.recent.map((r) => `<tr><td>${fdt(r.nice_at || r.received_at)}</td><td class=
     };
     $("ns-dry").addEventListener("click", () => sim(true));
     $("ns-run").addEventListener("click", () => sim(false).then(() => setTimeout(viewNiceAdmin, 600)));
-    $app.querySelectorAll("[data-nlink]").forEach((b) => b.addEventListener("click", async () => {
-      const ref = prompt("เลขเคส (เช่น CASE-2026-11-0142) หรือ id ของเคส");
+  }
+
+  // ------------------------------------------------------------ NICE mails waiting for a case (admin + managers)
+  async function viewNiceQueue() {
+    setNav("nicequeue");
+    const d = await api("/nice/unmatched");
+    const mine = d.teams || [];
+    const item = (x) => `<div class="nice-q ${!d.isAdmin && !x.ours ? "nq-dim" : ""}"><div><strong class="mono">${esc(x.cs_number)}</strong> · ${esc(x.customer || "-")} ${x.impact ? `<span class="chip c-r1">${esc(x.impact)}</span>` : ""}
+${!d.isAdmin && x.ours ? `<span class="chip c-ok">น่าจะเป็นทีมคุณ</span>` : ""}
+<div style="font-size:13px">${esc(x.description || x.subject || "")}</div>
+<div class="muted" style="font-size:12px">${fdt(x.nice_at || x.received_at)} · ${esc(x.updated_by || "NICE")} · ${x.guess.teams.length ? `ทีมที่น่าจะดูแล: <b>${esc(x.guess.teams.map(teamLabel).join(", "))}</b>${x.guess.site ? ` (ลูกค้า ${esc(x.guess.site)})` : ""}` : "ระบบเดาทีมไม่ได้ (ชื่อลูกค้าไม่ตรงกับในระบบ)"}</div></div>
+<div class="nice-qb"><button class="btn primary" type="button" data-nlink="${x.id}">ผูกกับเคส…</button><button class="btn" type="button" data-nnew="${x.id}">เปิดเคสใหม่จากนี้</button>${x.canSkip ? `<button class="btn" type="button" data-nskip="${x.id}">ข้าม</button>` : ""}${!d.isAdmin ? `<button class="btn" type="button" data-nhide="${x.id}" title="ซ่อนเฉพาะคุณ คนอื่นยังเห็น">ไม่ใช่ทีมเรา</button>` : ""}</div></div>`;
+    $app.innerHTML = `
+<div class="crumb">${d.isAdmin ? `<a href="#/nice-admin">อัปเดตจาก NICE</a> / ` : ""}NICE รอผูกเคส</div>
+<div class="head"><div><h1>NICE รอผูกเคส</h1><p>email จาก NICE ที่ CS Number ยังไม่ตรงกับเคสใด · ${d.isAdmin ? "Admin ผูกได้ทุกทีม" : `ผูกหรือเปิดเคสได้เฉพาะในทีมของคุณ (${esc(mine.map(teamLabel).join(", ") || "-")})`} · ผูกผิดยกเลิกได้ภายใน 7 วัน</p></div></div>
+<section class="card"><div class="title"><h2>รอผูก (${d.items.length})</h2></div>
+${d.items.map(item).join("") || `<p class="muted" style="margin:0">ไม่มีรายการ</p>`}</section>
+<section class="card"><div class="title"><h2>ผูกล่าสุด 7 วัน</h2></div>
+${d.links.length ? `<div class="tablewrap"><table><thead><tr><th>เวลา</th><th>CS</th><th>เคส</th><th>ทีม</th><th>โดย</th><th>email</th><th></th></tr></thead><tbody>
+${d.links.map((l) => `<tr><td>${fdt(l.linked_at)}</td><td class="mono">${esc(l.cs_number)}</td><td><a class="mono" href="#/case/${l.case_id}">${esc(l.case_no)}</a> ${esc(l.site || "")}</td><td>${esc(teamLabel(l.team || ""))}</td><td>${esc(l.linked_by_name || "-")}${l.link_kind === "new" ? " · เปิดเคสใหม่" : ""}</td><td>${l.mails}</td>
+<td>${l.canUndo ? `<button class="btn" type="button" data-nundo="${l.id}">ยกเลิกการผูก</button>` : `<span class="muted" style="font-size:12px">เปิดผิดทีม: ใช้ “โอนเคสข้ามทีม”</span>`}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted" style="margin:0">ยังไม่มี</p>`}</section>`;
+    const act = (sel, fn) => $app.querySelectorAll(sel).forEach((b) => b.addEventListener("click", () => fn(b).catch((err) => alert(err.message))));
+    act("[data-nlink]", async (b) => {
+      const ref = prompt(`เลขเคส (เช่น CASE-2026-11-0142)${d.isAdmin ? "" : " · ต้องเป็นเคสในทีมของคุณ"}`);
       if (!ref) return;
-      try {
-        const r = await post(`/nice/unmatched/${b.dataset.nlink}/link`, { case: ref.trim() });
-        location.hash = `#/case/${r.caseId}`;
-      } catch (err) { alert(err.message); }
-    }));
-    $app.querySelectorAll("[data-nnew]").forEach((b) => b.addEventListener("click", () => {
-      const x = um.items.find((i) => String(i.id) === b.dataset.nnew);
-      try { sessionStorage.setItem("nicePrefill", JSON.stringify({ cs: x.cs_number, task: x.description || "" })); } catch (e) {}
+      let r;
+      try { r = await post(`/nice/unmatched/${b.dataset.nlink}/link`, { case: ref.trim() }); }
+      catch (err) {
+        if (!(err.data && err.data.needConfirm)) throw err;
+        if (!confirm(`${err.message}\n\nยืนยันผูกกับเคสนี้?`)) return;
+        r = await post(`/nice/unmatched/${b.dataset.nlink}/link`, { case: ref.trim(), confirm: true });
+      }
+      toast(`ผูกแล้ว${r.more ? ` (+${r.more} email)` : ""} · ยกเลิกได้ภายใน 7 วัน`, 5000);
+      location.hash = `#/case/${r.caseId}`;
+    });
+    act("[data-nnew]", async (b) => {
+      const x = d.items.find((i) => String(i.id) === b.dataset.nnew);
+      const pc = await api(`/nice/unmatched/${x.id}/precheck`);
+      if (pc.warn && !confirm(pc.warn)) return;
+      try { sessionStorage.setItem("nicePrefill", JSON.stringify({ cs: x.cs_number, task: x.description || "", site: pc.guess.site || "", niceId: x.id })); } catch (e) {}
       location.hash = "#/case/new";
-    }));
-    $app.querySelectorAll("[data-nskip]").forEach((b) => b.addEventListener("click", async () => {
-      if (!confirm("ข้ามรายการนี้? email จะไม่ถูกนำเข้าเคสใด")) return;
-      try { await post(`/nice/unmatched/${b.dataset.nskip}/skip`); viewNiceAdmin(); } catch (err) { alert(err.message); }
-    }));
+    });
+    act("[data-nskip]", async (b) => {
+      if (!confirm("ข้ามถาวร? email จะไม่ถูกนำเข้าเคสใด และหายจากรายการของทุกคน")) return;
+      await post(`/nice/unmatched/${b.dataset.nskip}/skip`);
+      viewNiceQueue();
+    });
+    act("[data-nhide]", async (b) => {
+      await post(`/nice/unmatched/${b.dataset.nhide}/hide`);
+      viewNiceQueue();
+    });
+    act("[data-nundo]", async (b) => {
+      if (!confirm("ยกเลิกการผูก? ระบบจะลบ Activity จาก NICE ที่นำเข้า เอา CS Number ออกจากเคส และนำ email กลับไปรอผูก")) return;
+      const r = await post(`/nice/link/${b.dataset.nundo}/undo`);
+      toast(`ยกเลิกแล้ว · ${r.mails} email กลับไปรอผูก`, 5000);
+      viewNiceQueue();
+    });
   }
 
   async function viewIntakeAdmin() {
@@ -7559,6 +7603,7 @@ ${rows.slice(0, 12).map(([p, t]) => `<tr class="click" data-href="#/projects/${p
         case "intake": return parts[1] ? await viewIntakeItem(parts[1]) : await viewIntake(params);
         case "intake-admin": return await viewIntakeAdmin();
         case "nice-admin": return await viewNiceAdmin();
+        case "nice-queue": return await viewNiceQueue();
         case "nice-response": return await viewNiceResponse(params);
         case "skills": return await viewSkills(params);
         case "kpi": return await viewKpi(params);

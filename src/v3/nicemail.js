@@ -154,13 +154,13 @@ async function importInto(row, kase, { notify = true, user = null } = {}) {
   if (lower(row.sender).endsWith("@" + OUR_DOMAIN)) {
     // Our reply: a team activity under the engineer's name (clears "รอฝั่งเรา"); nobody is notified.
     const u = await one("SELECT id FROM users WHERE lower(email) = $1", [lower(row.sender)]);
-    await q("INSERT INTO case_activities (case_id, activity_date, kind, detail, is_system, created_by) VALUES ($1,$2,$3,$4,false,$5)", [
+    const act = await one("INSERT INTO case_activities (case_id, activity_date, kind, detail, is_system, created_by) VALUES ($1,$2,$3,$4,false,$5) RETURNING id", [
       kase.id, bkkDate(at), KIND_OUT, `${bkkTime(at)} น. · ${/updated by customer/i.test(row.subject || "") ? "อัปเดตบน NICE Portal" : "ส่งถึง NICE ทาง email"}${!u && row.updated_by ? ` · ${row.updated_by}` : ""}\n\n${row.body || "(ไม่มีข้อความ)"}`, u ? u.id : user ? user.id : null,
     ]);
-    await q("UPDATE nice_mails SET status = 'imported', case_id = $2, reason = NULL WHERE id = $1", [row.id, kase.id]);
+    await q("UPDATE nice_mails SET status = 'imported', case_id = $2, reason = NULL, activity_id = $3 WHERE id = $1", [row.id, kase.id, act.id]);
     return;
   }
-  await q("INSERT INTO case_activities (case_id, activity_date, kind, detail, is_system, created_by) VALUES ($1,$2,$3,$4,true,$5)", [
+  const act = await one("INSERT INTO case_activities (case_id, activity_date, kind, detail, is_system, created_by) VALUES ($1,$2,$3,$4,true,$5) RETURNING id", [
     kase.id, bkkDate(at), KIND, detailOf(row), user ? user.id : null,
   ]);
   await q(
@@ -168,8 +168,8 @@ async function importInto(row, kase, { notify = true, user = null } = {}) {
             nice_last_at = GREATEST(COALESCE(nice_last_at, $3), $3) WHERE id = $1`,
     [kase.id, row.impact || "", at]
   );
-  await q("UPDATE nice_mails SET status = 'imported', case_id = $2, reason = NULL, handled_by = $3, handled_at = CASE WHEN $3::int IS NULL THEN handled_at ELSE now() END WHERE id = $1", [
-    row.id, kase.id, user ? user.id : null,
+  await q("UPDATE nice_mails SET status = 'imported', case_id = $2, reason = NULL, activity_id = $4, handled_by = $3, handled_at = CASE WHEN $3::int IS NULL THEN handled_at ELSE now() END WHERE id = $1", [
+    row.id, kase.id, user ? user.id : null, act.id,
   ]);
   if (notify) await notifyOwner(row, kase).catch((e) => console.warn("[nice-mail] notify:", e.message));
 }
@@ -422,6 +422,67 @@ async function forCase(caseId) {
 }
 
 // ------------------------------------------------------------ routes
+// ------------------------------------------------------------ who is likely responsible (NICE mails don't say)
+/** Returns a function row → { site, teams } built from our customers, their other names and recent cases. */
+async function guesser() {
+  const names = await all(
+    `SELECT site AS name, site FROM (SELECT DISTINCT site FROM cases WHERE coalesce(site,'') <> '') s
+     UNION SELECT alias AS name, site FROM intake_aliases`
+  ).catch(() => []);
+  const list = names.filter((n) => String(n.name || "").trim().length >= 3).map((n) => ({ key: lower(n.name), site: n.site }));
+  const teamCache = new Map();
+  const teamsOf = async (site) => {
+    if (teamCache.has(site)) return teamCache.get(site);
+    const rows = await all(
+      `SELECT team, sum(n)::int AS n FROM (
+         SELECT team, 100 AS n FROM customer_products WHERE lower(site) = lower($1) AND coalesce(team,'') <> ''
+         UNION ALL SELECT team, count(*)::int FROM cases WHERE lower(site) = lower($1) AND coalesce(team,'') <> '' AND created_at > now() - interval '365 days' GROUP BY team
+       ) x GROUP BY team ORDER BY 2 DESC LIMIT 3`,
+      [site]
+    ).catch(() => []);
+    const t = rows.map((r) => r.team);
+    teamCache.set(site, t);
+    return t;
+  };
+  const word = (hay, k) => new RegExp(`(^|[^a-z0-9])${k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9]|$)`).test(hay);
+  return async (row) => {
+    // "Krungthai Card PCL. (KTC)": a short code in brackets that is one of our names wins over a longer name ("Krungthai" → KTB).
+    let site = null;
+    const c = lower(row.customer);
+    const codes = [...c.matchAll(/\(([^()]{2,20})\)/g)].map((m) => m[1].trim());
+    const code = codes.length ? list.find((n) => codes.includes(n.key)) : null;
+    if (code) site = { site: code.site, len: 99 };
+    else if (c) for (const n of list) if (word(c, n.key) && (!site || n.key.length > site.len)) site = { site: n.site, len: n.key.length };
+    const teams = site ? [...(await teamsOf(site.site))] : [];
+    if (lower(row.sender).endsWith("@" + OUR_DOMAIN)) {
+      const ut = await all("SELECT ut.team FROM user_teams ut JOIN users u ON u.id = ut.user_id WHERE lower(u.email) = $1", [lower(row.sender)]).catch(() => []);
+      ut.forEach((x) => !teams.includes(x.team) && teams.push(x.team));
+    }
+    return { site: site ? site.site : null, teams };
+  };
+}
+/** Tell the managers of the teams that usually look after this customer that someone else took the mail. */
+async function tellTeams(teams, user, row, kase, what) {
+  const ids = (await all("SELECT DISTINCT u.id FROM users u JOIN user_teams ut ON ut.user_id = u.id WHERE u.role = 'manager' AND u.active AND ut.team = ANY($1) AND u.id <> $2", [teams, user.id]).catch(() => [])).map((r) => r.id);
+  if (!ids.length) return;
+  await require("./push").send(ids, {
+    title: `NICE ${row.cs_number}: ${what}`,
+    body: `${user.display_name || user.email || ""} → ${kase.case_no || "#" + kase.id} (ทีม ${kase.team || "-"}) · ถ้าไม่ถูกต้อง ยกเลิกการผูกได้ภายใน 7 วัน`,
+    url: `/#/nice-queue`,
+    tag: `nice-q-${row.id}`,
+  }).catch((e) => console.warn("[nice-mail] tellTeams:", e.message));
+}
+
+/** A case was opened from a waiting item (the new-case form): import its mails now and record who did it. */
+async function openedFrom(user, niceId, kase) {
+  const row = await one("SELECT * FROM nice_mails WHERE id = $1", [Number(niceId)]);
+  if (!row || lower(row.cs_number) !== lower(kase.cs_number)) return;
+  const g = await (await guesser())(row);
+  await matchWaiting(row.cs_number);
+  await q("UPDATE nice_mails SET linked_by = $2, linked_at = now(), link_kind = 'new' WHERE id = $1 AND case_id = $3", [row.id, user.id, kase.id]);
+  if (user.role !== "admin" && g.teams.length && !g.teams.includes(kase.team)) await tellTeams(g.teams, user, row, kase, "เปิดเคสใหม่ในทีมอื่น");
+}
+
 function mount(api, { wrap, need, loadVisible }) {
   const admin = need("settings_manage");
   api.get("/nice-admin", admin, wrap(async (req, res) => {
@@ -451,36 +512,115 @@ function mount(api, { wrap, need, loadVisible }) {
     await audit(req.user, "nice_mail_simulate", parsed.cs || "-", { status: st });
     res.json({ ok: true, status: st, parsed });
   }));
-  api.get("/nice/unmatched", admin, wrap(async (req, res) => {
-    res.json({ items: await all("SELECT id, cs_number, subject, updated_by, nice_at, received_at, impact, customer, description, body FROM nice_mails WHERE status = 'unmatched' ORDER BY id DESC LIMIT 100") });
+  // Waiting list: admin sees and handles everything; a manager links only to cases of their own team.
+  const queueUser = (req, res, next) => (["admin", "manager"].includes(req.user.role) ? next() : res.status(403).json({ error: "ไม่มีสิทธิ์ทำรายการนี้" }));
+  api.get("/nice/unmatched", queueUser, wrap(async (req, res) => {
+    const u = req.user, isAdmin = u.role === "admin", mine = u.teams || [];
+    const rows = await all(
+      `SELECT id, cs_number, subject, sender, updated_by, nice_at, received_at, impact, customer, description, body, hidden_for FROM nice_mails
+        WHERE status = 'unmatched' ${isAdmin ? "" : "AND NOT ($1 = ANY(hidden_for))"} ORDER BY id DESC LIMIT 100`,
+      isAdmin ? [] : [u.id]
+    );
+    const g = await guesser();
+    const items = [];
+    for (const r of rows) {
+      const x = await g(r);
+      const ours = x.teams.some((t) => mine.includes(t));
+      items.push({ ...r, hidden_for: undefined, guess: x, ours, canSkip: isAdmin || ours });
+    }
+    if (!isAdmin) items.sort((a, b) => b.ours - a.ours);
+    const links = await all(
+      `SELECT n.id, n.cs_number, n.link_kind, n.linked_at, n.case_id, c.case_no, c.site, c.team, lu.display_name AS linked_by_name,
+              (SELECT count(*)::int FROM nice_mails m WHERE m.case_id = n.case_id AND lower(m.cs_number) = lower(n.cs_number)) AS mails
+         FROM nice_mails n JOIN cases c ON c.id = n.case_id LEFT JOIN users lu ON lu.id = n.linked_by
+        WHERE n.linked_at > now() - interval '7 days' AND n.status = 'imported'
+          ${isAdmin ? "" : "AND (n.linked_by = $1 OR c.team = ANY($2))"}
+        ORDER BY n.linked_at DESC LIMIT 50`,
+      isAdmin ? [] : [u.id, mine]
+    );
+    res.json({ items, links: links.map((l) => ({ ...l, canUndo: l.link_kind === "link" })), isAdmin, teams: mine });
   }));
-  api.post("/nice/unmatched/:id(\\d+)/link", admin, wrap(async (req, res) => {
+  api.post("/nice/unmatched/:id(\\d+)/link", queueUser, wrap(async (req, res) => {
+    const u = req.user, isAdmin = u.role === "admin";
     const row = await one("SELECT * FROM nice_mails WHERE id = $1 AND status = 'unmatched'", [Number(req.params.id)]);
-    if (!row) throw bad("ไม่พบรายการ หรือจัดการไปแล้ว", 404);
+    if (!row) throw bad("ไม่พบรายการ หรือมีคนจัดการไปแล้ว", 404);
     const ref = String(req.body?.case || "").trim();
     const kase = await one(
-      `SELECT c.id, c.case_no, c.site, c.owner_id, c.cs_number, u.email AS owner_email FROM cases c LEFT JOIN users u ON u.id = c.owner_id
+      `SELECT c.id, c.case_no, c.site, c.team, c.owner_id, c.cs_number, u.email AS owner_email FROM cases c LEFT JOIN users u ON u.id = c.owner_id
         WHERE ${/^\d+$/.test(ref) ? "c.id = $1::int" : "lower(c.case_no) = lower($1)"}`,
       [ref]
     );
     if (!kase) throw bad("ไม่พบเคสนี้");
+    if (!isAdmin && !(u.teams || []).includes(kase.team)) throw bad(`ผูกได้เฉพาะเคสในทีมของคุณ (เคส ${kase.case_no} อยู่ทีม ${kase.team || "-"})`, 403);
     if (kase.cs_number && lower(kase.cs_number) !== lower(row.cs_number)) throw bad(`เคสนี้มี CS Number ${kase.cs_number} อยู่แล้ว ไม่ตรงกับ ${row.cs_number}`);
-    if (!kase.cs_number) {
-      await q("UPDATE cases SET cs_number = $2, updated_at = now() WHERE id = $1", [kase.id, row.cs_number]);
-      await q("INSERT INTO case_activities (case_id, activity_date, kind, detail, is_system, created_by) VALUES ($1, current_date, 'แก้ไขเคส', $2, true, $3)", [
-        kase.id, `ใส่ CS Number ${row.cs_number} จากการผูก email NICE`, req.user.id,
-      ]);
-    }
-    await importInto(row, kase, { user: req.user });
+    const g = await (await guesser())(row);
+    const warn = [];
+    if (g.site && lower(g.site) !== lower(kase.site)) warn.push(`email นี้เป็นของลูกค้า ${g.site} แต่เคส ${kase.case_no} เป็นของ ${kase.site || "-"}`);
+    if (g.teams.length && !g.teams.includes(kase.team)) warn.push(`ลูกค้ารายนี้ปกติทีม ${g.teams.join(", ")} ดูแล`);
+    if (warn.length && !req.body?.confirm) return res.status(409).json({ ok: false, needConfirm: true, error: warn.join(" · ") });
+    await q("UPDATE cases SET cs_number = $2, updated_at = now() WHERE id = $1", [kase.id, row.cs_number]);
+    await q("INSERT INTO case_activities (case_id, activity_date, kind, detail, is_system, created_by) VALUES ($1, current_date, 'แก้ไขเคส', $2, true, $3)", [
+      kase.id, `ใส่ CS Number ${row.cs_number} จากการผูก email NICE`, u.id,
+    ]);
+    await importInto(row, kase, { user: u });
+    await q("UPDATE nice_mails SET linked_by = $2, linked_at = now(), link_kind = 'link' WHERE id = $1", [row.id, u.id]);
     const more = await matchWaiting(row.cs_number);
-    await audit(req.user, "nice_mail_link", row.cs_number, { case_id: kase.id, more });
+    await audit(u, "nice_mail_link", row.cs_number, { case_id: kase.id, more, warned: warn.join(" · ") || undefined });
+    if (g.teams.length && !g.teams.includes(kase.team)) await tellTeams(g.teams, u, row, kase, "ผูก email NICE เข้าเคสของทีมอื่น");
     res.json({ ok: true, caseId: kase.id, more });
   }));
-  api.post("/nice/unmatched/:id(\\d+)/skip", admin, wrap(async (req, res) => {
-    const r = await one("UPDATE nice_mails SET status = 'skipped', handled_by = $2, handled_at = now() WHERE id = $1 AND status = 'unmatched' RETURNING cs_number", [Number(req.params.id), req.user.id]);
-    if (!r) throw bad("ไม่พบรายการ หรือจัดการไปแล้ว", 404);
-    await audit(req.user, "nice_mail_skip", r.cs_number, {});
+  // Undo a link within 7 days: remove the activities it made, take the CS number off the case, put the mails back in the list.
+  api.post("/nice/link/:id(\\d+)/undo", queueUser, wrap(async (req, res) => {
+    const u = req.user;
+    const head = await one(
+      `SELECT n.*, c.team, c.case_no FROM nice_mails n JOIN cases c ON c.id = n.case_id
+        WHERE n.id = $1 AND n.link_kind = 'link' AND n.status = 'imported' AND n.linked_at > now() - interval '7 days'`,
+      [Number(req.params.id)]
+    );
+    if (!head) throw bad("ยกเลิกไม่ได้: ไม่พบการผูก หรือเกิน 7 วันแล้ว", 404);
+    if (!(u.role === "admin" || head.linked_by === u.id || (u.teams || []).includes(head.team))) throw bad("ยกเลิกได้เฉพาะคนที่ผูก, Manager ของทีมเจ้าของเคส หรือ Admin", 403);
+    const rows = await all("SELECT id, activity_id FROM nice_mails WHERE case_id = $1 AND lower(cs_number) = lower($2) AND status = 'imported'", [head.case_id, head.cs_number]);
+    const acts = rows.map((r) => r.activity_id).filter(Boolean);
+    if (acts.length) await q("DELETE FROM case_activities WHERE case_id = $1 AND id = ANY($2::int[])", [head.case_id, acts]);
+    await q(
+      `UPDATE nice_mails SET status = 'unmatched', case_id = NULL, activity_id = NULL, linked_by = NULL, linked_at = NULL, link_kind = NULL, handled_by = NULL, handled_at = NULL
+        WHERE id = ANY($1::bigint[])`,
+      [rows.map((r) => r.id)]
+    );
+    await q("UPDATE cases SET cs_number = NULL, updated_at = now() WHERE id = $1 AND lower(cs_number) = lower($2)", [head.case_id, head.cs_number]);
+    await q("INSERT INTO case_activities (case_id, activity_date, kind, detail, is_system, created_by) VALUES ($1, current_date, 'แก้ไขเคส', $2, true, $3)", [
+      head.case_id, `ยกเลิกการผูก email NICE ${head.cs_number} (ผูกผิดเคส) · เอา CS Number ออก และนำ ${rows.length} email กลับไปรอผูก`, u.id,
+    ]);
+    await audit(u, "nice_mail_unlink", head.cs_number, { case_id: head.case_id, mails: rows.length });
+    res.json({ ok: true, mails: rows.length });
+  }));
+  // "Not our team": hides the item for this person only. A permanent skip: admin, or a manager of the team the customer belongs to.
+  api.post("/nice/unmatched/:id(\\d+)/hide", queueUser, wrap(async (req, res) => {
+    const r = await one("UPDATE nice_mails SET hidden_for = array_append(hidden_for, $2) WHERE id = $1 AND status = 'unmatched' AND NOT ($2 = ANY(hidden_for)) RETURNING cs_number", [Number(req.params.id), req.user.id]);
+    if (r) await audit(req.user, "nice_mail_hide", r.cs_number, {});
     res.json({ ok: true });
+  }));
+  api.post("/nice/unmatched/:id(\\d+)/skip", queueUser, wrap(async (req, res) => {
+    const u = req.user;
+    const row = await one("SELECT * FROM nice_mails WHERE id = $1 AND status = 'unmatched'", [Number(req.params.id)]);
+    if (!row) throw bad("ไม่พบรายการ หรือมีคนจัดการไปแล้ว", 404);
+    if (u.role !== "admin") {
+      const g = await (await guesser())(row);
+      if (!g.teams.some((t) => (u.teams || []).includes(t))) throw bad("ข้ามถาวรได้เฉพาะ Admin หรือ Manager ของทีมที่ดูแลลูกค้ารายนี้ · ใช้ “ไม่ใช่ทีมเรา” แทน", 403);
+    }
+    await q("UPDATE nice_mails SET status = 'skipped', handled_by = $2, handled_at = now() WHERE id = $1", [row.id, u.id]);
+    await audit(u, "nice_mail_skip", row.cs_number, {});
+    res.json({ ok: true });
+  }));
+  // New case from an item: checks before the form opens (the case itself is created by the normal new-case form).
+  api.get("/nice/unmatched/:id(\\d+)/precheck", queueUser, wrap(async (req, res) => {
+    const row = await one("SELECT * FROM nice_mails WHERE id = $1 AND status = 'unmatched'", [Number(req.params.id)]);
+    if (!row) throw bad("ไม่พบรายการ หรือมีคนจัดการไปแล้ว", 404);
+    const dup = await one("SELECT id, case_no, team FROM cases WHERE lower(cs_number) = lower($1) ORDER BY id DESC LIMIT 1", [row.cs_number]);
+    if (dup) throw bad(`มีเคส ${dup.case_no} (ทีม ${dup.team || "-"}) ใช้ CS Number ${row.cs_number} อยู่แล้ว · ให้ผูกกับเคสนั้นแทน`, 409);
+    const g = await (await guesser())(row);
+    const mine = req.user.teams || [];
+    res.json({ ok: true, guess: g, warn: req.user.role !== "admin" && g.teams.length && !g.teams.some((t) => mine.includes(t)) ? `ลูกค้ารายนี้ปกติทีม ${g.teams.join(", ")} ดูแล ยืนยันเปิดในทีมคุณ?` : "" });
   }));
   // Case page: pull now (reads the mailbox, then imports anything waiting for this CS number).
   api.post("/case/:id(\\d+)/nice-pull", wrap(async (req, res) => {
@@ -494,4 +634,4 @@ function mount(api, { wrap, need, loadVisible }) {
   }));
 }
 
-module.exports = { KIND, KIND_OUT, processMessage, settings, saveSettings, parse, dedupe, poll, cleanup, forCase, matchWaiting, mount };
+module.exports = { openedFrom, KIND, KIND_OUT, processMessage, settings, saveSettings, parse, dedupe, poll, cleanup, forCase, matchWaiting, mount };
