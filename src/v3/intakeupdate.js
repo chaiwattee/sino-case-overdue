@@ -143,7 +143,7 @@ async function submit(token, b, ip) {
 
   if (i.status === "claimed" && i.case_id) {
     await q("INSERT INTO case_activities (case_id, activity_date, kind, detail, created_by, is_system) VALUES ($1,$2,$3,$4,NULL,true)", [
-      i.case_id, d.toISODate(d.today()), "ติดต่อลูกค้า", `ลูกค้าเพิ่มข้อมูลทางฟอร์ม · ${stamp}\n${text}`.slice(0, 6000),
+      i.case_id, d.toISODate(d.today()), "ติดต่อลูกค้า", `ลูกค้าเพิ่มข้อมูลทาง${b.via === "portal" ? " Customer Portal" : "ฟอร์ม"} · ${stamp}\n${text}`.slice(0, 6000),
     ]);
     await q("UPDATE cases SET updated_at = now() WHERE id = $1", [i.case_id]);
     if (f.phone || f.contactName) await q("UPDATE intakes SET contact_phone = COALESCE(NULLIF($2,''), contact_phone), contact_name = COALESCE(NULLIF($3,''), contact_name) WHERE id = $1", [i.id, f.phone, f.contactName]);
@@ -154,7 +154,7 @@ async function submit(token, b, ip) {
          product = COALESCE(NULLIF($4,''), product), severity = COALESCE(NULLIF($5,''), severity),
          started_text = COALESCE(NULLIF($6,''), started_text), affected = COALESCE(NULLIF($7,''), affected),
          detail = left(detail || $8, 20000) WHERE id = $1`,
-      [i.id, f.contactName, f.phone, f.product, f.severity, f.startedText, f.affected, `\n\n--- ข้อมูลเพิ่มจากลูกค้า (ฟอร์ม) · ${stamp} ---\n${text}`]
+      [i.id, f.contactName, f.phone, f.product, f.severity, f.startedText, f.affected, `\n\n--- ข้อมูลเพิ่มจากลูกค้า (${b.via === "portal" ? "Customer Portal" : "ฟอร์ม"}) · ${stamp} ---\n${text}`]
     );
   }
   await audit(null, "intake_update", i.req_no, { fields: changed.map(([k]) => k), files: files.length, claimed: i.status === "claimed" });
@@ -216,4 +216,4 @@ router.post("/update/:token", express.json({ limit: "64kb" }), wrap(async (req, 
   res.json(await submit(req.params.token, req.body || {}, (requestContext.getStore() || {}).ip || req.ip));
 }));
 
-module.exports = { router, tokenFor, idFrom, updateUrl, filesForCase, submit, info, SEV_EN };
+module.exports = { router, tokenFor, idFrom, updateUrl, filesForCase, submit, info, addFile, removeFile, SEV_EN };

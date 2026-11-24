@@ -23,6 +23,28 @@
     return body;
   }
   const post = (p, body) => api(p, { method: "POST", body: body || {} });
+  async function upload(caseId, file) {
+    const res = await fetch(`/api/portal/cases/${caseId}/files`, { method: "POST", credentials: "same-origin", headers: { "X-Requested-With": "fetch", "Content-Type": file.type || "application/octet-stream", "X-File-Name": encodeURIComponent(file.name) }, body: file });
+    const b = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(b.error || `Could not attach ${file.name}.`);
+    return b.file;
+  }
+  /** Upload the chosen files one by one; returns their ids. */
+  async function uploadAll(caseId, files, att, onStep) {
+    const list = [...files];
+    if (att && list.length > att.maxFiles) throw new Error(`You can attach up to ${att.maxFiles} files at a time.`);
+    const ids = [];
+    for (const f of list) {
+      if (att && f.size > att.maxMb * 1048576) throw new Error(`${f.name} is larger than ${att.maxMb} MB.`);
+      onStep && onStep(`Uploading ${f.name}…`);
+      ids.push((await upload(caseId, f)).id);
+    }
+    return ids;
+  }
+  const fileInput = (att) => `<label for="fl">Attach files (optional)</label><input id="fl" type="file" multiple ${att ? `accept="${att.ext.map((e) => "." + e).join(",")}"` : ""}>
+<p class="muted small" style="margin:6px 0 0">${att ? `Up to ${att.maxFiles} files, ${att.maxMb} MB each: screenshots, logs, PDF, Office files or ZIP.` : ""}</p>`;
+  const hotlineBox = (h) => !h || !h.lines || !h.lines.length ? "" : `<div class="hot"><div><b>Critical issue?</b> For the fastest response, please call our engineer hotline as well as reporting the case here.</div>
+<div class="hot-l">${h.lines.map((l) => `<a href="tel:${esc(String(l.phone).replace(/[^0-9+]/g, ""))}"><span>${esc(l.label)}</span><b>${esc(l.phone)}</b></a>`).join("")}</div></div>`;
   function toast(t) {
     const d = Object.assign(document.createElement("div"), { className: "toast", textContent: t });
     document.body.appendChild(d); setTimeout(() => d.remove(), 3500);
@@ -107,10 +129,11 @@ ${forced ? `<p class="small" style="margin:16px 0 0"><a href="#" id="out2">Sign 
   const stChip = (c) => `<span class="st st-${c.statusKey}">${esc(c.status)}</span>`;
   async function viewCases() {
     shell("cases", `<div class="muted">Loading…</div>`);
-    const d = await api("/cases");
+    const [d, h] = await Promise.all([api("/cases"), api("/hotline").catch(() => ({}))]);
     const main = $app.querySelector("main");
     main.innerHTML = `${ME.warnExpiry ? `<div class="warn">Your password expires in ${ME.expiresInDays} day${ME.expiresInDays > 1 ? "s" : ""}. <a href="#/password">Change it now</a>.</div>` : ""}
 <div class="head"><h1>Cases for ${esc(d.company)}</h1><a class="btn primary" href="#/new">+ Report a case</a></div>
+${hotlineBox(h.hotline)}
 <div class="filters"><input id="q" type="search" placeholder="Search by case number or subject"><select id="s"><option value="">All statuses</option><option value="open">Open cases</option>
 <option value="received">Received</option><option value="progress">In progress</option><option value="waiting">Awaiting information</option><option value="resolved">Resolved – awaiting confirmation</option><option value="closed">Closed</option></select></div>
 <div class="tablewrap"><table><thead><tr><th>Case number</th><th>Subject</th><th>Reported via</th><th>Status</th><th>Last update</th></tr></thead><tbody id="tb"></tbody></table></div>
@@ -139,15 +162,27 @@ ${forced ? `<p class="small" style="margin:16px 0 0"><a href="#" id="out2">Sign 
 <p style="text-align:center;margin:8px 0 0">${stChip(c)}</p></div>
 <div class="card" style="margin-top:20px"><h2>Updates</h2>
 ${d.updates.map((u) => `<div class="up ${u.mine ? "mine" : u.system ? "sys" : ""}">${esc(u.text)}<small>${esc(u.from)} · ${fdt(u.at)}</small></div>`).join("")}
-${c.canReply ? `<form id="rf"><label for="rt">Reply to the support team</label><textarea id="rt" rows="3" maxlength="3000" placeholder="Add information or answer a question from our team" required></textarea><div style="margin-top:10px"><button class="btn primary">Send</button></div></form>`
-      : c.statusKey === "closed" ? `<p class="muted small">This case is closed. If the issue comes back, please <a href="#/new">report a new case</a>.</p>` : `<p class="muted small">You can reply here once an engineer has been assigned and you have a case number.</p>`}</div></div>
+${c.canAdd ? `<form id="rf"><h2 style="margin-top:20px">Add information</h2><label for="rt">Message to the support team</label><textarea id="rt" rows="3" maxlength="5000" placeholder="More details, answers to our questions, or what changed"></textarea>
+${fileInput(d.attachments)}<div id="rerr" hidden class="err"></div><div style="margin-top:12px"><button class="btn primary">Send</button></div>
+${c.caseNo ? "" : `<p class="muted small" style="margin:8px 0 0">Your request is waiting for an engineer. What you add now is included when the case is opened.</p>`}</form>`
+      : `<p class="muted small">This case is closed. If the issue comes back, please <a href="#/new">report a new case</a>.</p>`}</div></div>
 <div class="card" style="align-self:start"><h2>Details</h2><dl class="meta"><dt>Case number</dt><dd class="mono">${esc(c.caseNo || "Not assigned yet")}</dd><dt>Request</dt><dd class="mono">${esc(c.reqNo)}</dd>
 <dt>System</dt><dd>${esc(c.product || "-")}</dd><dt>Urgency</dt><dd>${esc(c.severity || "-")}</dd><dt>Status</dt><dd>${esc(c.status)}</dd><dt>Last update</dt><dd>${fdt(c.updatedAt)}</dd></dl>
-<h2 style="margin-top:20px">What you reported</h2><p style="white-space:pre-wrap;overflow-wrap:anywhere;margin:0">${esc(c.detail || "")}</p></div></div>`;
+<h2 style="margin-top:20px">What you reported</h2><p style="white-space:pre-wrap;overflow-wrap:anywhere;margin:0">${esc(String(c.detail || "").split("\n\n--- ")[0])}</p>
+${d.files.length ? `<h2 style="margin-top:20px">Files you sent (${d.files.length})</h2><ul class="files">${d.files.map((f) => `<li>${esc(f.name)} <span class="muted small">${Math.max(1, Math.round(f.size / 1024))} KB · ${fd(f.at)}</span></li>`).join("")}</ul>` : ""}
+${c.severity === "Critical" && c.statusKey !== "closed" ? `<div style="margin-top:16px">${hotlineBox(d.hotline)}</div>` : ""}</div></div>`;
     const rf = document.getElementById("rf");
     if (rf) rf.onsubmit = async (e) => {
       e.preventDefault();
-      try { await post(`/cases/${id}/reply`, { text: document.getElementById("rt").value }); toast("Message sent to the support team."); viewCase(id); } catch (x) { toast(x.message); }
+      const err = document.getElementById("rerr"), b = rf.querySelector("button");
+      const text = document.getElementById("rt").value.trim(), fl = document.getElementById("fl").files;
+      if (!text && !fl.length) { err.textContent = "Please type a message or attach a file."; err.hidden = false; return; }
+      err.hidden = true; b.disabled = true;
+      try {
+        const files = await uploadAll(id, fl, d.attachments, (t) => (b.textContent = t));
+        await post(`/cases/${id}/reply`, { text, files });
+        toast("Sent to the support team."); viewCase(id);
+      } catch (x) { err.textContent = x.message; err.hidden = false; b.disabled = false; b.textContent = "Send"; }
     };
   }
 
@@ -155,13 +190,14 @@ ${c.canReply ? `<form id="rf"><label for="rt">Reply to the support team</label><
     shell("new", `<div class="muted">Loading…</div>`);
     const d = await api("/form");
     const main = $app.querySelector("main");
-    main.innerHTML = `<div class="card" style="max-width:760px;margin:0 auto"><h1>Report a case</h1><p class="muted" style="margin:0">You get a request number right away, and an email confirmation like a case reported by email.</p>
+    main.innerHTML = `<div style="max-width:760px;margin:0 auto">${hotlineBox(d.hotline)}</div><div class="card" style="max-width:760px;margin:0 auto"><h1>Report a case</h1><p class="muted" style="margin:0">You get a request number right away, and an email confirmation like a case reported by email.</p>
 <form id="nf"><label for="sj">Subject</label><input id="sj" name="subject" maxlength="150" required placeholder="e.g. Agents cannot log in after the update">
 <label for="pr">Affected system</label><select id="pr" name="product" required><option value="">Choose…</option>${d.products.map((p) => `<option>${esc(p)}</option>`).join("")}</select>
 <label for="sv">Urgency</label><select id="sv" name="severity" required><option value="">Choose…</option>${d.severities.map((s) => `<option value="${esc(s.value)}">${esc(s.label)} — ${esc(s.hint)}</option>`).join("")}</select>
 <label for="dt">Details</label><textarea id="dt" name="detail" rows="6" maxlength="5000" required placeholder="What happened, when it started, how many users are affected, any error message"></textarea>
 <label for="st">When did it start? (optional)</label><input id="st" name="startedText" maxlength="120" placeholder="e.g. Today 09:00">
 <label for="rf2">Your reference number (optional)</label><input id="rf2" name="customerRef" maxlength="120">
+${fileInput(d.attachments)}
 <h2 style="margin-top:24px">Contact for this case</h2>
 <label for="cn">Name</label><input id="cn" name="contactName" required value="${esc(d.contact.name)}">
 <label for="em">Email</label><input id="em" name="email" type="email" required value="${esc(d.contact.email)}">
@@ -175,9 +211,15 @@ ${c.canReply ? `<form id="rf"><label for="rt">Reply to the support team</label><
       const body = Object.fromEntries(["subject", "product", "severity", "detail", "startedText", "customerRef", "contactName", "email", "phone"].map((k) => [k, f[k].value]));
       try {
         const r = await post("/cases", { ...body, confirmDuplicate });
+        const fl = document.getElementById("fl").files;
+        let fileNote = "";
+        if (fl.length) {
+          try { const ids = await uploadAll(r.id, fl, d.attachments, (t) => (b.textContent = t)); await post(`/cases/${r.id}/reply`, { text: "", files: ids }); fileNote = ` ${ids.length} file${ids.length > 1 ? "s" : ""} attached.`; }
+          catch (x) { fileNote = ` Your case was created, but a file could not be attached (${x.message}). You can add it on the case page.`; }
+        }
         main.innerHTML = `<div class="card" style="max-width:640px;margin:0 auto;text-align:center"><h1>Thank you. We received your case.</h1>
 <p>Your request number is <span class="mono" style="font-size:20px">${esc(r.reqNo)}</span></p>
-<p class="muted">We sent a confirmation to your email. An engineer will contact you, and you can follow the case here.${r.afterHours ? " It is outside business hours now: for urgent issues please call our hotline." : ""}</p>
+<p class="muted">We sent a confirmation to your email. An engineer will contact you, and you can follow the case here.${esc(fileNote)}${r.afterHours ? " It is outside business hours now: for urgent issues please call our hotline." : ""}</p>${body.severity === "Critical" ? hotlineBox(d.hotline) : ""}
 <p><a class="btn primary" href="#/case/${r.id}">View the case</a> <a class="btn" href="#/cases">Back to our cases</a></p></div>`;
       } catch (x) {
         if (x.status === 409 && !confirmDuplicate && confirm(`${x.message}\n\nSend as a new case anyway?`)) return send(true);

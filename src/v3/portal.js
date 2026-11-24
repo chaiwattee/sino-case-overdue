@@ -205,45 +205,85 @@ async function loadOwn(req) {
   return r;
 }
 
+// Customer-facing hotline (from the hotline settings): shown with a note to call for Critical cases.
+async function hotline() {
+  const h = await require("./intake").hotlineForCustomers().catch(() => ({ lines: [] }));
+  return { lines: h.lines.map((l) => ({ label: l.label, phone: l.phone })), waitMinutes: h.waitMinutes };
+}
+const upd = () => require("./intakeupdate");
+
 router.get("/cases/:id(\\d+)", need(), wrap(async (req, res) => {
   const r = await loadOwn(req);
-  const updates = r.case_id
-    ? await all(
-        `SELECT a.id, a.detail, a.created_at, a.kind, a.portal_user_id, pu.display_name AS customer_name
-           FROM case_activities a LEFT JOIN portal_users pu ON pu.id = a.portal_user_id
-          WHERE a.case_id = $1 AND a.customer_visible ORDER BY a.created_at DESC, a.id DESC LIMIT 200`, [r.case_id])
+  // Sino's updates: only activities an engineer marked for the customer.
+  const staff = r.case_id
+    ? await all("SELECT detail, created_at FROM case_activities WHERE case_id = $1 AND customer_visible AND portal_user_id IS NULL ORDER BY created_at DESC LIMIT 200", [r.case_id])
     : [];
-  const list = updates.map((a) => ({ at: a.created_at, text: a.portal_user_id ? String(a.detail).replace(/^[^\n]*?\(Portal\): /, "") : a.detail, from: a.portal_user_id ? a.customer_name || "You" : "Sino S-Tech Support", mine: !!a.portal_user_id }));
+  // The customer's own additions (portal or the update form), before and after an engineer took the case.
+  const mine = await all("SELECT data, created_at, source FROM intake_updates WHERE intake_id = $1 AND source = 'form' ORDER BY id DESC LIMIT 100", [r.id]);
+  const files = await all("SELECT id, file_name, size, created_at FROM intake_files WHERE intake_id = $1 AND (update_id IS NOT NULL OR link_id IS NOT NULL) ORDER BY id", [r.id]).catch(() => []);
+  const list = [
+    ...staff.map((a) => ({ at: a.created_at, text: a.detail, from: "Sino S-Tech Support", mine: false })),
+    ...mine.map((u) => {
+      const d = u.data || {};
+      const f = (d.files || []).length ? `\nAttached: ${d.files.join(", ")}` : "";
+      return { at: u.created_at, text: `${d.detail || (f ? "" : "Updated details")}${f}`.trim(), from: "You added", mine: true };
+    }),
+  ];
   if (r.case_id) list.push({ at: r.created_at, text: `We received your request and assigned it case number ${r.case_no}.`, from: "Sino S-Tech Support", mine: false, system: true });
   list.push({ at: r.created_at, text: `Request ${r.req_no} submitted by ${r.contact_name || "your team"} via ${CH[r.channel] || "web form"}.`, from: "System", mine: false, system: true });
-  res.json({ ok: true, case: { ...rowOut(r), detail: r.detail, canReply: !!r.case_id && statusOf(r).key !== "closed" }, updates: list });
+  list.sort((x, y) => new Date(y.at) - new Date(x.at));
+  const closed = statusOf(r).key === "closed";
+  const s = await require("./intake").settings();
+  res.json({
+    ok: true,
+    case: { ...rowOut(r), detail: r.detail, canAdd: !closed },
+    updates: list,
+    files: files.map((f) => ({ name: f.file_name, size: f.size, at: f.created_at })),
+    attachments: { maxFiles: s.attachMaxFiles, maxMb: s.attachMaxMb, ext: require("./intake").FILE_EXT },
+    hotline: await hotline(),
+  });
 }));
 
+// Add information (text and / or files) to a case, before or after an engineer has taken it. Uses the same path as the
+// customer update form: before a case exists it is added to the request; afterwards it goes into the case and the owner is told.
 router.post("/cases/:id(\\d+)/reply", need(), wrap(async (req, res) => {
   const r = await loadOwn(req);
-  if (!r.case_id) throw bad("You can reply once an engineer has been assigned. Please wait for the case number.");
   if (statusOf(r).key === "closed") throw bad("This case is closed. Please report a new case.");
-  const text = clean(req.body?.text, 3000);
-  if (text.length < 2) throw bad("Please type a message.");
-  const recent = await one("SELECT count(*)::int AS n FROM case_activities WHERE portal_user_id = $1 AND created_at > now() - interval '10 minutes'", [req.pu.id]);
-  if (recent.n >= 10) throw bad("Too many messages. Please wait a few minutes.", 429);
-  await q(
-    `INSERT INTO case_activities (case_id, activity_date, kind, detail, is_system, created_by, customer_visible, portal_user_id)
-     VALUES ($1, (now() AT TIME ZONE 'Asia/Bangkok')::date, 'ข้อความจากลูกค้า', $2, false, NULL, true, $3)`,
-    [r.case_id, `${req.pu.display_name} (Portal): ${text}`, req.pu.id]
-  );
-  const kase = await one("SELECT owner_id, case_no FROM cases WHERE id = $1", [r.case_id]);
+  const text = clean(req.body?.text, 5000);
+  const files = (Array.isArray(req.body?.files) ? req.body.files : []).map(Number).filter(Boolean).slice(0, 20);
+  if (text.length < 2 && !files.length) throw bad("Please type a message or attach a file.");
+  const out = await upd().submit(upd().tokenFor(r.id), { detail: text ? `${req.pu.display_name} (Portal): ${text}` : "", files, via: "portal" }, null);
+  // Keep the customer's own words (without the name prefix staff see) for the portal timeline.
+  await q("UPDATE intake_updates SET data = jsonb_set(data, '{detail}', to_jsonb($2::text)) || jsonb_build_object('portal', true) WHERE id = (SELECT max(id) FROM intake_updates WHERE intake_id = $1)", [r.id, text]);
+  const kase = r.case_id ? await one("SELECT owner_id, case_no FROM cases WHERE id = $1", [r.case_id]) : null;
   if (kase?.owner_id) {
-    await require("./push").send([kase.owner_id], { title: `ลูกค้าตอบใน Portal · ${kase.case_no}`, body: `${req.pu.display_name} (${req.pu.site}): ${text.slice(0, 140)}`, url: `/#/case/${r.case_id}`, tag: `portal-${r.case_id}` }).catch(() => {});
+    await require("./push").send([kase.owner_id], { title: `ลูกค้าเพิ่มข้อมูลใน Portal · ${kase.case_no}`, body: `${req.pu.display_name} (${req.pu.site}): ${(text || `แนบไฟล์ ${files.length} ไฟล์`).slice(0, 140)}`, url: `/#/case/${r.case_id}`, tag: `portal-${r.case_id}` }).catch(() => {});
   }
-  await audit(null, "portal_reply", r.case_no || r.req_no, { user: req.pu.username });
+  await audit(null, "portal_add_info", r.case_no || r.req_no, { user: req.pu.username, files: out.files, before_case: !r.case_id });
+  res.json({ ok: true, files: out.files, beforeCase: !r.case_id });
+}));
+
+// Attach a file (sent one at a time, then listed in the next /reply). Same types and size limits as the web form.
+router.post("/cases/:id(\\d+)/files", need(), express.raw({ type: () => true, limit: "25mb" }), wrap(async (req, res) => {
+  const r = await loadOwn(req);
+  if (statusOf(r).key === "closed") throw bad("This case is closed.");
+  const name = clean(decodeURIComponent(req.get("X-File-Name") || "file"), 200);
+  const f = await upd().addFile(upd().tokenFor(r.id), name, String(req.get("Content-Type") || "application/octet-stream").slice(0, 100), req.body);
+  res.json({ ok: true, file: f });
+}));
+router.delete("/cases/:id(\\d+)/files/:fid(\\d+)", need(), wrap(async (req, res) => {
+  const r = await loadOwn(req);
+  await upd().removeFile(upd().tokenFor(r.id), Number(req.params.fid));
   res.json({ ok: true });
 }));
+
+router.get("/hotline", need(), wrap(async (req, res) => res.json({ ok: true, hotline: await hotline() })));
 
 router.get("/form", need(), wrap(async (req, res) => {
   const products = (await all("SELECT value FROM lookups WHERE kind='product' AND active ORDER BY sort, lower(value)")).map((r) => r.value);
   const { SEV_EN } = require("./intakeupdate");
-  res.json({ ok: true, products, severities: SEV_EN.map(([value, label, hint]) => ({ value, label, hint })), contact: { name: req.pu.display_name, email: req.pu.email || "", phone: req.pu.phone || "" } });
+  const st = await require("./intake").settings();
+  res.json({ ok: true, hotline: await hotline(), attachments: { maxFiles: st.attachMaxFiles, maxMb: st.attachMaxMb, ext: require("./intake").FILE_EXT }, products, severities: SEV_EN.map(([value, label, hint]) => ({ value, label, hint })), contact: { name: req.pu.display_name, email: req.pu.email || "", phone: req.pu.phone || "" } });
 }));
 
 // New case: goes through the same intake as the web form and email, so the team is notified and claims it as usual.
