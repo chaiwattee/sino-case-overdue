@@ -1123,8 +1123,11 @@ ${allowNew ? `<span class="hint">${newHint}</span>` : ""}</div>`;
     });
   }
 
-  function actsHtml(acts) {
+  function actsHtml(acts, ctx = {}) {
     if (!acts.length) return `<div class="empty">ยังไม่มี Activity</div>`;
+    const pv = (a) => !ctx.portal ? "" : a.portal_user_id ? `<span class="pv on">ข้อความจากลูกค้าใน Portal</span>`
+      : ctx.edit ? `<button type="button" class="pv ${a.customer_visible ? "on" : ""}" data-pv="${a.id}" data-on="${a.customer_visible ? 1 : 0}" title="${a.customer_visible ? "ลูกค้าเห็นข้อความนี้ใน Portal · กดเพื่อซ่อน" : "กดเพื่อให้ลูกค้าเห็นข้อความนี้ใน Portal"}">${a.customer_visible ? "👁 ลูกค้าเห็น" : "แสดงให้ลูกค้า"}</button>`
+      : a.customer_visible ? `<span class="pv on">👁 ลูกค้าเห็น</span>` : "";
     const dotFor = (a) => (a.kind === "ปิดเคส" ? "d-normal" : a.is_system ? "d-closed" : "d-all");
     return `<div class="acts">${acts
       .map((a) => {
@@ -1132,7 +1135,7 @@ ${allowNew ? `<span class="hint">${newHint}</span>` : ""}</div>`;
         const nice = a.kind === "อัปเดตจาก NICE", niceOut = a.kind === "ตอบ NICE";
         return `<div class="act ${nice ? "nice" : niceOut ? "nice-out" : a.is_system ? "sys" : ""}"><div class="dt"><strong>${fd(a.activity_date)}</strong>${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}</div>
 <span class="dot ${nice ? "d-nice" : niceOut ? "d-nice-out" : dotFor(a)}" aria-hidden="true"></span>
-<div><div class="k">${esc(a.kind)}</div><div class="x">${esc(a.detail)}</div><div class="by">${esc(nice ? "NICE (จาก email)" + (a.by ? " · ผูกโดย " + a.by : "") : a.by || (a.is_system ? "ระบบ" : "-"))}${
+<div><div class="k">${esc(a.kind)} ${pv(a)}</div><div class="x">${esc(a.detail)}</div><div class="by">${esc(nice ? "NICE (จาก email)" + (a.by ? " · ผูกโดย " + a.by : "") : a.by || (a.is_system ? "ระบบ" : "-"))}${
           a.activity_date !== isoDay(t) ? ` · บันทึกเมื่อ ${fdt(a.created_at)}` : ""
         }</div></div></div>`;
       })
@@ -1253,10 +1256,11 @@ ${permsC.edit ? `<form id="af" class="stack">
 <label class="f">วันที่ทำ<input type="date" name="date" value="${daysAgo(0)}" max="${daysAgo(0)}" required></label>
 <label class="f">ประเภท<select name="kind">${KINDS.map((k) => `<option>${k}</option>`).join("")}</select></label></div>
 <label class="f">รายละเอียด<textarea name="detail" rows="3" placeholder="วันนี้ทำอะไรไป ผลเป็นอย่างไร ขั้นต่อไปคืออะไร" required></textarea></label>
+
 <p class="hint" id="af-deploy" hidden style="margin:-4px 0 0">สรุป Deploy: Patch / เวอร์ชัน ระบบหรือเครื่องที่ลง ผลการทดสอบ และแผน rollback อย่างน้อย 30 ตัวอักษร จึงนับเป็นงานใน KPI (นับ 1 ครั้งต่อเคส · Product Patch นับมากกว่า MS Patch)</p>
 <p class="hint" id="af-meet" hidden style="margin:-4px 0 0">สรุป Meeting: ผู้เข้าร่วมฝั่งลูกค้า หัวข้อ ข้อตกลง และขั้นต่อไป อย่างน้อย 30 ตัวอักษร จึงนับเป็นงานใน KPI · Onsite (ไปที่ลูกค้า) นับมากกว่า Online · นับสูงสุด 2 ครั้งต่อเคส</p>
-<div class="right"><button class="btn primary" type="submit">เพิ่ม Activity</button></div></form>` : ""}
-${actsHtml(data.activities)}</section>`}
+<div class="right" style="flex-direction:column;align-items:flex-end;gap:6px">${data.portal ? `<label style="font-size:13px;display:inline-flex;gap:6px;align-items:center;white-space:nowrap"><input type="checkbox" name="cv"> ลูกค้าเห็นใน Portal</label>` : ""}<button class="btn primary" type="submit">เพิ่ม Activity</button></div></form>` : ""}
+${actsHtml(data.activities, { portal: data.portal, edit: permsC.edit })}</section>`}
 <dialog id="dlg"></dialog>`;
 
     if (!isNew) {
@@ -1355,13 +1359,19 @@ ${actsHtml(data.activities)}</section>`}
         if (MEETINGS.includes(af.kind.value) && af.detail.value.trim().length < 30 && !confirm("สรุป Meeting สั้นกว่า 30 ตัวอักษร จะไม่นับใน KPI บันทึกต่อไหม?")) return;
         if (DEPLOYS.includes(af.kind.value) && af.detail.value.trim().length < 30 && !confirm("สรุป Deploy สั้นกว่า 30 ตัวอักษร จะไม่นับใน KPI บันทึกต่อไหม?")) return;
         try {
-          await post(`/case/${id}/activity`, { date: af.date.value, kind: af.kind.value, detail: af.detail.value });
+          if (af.cv && af.cv.checked && !confirm("ข้อความนี้ลูกค้าจะเห็นใน Customer Portal ทันที ยืนยัน?")) return;
+          await post(`/case/${id}/activity`, { date: af.date.value, kind: af.kind.value, detail: af.detail.value, customerVisible: !!(af.cv && af.cv.checked) });
           toast("เพิ่ม Activity แล้ว");
           viewCase(id);
         } catch (err) {
           toast(err.message, 6000);
         }
       };
+    $app.querySelectorAll("[data-pv]").forEach((b) => b.addEventListener("click", async () => {
+      const on = b.dataset.on !== "1";
+      if (on && !confirm("ให้ลูกค้าเห็นข้อความนี้ใน Customer Portal?")) return;
+      try { await post(`/case/${id}/activity/${b.dataset.pv}/visible`, { visible: on }, "PUT"); viewCase(id); } catch (err) { toast(err.message, 6000); }
+    }));
     const bc = document.getElementById("btn-close");
     if (bc)
       bc.onclick = async () => {
@@ -5608,6 +5618,62 @@ ${s.comment ? `<div class="resol">${esc(s.comment)}</div>` : ""}
     ["remote_access", "Remote access", "เช่น VPN FortiClient · ขอสิทธิ์ล่วงหน้า 1 วัน"],
     ["notes", "หมายเหตุ", ""],
   ];
+  // Customer portal accounts for one customer: admin / "จัดการรายชื่อลูกค้า" create, reset and disable.
+  async function loadPortalAccounts(host, site) {
+    if (!host) return;
+    let r;
+    try { r = await api("/portal-accounts?site=" + encodeURIComponent(site)); } catch (e) { host.remove(); return; }
+    if (!r.canManage && !r.accounts.length) { host.remove(); return; }
+    const st = (a) => !a.active ? `<span class="chip c-closed">ปิดใช้</span>` : a.locked ? `<span class="chip c-overdue">ล็อกอยู่</span>` : a.mustChange ? `<span class="chip c-r1">รอเปลี่ยนรหัสครั้งแรก</span>` : new Date(a.expiresAt) < new Date() ? `<span class="chip c-r1">รหัสหมดอายุ</span>` : `<span class="chip c-normal">ใช้งาน</span>`;
+    host.innerHTML = `<div class="title"><h2>Customer Portal (${r.accounts.length} บัญชี)</h2>${r.canManage ? `<button class="btn primary" type="button" id="pa-add">+ เพิ่มบัญชี</button>` : ""}</div>
+<p class="hint" style="margin:0 0 8px">ลิงก์สำหรับลูกค้า: <span class="mono">${esc(r.portalUrl)}</span> · ทุกบัญชีของลูกค้านี้เห็นเคสที่ลูกค้าแจ้งทาง email / ฟอร์ม / Portal ทั้งหมด ไม่เห็นเคสภายใน · เห็นเฉพาะ Activity ที่ติ๊ก “แสดงให้ลูกค้า”</p>
+${r.accounts.length ? `<div class="tablewrap"><table><thead><tr><th>Username</th><th>ชื่อ</th><th>Email</th><th>สถานะ</th><th>เข้าล่าสุด</th>${r.canManage ? "<th></th>" : ""}</tr></thead><tbody>
+${r.accounts.map((a) => `<tr><td class="mono">${esc(a.username)}</td><td>${esc(a.name)}</td><td>${esc(a.email || "-")}</td><td>${a.active === undefined ? "" : st(a)}</td><td>${a.lastLoginAt ? fdt(a.lastLoginAt) : "-"}</td>
+${r.canManage ? `<td class="right" style="white-space:nowrap">${a.locked ? `<button class="btn" type="button" data-pa-unlock="${a.id}">ปลดล็อก</button> ` : ""}<button class="btn" type="button" data-pa-reset="${a.id}">รีเซ็ตรหัสผ่าน</button> <button class="btn" type="button" data-pa-act="${a.id}" data-on="${a.active ? 0 : 1}">${a.active ? "ปิดใช้" : "เปิดใช้"}</button></td>` : ""}</tr>`).join("")}</tbody></table></div>` : `<div class="empty">ยังไม่มีบัญชี</div>`}`;
+    const showTemp = (u, pw) => {
+      const d = document.getElementById("dlg") || document.body.appendChild(Object.assign(document.createElement("dialog"), { id: "dlg" }));
+      d.innerHTML = `<form method="dialog" class="stack" style="max-width:460px"><h2 style="margin:0">รหัสผ่านเริ่มต้นของ ${esc(u)}</h2>
+<p class="mono" style="font-size:22px;margin:4px 0;user-select:all">${esc(pw)}</p>
+<div class="banner warn">แสดงครั้งเดียว ปิดหน้าต่างนี้แล้วดูอีกไม่ได้ · ส่งให้ลูกค้าผ่านช่องทางที่ปลอดภัย แยกจาก username (เช่น โทรบอก หรือ SMS) ไม่ส่งในแชทหรือ email ฉบับเดียวกัน · ลูกค้าต้องตั้งรหัสใหม่เมื่อเข้าครั้งแรก</div>
+<div class="right"><button class="btn" type="button" id="pa-copy">คัดลอก</button> <button class="btn primary">ปิด</button></div></form>`;
+      d.showModal();
+      d.querySelector("#pa-copy").onclick = () => navigator.clipboard.writeText(pw).then(() => toast("คัดลอกแล้ว")).catch(() => toast("คัดลอกไม่ได้ กรุณาเลือกข้อความเอง"));
+      d.addEventListener("close", () => { d.innerHTML = ""; loadPortalAccounts(host, site); }, { once: true });
+    };
+    const add = host.querySelector("#pa-add");
+    if (add) add.onclick = () => {
+      const d = document.getElementById("dlg") || document.body.appendChild(Object.assign(document.createElement("dialog"), { id: "dlg" }));
+      d.innerHTML = `<form class="stack" style="width:min(460px,90vw)" id="pa-f"><h2 style="margin:0">เพิ่มบัญชี Portal · ${esc(site)}</h2>
+<label class="f">Username<input name="username" required pattern="[a-zA-Z0-9][a-zA-Z0-9._-]{2,59}" placeholder="เช่น ${esc(site.toLowerCase().replace(/[^a-z0-9]/g, "") || "company")}.somchai"></label>
+<label class="f">ชื่อผู้ใช้ (แสดงในเคส)<input name="name" required></label>
+<label class="f">Email<input name="email" type="email"></label><label class="f">เบอร์โทร<input name="phone"></label>
+<p class="hint" style="margin:0">ระบบสร้างรหัสผ่านเริ่มต้นให้ และแสดงครั้งเดียว</p>
+<div class="right"><button class="btn" type="button" id="pa-x">ยกเลิก</button> <button class="btn primary">สร้างบัญชี</button></div></form>`;
+      d.showModal();
+      d.querySelector("#pa-x").onclick = () => d.close();
+      d.querySelector("#pa-f").onsubmit = async (e) => {
+        e.preventDefault();
+        const f = e.target;
+        try {
+          const x = await post("/portal-accounts", { site, username: f.username.value, name: f.name.value, email: f.email.value, phone: f.phone.value });
+          d.close(); showTemp(x.account.username, x.tempPassword);
+        } catch (err) { toast(err.message, 6000); }
+      };
+    };
+    host.querySelectorAll("[data-pa-reset]").forEach((b) => b.onclick = async () => {
+      if (!confirm("รีเซ็ตรหัสผ่าน? รหัสเดิมใช้ไม่ได้ทันที และลูกค้าต้องตั้งใหม่เมื่อเข้าครั้งถัดไป")) return;
+      try { const x = await post(`/portal-accounts/${b.dataset.paReset}/reset`); showTemp(x.account.username, x.tempPassword); } catch (err) { toast(err.message, 6000); }
+    });
+    host.querySelectorAll("[data-pa-act]").forEach((b) => b.onclick = async () => {
+      const on = b.dataset.on === "1";
+      if (!on && !confirm("ปิดใช้บัญชีนี้? ลูกค้าจะออกจากระบบทันที")) return;
+      try { await post(`/portal-accounts/${b.dataset.paAct}`, { active: on }, "PUT"); loadPortalAccounts(host, site); } catch (err) { toast(err.message, 6000); }
+    });
+    host.querySelectorAll("[data-pa-unlock]").forEach((b) => b.onclick = async () => {
+      try { await post(`/portal-accounts/${b.dataset.paUnlock}`, { unlock: true }, "PUT"); loadPortalAccounts(host, site); } catch (err) { toast(err.message, 6000); }
+    });
+  }
+
   async function loadCustInfo(host, site) {
     let r;
     try {
@@ -5776,6 +5842,7 @@ ${list.map((x) => `<tr class="click" data-href="#/customer?site=${encodeURICompo
 <select id="cpick">${opts.map((l) => `<option value="${esc(l.site)}" ${l.site.toLowerCase() === site.toLowerCase() ? "selected" : ""}>${esc(l.site)}${l.open ? ` (${l.open})` : ""}</option>`).join("")}</select></label>
 ${lvl("export") === "all" ? `<a class="btn" href="#/reports?site=${encodeURIComponent(x.site)}">Export เคสของลูกค้านี้</a>` : ""}</div></section>
 <div id="cinfo"><div class="hint">กำลังโหลดข้อมูลลูกค้า…</div></div>
+<section class="card" id="cportal"></section>
 <div class="banner ${x.health === "bad" ? "err" : x.health === "warn" ? "warn" : "ok"} health-reasons"><strong>สุขภาพลูกค้า: ${hl}</strong><ul>${x.reasons.map((r) => `<li>${esc(r.text)}</li>`).join("")}</ul></div>
 <div class="kpis">
 <div class="kpi k-all"><div class="l">ยังไม่ปิด</div><div class="v">${st.open}</div></div>
@@ -5811,6 +5878,7 @@ ${x.recentClosed.map((c) => `<tr class="click" data-href="#/case/${c.id}"><td><a
 </tbody></table></div>` : `<div class="empty">ไม่มีเคสที่ปิดใน 6 เดือน</div>`}</section>`;
     document.getElementById("cpick").onchange = (e) => (location.hash = "#/customer?site=" + encodeURIComponent(e.target.value));
     loadCustInfo(document.getElementById("cinfo"), x.site);
+    loadPortalAccounts(document.getElementById("cportal"), x.site);
     bindRowLinks();
     bindCustomerReport(x.site);
   }

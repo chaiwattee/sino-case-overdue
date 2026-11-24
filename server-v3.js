@@ -107,6 +107,8 @@ app.get("/run-retention", ops(() => jobs.runRetention()));
 app.use(auth.router);
 // Customer case intake: chatbot API (API key) and the customer form (one-time link), no login.
 app.use("/api/v1", intake.apiV1);
+// Customer portal (own customer accounts, never staff sessions).
+require("./src/v3/portal").attach(app);
 app.use("/api/public", require("./src/v3/intakeupdate").router);
 app.use("/api/public", intake.publicApi);
 app.use("/api", api);

@@ -1153,3 +1153,6 @@ main, .topbar-in, .foot { max-width: 1880px; }
 .nr-search{display:flex;gap:8px;margin:0 0 14px;max-width:720px}
 .nr-search input{flex:1}
 .nr-hit .title{flex-wrap:wrap;gap:6px}
+.pv{display:inline-block;margin-left:8px;font-size:12px;font-weight:600;padding:2px 9px;border-radius:999px;border:1px solid var(--line);background:transparent;color:var(--muted);cursor:pointer;vertical-align:1px}
+span.pv{cursor:default}
+.pv.on{background:color-mix(in srgb,#1E8E4E 14%,transparent);border-color:#1E8E4E;color:#1E8E4E}

@@ -69,6 +69,7 @@ api.put("/profile/lang", wrap(async (req, res) => {
   res.json({ ok: true, lang });
 }));
 require("./customers").mount(api, { wrap });
+require("./portal").mountStaff(api, { wrap });
 require("./teamsnotify").mount(api, { wrap, need });
 require("./adminnotify").mount(api, { wrap, need });
 require("./workload").mount(api, { wrap });
@@ -381,6 +382,8 @@ api.get("/case/:id", wrap(async (req, res) => {
     ma: await require("./pm").maFor(c.id),
     files: await require("./casefiles").list(c.id),
     activities: acts,
+    // Reported by the customer (email / form / portal): its company's portal accounts can see it.
+    portal: !!(await one("SELECT 1 FROM intakes WHERE case_id = $1 AND NOT is_test AND status <> 'duplicate' LIMIT 1", [c.id])),
     nice: await require("./nicemail").forCase(c.id),
     niceResp: await require("./niceresp").forCase(c.id).catch((e) => (console.warn("[niceresp]", e.message), null)),
     alerts,
@@ -526,8 +529,18 @@ api.post("/case/:id/activity", wrap(async (req, res) => {
   if (date > d.today()) throw bad("วันที่ทำต้องไม่เกินวันนี้");
   if (c.startDate && date < d.addDays(c.startDate, -30)) throw bad("วันที่ทำเก่ากว่าวันเปิดเคสมากเกินไป");
   await require("./db").tx((cl) =>
-    repo.addActivity(cl, c.id, req.user, { date: d.toISODate(date), kind: String(req.body.kind || "ดำเนินการ").slice(0, 40), detail: detail.slice(0, 4000) })
+    repo.addActivity(cl, c.id, req.user, { date: d.toISODate(date), kind: String(req.body.kind || "ดำเนินการ").slice(0, 40), detail: detail.slice(0, 4000), customerVisible: !!req.body.customerVisible })
   );
+  res.json({ ok: true });
+}));
+
+// Show / hide one activity in the customer portal (only cases the customer reported can be seen there at all).
+api.put("/case/:id/activity/:aid(\\d+)/visible", wrap(async (req, res) => {
+  const c = await loadVisible(req);
+  if (!(await perms.can(req.user, "case_edit", c))) throw bad("ไม่มีสิทธิ์แก้ Activity ในเคสนี้", 403);
+  const r = await one("UPDATE case_activities SET customer_visible = $3 WHERE id = $2 AND case_id = $1 AND portal_user_id IS NULL RETURNING id", [c.id, Number(req.params.aid), !!req.body.visible]);
+  if (!r) throw bad("ไม่พบ Activity นี้", 404);
+  await audit(req.user, req.body.visible ? "activity_show_customer" : "activity_hide_customer", String(c.id), { activity: r.id });
   res.json({ ok: true });
 }));
 

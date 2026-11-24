@@ -176,17 +176,17 @@ function canSee(user, c) {
 
 async function activities(caseId) {
   return all(
-    `SELECT a.id, a.activity_date, a.kind, a.detail, a.is_system, a.created_at, u.display_name AS by
-     FROM case_activities a LEFT JOIN users u ON u.id = a.created_by
+    `SELECT a.id, a.activity_date, a.kind, a.detail, a.is_system, a.created_at, a.customer_visible, a.portal_user_id, coalesce(u.display_name, pu.display_name || ' (ลูกค้า · Portal)') AS by
+     FROM case_activities a LEFT JOIN users u ON u.id = a.created_by LEFT JOIN portal_users pu ON pu.id = a.portal_user_id
      WHERE a.case_id = $1 ORDER BY a.activity_date DESC, a.id DESC`,
     [caseId]
   );
 }
 
-async function addActivity(client, caseId, user, { date, kind, detail, system = false }) {
+async function addActivity(client, caseId, user, { date, kind, detail, system = false, customerVisible = false }) {
   await client.query(
-    "INSERT INTO case_activities (case_id, activity_date, kind, detail, is_system, created_by) VALUES ($1,$2,$3,$4,$5,$6)",
-    [caseId, date || d.toISODate(d.today()), kind, detail, system, user?.id || null]
+    "INSERT INTO case_activities (case_id, activity_date, kind, detail, is_system, created_by, customer_visible) VALUES ($1,$2,$3,$4,$5,$6,$7)",
+    [caseId, date || d.toISODate(d.today()), kind, detail, system, user?.id || null, !!customerVisible]
   );
 }
 
