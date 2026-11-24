@@ -98,13 +98,15 @@ function meOf(u) {
 }
 
 // ------------------------------------------------------------ customer view of cases
-const CLOSED = ["Success", "Cancel", "N/A", "Transferred"];
+// The system's closed statuses (Success, Resolved, Cancel, N/A, Transferred): all "Closed" to a customer.
+const CLOSED = require("../config").config.closedStatuses;
 /** The short status a customer sees. */
 function statusOf(i) {
   if (i.status === "rejected") return { key: "closed", label: "Closed" };
   if (!i.case_id || !i.case_status) return { key: "received", label: "Received" };
-  if (CLOSED.includes(i.case_status)) return { key: "closed", label: "Closed" };
-  if (i.case_status === "Resolved") return { key: "resolved", label: "Resolved – awaiting confirmation" };
+  if (CLOSED.includes(String(i.case_status).toLowerCase())) return { key: "closed", label: "Closed" };
+  // The engineer asked to close and a manager has not approved yet.
+  if (i.close_pending) return { key: "resolved", label: "Resolved – awaiting confirmation" };
   if (i.case_status === "Pending") return { key: "waiting", label: "Awaiting information" };
   return { key: "progress", label: "In progress" };
 }
@@ -114,6 +116,7 @@ const CH = { link: "Web form", line: "LINE", email: "Email", portal: "Portal", a
 const LIST_SQL = `
   SELECT i.id, i.req_no, i.subject, i.detail, i.severity, i.product, i.channel, i.status, i.created_at, i.contact_name,
          i.case_id, c.case_no, c.status AS case_status, c.end_date,
+         EXISTS (SELECT 1 FROM case_close_requests x WHERE x.case_id = c.id AND x.state = 'pending') AS close_pending,
          greatest(i.created_at, c.updated_at, (SELECT max(a.created_at) FROM case_activities a WHERE a.case_id = c.id AND a.customer_visible)) AS updated_at
     FROM intakes i LEFT JOIN cases c ON c.id = i.case_id
    WHERE lower(i.site) = lower($1) AND NOT i.is_test AND i.status <> 'duplicate'`;

@@ -122,6 +122,16 @@ function formHtml(s, picked, { saved } = {}) {
 </form>`);
 }
 
+// After rating: a plain thank-you page (the form stays one click away to change the rating).
+function thanksHtml(s) {
+  const stars = "★".repeat(s.rating) + "☆".repeat(5 - s.rating);
+  return page(`<h1>Thank you for your feedback!</h1>
+<p class="ok" style="font-size:20px;letter-spacing:2px">${stars} <span style="letter-spacing:0">${s.rating}/5</span></p>
+<p class="mut">Your rating for case <span class="ref">${esc(s.case_no || s.req_no || "")}</span> has been saved and shared with our support team.${s.comment ? " We have your comment too." : ""}</p>
+<p class="mut">You can close this window now.</p>
+<p class="mut" style="font-size:14px"><a href="/csat/${esc(s.token)}?edit=1">Change my rating</a> (until the link expires)</p>`, "Thank you");
+}
+
 const gone = () => page(`<h1>This link has expired</h1><p class="mut">Thank you for your time. If you still need help, please reply to our email or contact the support team.</p>`, "Link expired");
 
 /** Public routes, registered before the login wall. */
@@ -131,6 +141,8 @@ function attach(app) {
     res.set("X-Robots-Tag", "noindex, nofollow");
     const s = await byToken(req.params.token).catch(() => null);
     if (!s || new Date(s.expires_at) < new Date()) return res.status(404).send(gone());
+    // Already rated (and not asking to change it): show the thank-you page, not the form again.
+    if (s.rating && !req.query.edit && !req.query.r) return res.send(thanksHtml(s));
     res.send(formHtml(s, req.query.r));
   });
   app.post("/csat/:token", express.urlencoded({ extended: false, limit: "8kb" }), async (req, res) => {
@@ -148,7 +160,8 @@ function attach(app) {
       ]);
       await audit(null, "csat_rated", s.case_no, { case_id: s.case_id, rating });
       if (rating <= LOW && !s.alerted_at) alertLow({ ...s, rating, comment }).catch((e) => console.error("[csat] alert:", e.message));
-      res.send(formHtml({ ...s, rating, comment }, rating, { saved: true }));
+      // Post/redirect/get: a refresh does not resubmit, and the customer lands on the thank-you page.
+      res.redirect(303, `/csat/${encodeURIComponent(req.params.token)}`);
     } catch (e) {
       console.error("[csat] save:", e.message);
       res.status(500).send(page(`<h1>Something went wrong</h1><p class="mut">Please try again in a moment.</p>`));
