@@ -376,10 +376,13 @@ ${edit || !csOf(c) ? "" : `<div class="rca-sec" id="rca-sec"></div>`}
       ["audit", "#/audit", "ประวัติแก้ไข", lvl("audit_view") !== "none"],
       ["users", "#/users", "จัดการผู้ใช้", lvl("users_manage") !== "none"],
       ["settings", "#/settings", "ตั้งค่า", lvl("settings_manage") !== "none"],
+      ["helpadmin", "#/help-admin", "คู่มือในช่องค้นหา", ME.user.role === "admin"],
     ];
     tabs.splice(3, 0, ["sr", "#/sr", "คำขอบริการ", ME.user.role !== "viewer" || lvl("sr_create") !== "none"]);
     tabs.splice(4, 0, ["projects", "#/projects", "โปรเจกต์", !!ME.projects]);
     const shown = tabs.filter((t) => t[3] && (ME.user.role !== "requester" || t[0] === "sr" || t[0] === "response"));
+    SHOWN_TABS = shown.map(([k, h, l]) => ({ key: k, href: h, label: l.replace("&amp;", "&"), group: (NAV_GROUPS.find((g) => g[2].includes(k)) || [])[1] || "" }));
+    bindGlobalSearch();
     const link = ([k, h, l]) => `<a href="${h}" data-nav="${k}">${l}</a>`;
     // Pages are grouped into a few dropdowns; a group with one page is a plain link.
     const html = NAV_GROUPS.map(([gk, gl, keys]) => {
@@ -429,13 +432,133 @@ ${edit || !csOf(c) ? "" : `<div class="rca-sec" id="rca-sec"></div>`}
     };
   }
   const teamLabel = (code) => (ME.teams.find((t) => t.key === code) || {}).label || code;
+
+  // ------------------------------------------------------------ global search (Ctrl+K): menus, data, how-to help
+  let SHOWN_TABS = [];
+  let HELP = null;
+  // Extra words people use for a page (Thai / English), so "ขยาย" finds the approvals and "logout" finds the menu.
+  const MENU_WORDS = {
+    mine: "งานของฉัน เคสของฉัน my work my cases อนุมัติ ขยาย due ปิดเคส", intake: "เคสจากลูกค้า รับเรื่อง intake req คำขอรอรับ", sr: "คำขอบริการ service request sr",
+    overview: "ภาพรวม dashboard หน้าแรก", owner: "ราย user คน engineer", customer: "ลูกค้า customer portal บัญชีลูกค้า", team: "ทีม team",
+    managers: "ผลงาน manager performance อนุมัติ", kpi: "kpi คะแนน score", csat: "csat ความพึงพอใจ feedback", nicequeue: "nice รอผูก unmatched cs",
+    niceresp: "nice response sino response เวลาตอบ cs", reports: "report export excel รายงาน", audit: "ประวัติ audit log", users: "ผู้ใช้ users สิทธิ์ permission",
+    settings: "ตั้งค่า settings hotline holiday วันหยุด", workload: "ภาระงาน workload", skills: "skill ทักษะ", projects: "โปรเจกต์ project task", pm: "pm preventive",
+  };
+  const norm = (x) => String(x || "").toLowerCase().replace(/\s+/g, " ").trim();
+  function helpScore(a, q) {
+    const t = norm(q);
+    if (!t) return 0;
+    let sc = 0;
+    for (const k of a.keywords || []) if (k && t.includes(norm(k))) sc += 2 + norm(k).length / 10;
+    const title = norm(a.title);
+    if (title.includes(t)) sc += 4;
+    for (const w of t.split(" ")) if (w.length >= 2 && title.includes(w)) sc += 1;
+    return sc;
+  }
+  function bindGlobalSearch() {
+    const btn = document.getElementById("gs-open");
+    if (!btn || btn.dataset.bound) return;
+    btn.dataset.bound = "1";
+    btn.onclick = openGlobalSearch;
+    document.addEventListener("keydown", (e) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === "k" || e.key === "K")) { e.preventDefault(); openGlobalSearch(); }
+    });
+  }
+  async function openGlobalSearch() {
+    if (document.getElementById("gs")) return;
+    const d = document.body.appendChild(Object.assign(document.createElement("dialog"), { id: "gs", className: "gs" }));
+    d.innerHTML = `<div class="gs-in"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+<input id="gs-q" type="search" autocomplete="off" placeholder="หาเมนู เลขเคส CS Number ลูกค้า คน หรือพิมพ์คำถาม เช่น “ขอขยาย due ยังไง”" aria-label="ค้นหา"><kbd>Esc</kbd></div>
+<div id="gs-r" class="gs-r" role="listbox"></div><div class="gs-f"><span>↑↓ เลือก</span><span>Enter เปิด</span><span>Esc ปิด</span></div>`;
+    d.addEventListener("close", () => d.remove());
+    d.addEventListener("click", (e) => { if (e.target === d) d.close(); });
+    d.showModal();
+    const inp = d.querySelector("#gs-q"), box = d.querySelector("#gs-r");
+    if (!HELP) HELP = (await api("/help").catch(() => ({ items: [] }))).items;
+    let items = [], sel = 0, seq = 0, timer = null;
+    const go = (it) => {
+      if (!it) return;
+      if (it.kind === "help") { showAnswer(it.a); return; }
+      d.close();
+      if (it.href) location.hash = it.href.replace(/^#/, "#");
+    };
+    const paint = () => {
+      box.querySelectorAll(".gs-it").forEach((el, i) => el.classList.toggle("on", i === sel));
+      const on = box.querySelector(".gs-it.on");
+      if (on) on.scrollIntoView({ block: "nearest" });
+    };
+    const hl = (text, t) => {
+      const s = String(text || ""), i = t ? s.toLowerCase().indexOf(t.toLowerCase()) : -1;
+      return i < 0 ? esc(s) : `${esc(s.slice(0, i))}<mark>${esc(s.slice(i, i + t.length))}</mark>${esc(s.slice(i + t.length))}`;
+    };
+    const render = (t, data) => {
+      const groups = [];
+      const menus = SHOWN_TABS.map((m) => ({ m, sc: !t ? 0 : (norm(m.label).includes(norm(t)) ? 5 : 0) + (norm(MENU_WORDS[m.key]).includes(norm(t)) ? 2 : 0) + norm(t).split(" ").filter((w) => w.length >= 2 && (norm(m.label) + " " + norm(MENU_WORDS[m.key])).includes(w)).length }))
+        .filter((x) => !t || x.sc > 0).sort((a, b) => b.sc - a.sc).slice(0, t ? 5 : 8).map(({ m }) => ({ kind: "menu", href: m.href, html: `<b>${hl(m.label, t)}</b><small>${esc(m.group)}</small>`, ic: "≡" }));
+      const helps = (HELP || []).map((a) => ({ a, sc: helpScore(a, t) })).filter((x) => t && x.sc > 0).sort((a, b) => b.sc - a.sc).slice(0, 4)
+        .map(({ a }) => ({ kind: "help", a, html: `<b>${hl(a.title, t)}</b><small>${a.steps.length} ขั้นตอน</small>`, ic: "?" }));
+      const question = /[?？]|ยังไง|อย่างไร|ทำไง|วิธี|how|ไม่ได้|ทำไม/i.test(t);
+      if (helps.length && question) groups.push(["วิธีใช้", helps]);
+      if (data) {
+        if (data.cases.length) groups.push(["เคส", data.cases.map((c) => ({ kind: "case", href: `#/case/${c.id}`, ic: "#", html: `<b class="mono">${hl(c.ref, t)}</b> · ${hl(c.site, t)}<small>${c.cs ? hl(c.cs, t) + " · " : ""}${hl(c.task, t)} · ${esc(c.status)}${c.owner ? " · " + esc(c.owner) : ""}</small>` }))]);
+        if (data.requests.length) groups.push(["คำขอจากลูกค้า", data.requests.map((r) => ({ kind: "req", href: `#/intake/${r.id}`, ic: "R", html: `<b class="mono">${hl(r.req_no, t)}</b> · ${hl(r.site || "-", t)}<small>${hl(r.subject, t)}</small>` }))]);
+        if (data.customers.length) groups.push(["ลูกค้า", data.customers.map((c) => ({ kind: "cust", href: `#/customer?${qs({ site: c.site })}`, ic: "C", html: `<b>${hl(c.site, t)}</b><small>หน้าลูกค้า · เคส · Portal</small>` }))]);
+        if (data.people.length) groups.push(["คน", data.people.map((p) => ({ kind: "person", href: `#/owner/${p.id}`, ic: "@", html: `<b>${hl(p.display_name, t)}</b><small>${esc(ROLE[p.role] || p.role)}</small>` }))]);
+      }
+      if (menus.length) groups.push(["เมนู", menus]);
+      if (helps.length && !question) groups.push(["วิธีใช้", helps]);
+      items = groups.flatMap((g) => g[1]);
+      sel = 0;
+      box.innerHTML = groups.map(([g, its]) => `<div class="gs-g">${g}</div>` + its.map((it) => `<div class="gs-it" role="option" data-i="${items.indexOf(it)}"><span class="gs-ic">${it.ic}</span><span class="gs-tx">${it.html}</span></div>`).join("")).join("")
+        || (t ? `<div class="gs-none">ไม่พบ “${esc(t)}”${t.length >= 3 ? `<br><button class="btn" type="button" id="gs-ask">ส่งคำถามนี้ให้ผู้ดูแลเพิ่มคำตอบ</button>` : ""}</div>` : "");
+      box.querySelectorAll(".gs-it").forEach((el) => {
+        el.onmouseenter = () => { sel = Number(el.dataset.i); paint(); };
+        el.onclick = () => go(items[Number(el.dataset.i)]);
+      });
+      const ask = box.querySelector("#gs-ask");
+      if (ask) ask.onclick = async () => { try { await post("/help/ask", { q: t, page: location.hash }); box.innerHTML = `<div class="gs-none">ส่งคำถามแล้ว ผู้ดูแลจะเพิ่มคำตอบในคู่มือ</div>`; } catch (err) { toast(err.message); } };
+      paint();
+    };
+    const showAnswer = (a) => {
+      box.innerHTML = `<div class="gs-ans"><button class="gs-back" type="button">← กลับไปผลค้นหา</button><h3>${esc(a.title)}</h3><ol>${a.steps.map((s) => `<li>${esc(s)}</li>`).join("")}</ol>
+${a.href ? `<a class="btn primary" href="${esc(a.href)}" id="gs-go">${esc(a.hrefLabel || "ไปที่หน้านี้")} →</a>` : ""}
+<p class="hint">จากคู่มือการใช้งานในระบบ · ไม่ตรงกับที่ถาม? <a href="#" id="gs-ask2">ส่งคำถามให้ผู้ดูแล</a></p></div>`;
+      items = [];
+      box.querySelector(".gs-back").onclick = () => { render(inp.value.trim(), last); inp.focus(); };
+      const g = box.querySelector("#gs-go");
+      if (g) g.onclick = () => d.close();
+      box.querySelector("#gs-ask2").onclick = async (e) => { e.preventDefault(); try { await post("/help/ask", { q: inp.value.trim() || a.title, page: location.hash }); toast("ส่งคำถามแล้ว"); } catch (err) { toast(err.message); } };
+    };
+    let last = null;
+    const run = () => {
+      const t = inp.value.trim();
+      render(t, null);
+      clearTimeout(timer);
+      if (t.length < 2) { last = null; return; }
+      const my = ++seq;
+      timer = setTimeout(async () => {
+        const data = await api("/search?" + qs({ q: t })).catch(() => null);
+        if (my !== seq || !document.getElementById("gs")) return;
+        last = data;
+        render(t, data);
+      }, 200);
+    };
+    inp.addEventListener("input", run);
+    inp.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowDown") { e.preventDefault(); if (items.length) { sel = (sel + 1) % items.length; paint(); } }
+      else if (e.key === "ArrowUp") { e.preventDefault(); if (items.length) { sel = (sel - 1 + items.length) % items.length; paint(); } }
+      else if (e.key === "Enter") { e.preventDefault(); go(items[sel]); }
+    });
+    run();
+    inp.focus();
+  }
   // Top menu groups: [key, label, page keys]. Pages a user can't open are left out.
   const NAV_GROUPS = [
     ["work", "งานของฉัน", ["mine", "intake", "sr", "projects", "pm"]],
     ["view", "ภาพรวม", ["overview", "team", "owner", "customer"]],
     ["team", "ทีมและผลงาน", ["kpi", "managers", "response", "rank", "skills", "workload"]],
     ["report", "Report", ["reports", "csat", "nicequeue", "niceresp"]],
-    ["admin", "ผู้ดูแลระบบ", ["users", "settings", "audit"]],
+    ["admin", "ผู้ดูแลระบบ", ["users", "settings", "helpadmin", "audit"]],
   ];
   /** Opening a menu group that shows a number: list what the number is made of (each REQ / SR), with links. */
   async function showGroupAlerts(g) {
@@ -935,6 +1058,46 @@ ${caseTable(cases, { missingRes: showRes, empty: "ไม่พบเคสตา
   }
 
   // Admin: each manager's approvals (now and this month) and their team's results.
+  // Admin: the how-to answers the search box gives, and the questions nobody had an answer for.
+  async function viewHelpAdmin() {
+    setNav("helpadmin");
+    const d = await api("/help-admin");
+    const open = d.questions.filter((x) => !x.done);
+    $app.innerHTML = `<div class="head"><div><h1>คู่มือในช่องค้นหา</h1><p>คำตอบ “วิธีใช้” ที่ช่องค้นหา (Ctrl+K) ใช้ตอบ · ระบบตอบจากรายการนี้เท่านั้น · คำค้นใส่ได้ทั้งไทยและอังกฤษ</p></div>
+<div class="actions"><button class="btn primary" type="button" id="ha-new">+ เพิ่มคำตอบ</button></div></div>
+<section class="card"><div class="title"><h2>คำถามที่ยังไม่มีคำตอบ (${open.length})</h2></div>
+${d.questions.length ? `<div class="tablewrap"><table><thead><tr><th>เวลา</th><th>คำถาม</th><th>โดย</th><th>หน้า</th><th></th></tr></thead><tbody>${d.questions.map((x) => `<tr class="${x.done ? "nq-dim" : ""}"><td>${fdt(x.created_at)}</td><td>${esc(x.question)}</td><td>${esc(x.display_name || "-")}</td><td class="mono" style="font-size:12px">${esc(x.page || "")}</td>
+<td class="right" style="white-space:nowrap">${x.done ? "จัดการแล้ว" : `<button class="btn" type="button" data-ha-ans="${esc(x.question)}">เขียนคำตอบ</button> <button class="btn" type="button" data-ha-done="${x.id}">เสร็จแล้ว</button>`}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">ยังไม่มีคำถาม</div>`}</section>
+<section class="card"><div class="title"><h2>คำตอบทั้งหมด (${d.items.length})</h2></div><div class="tablewrap"><table><thead><tr><th>หัวข้อ</th><th>สำหรับ</th><th>คำค้น</th><th>ขั้นตอน</th><th></th></tr></thead><tbody>
+${d.items.map((a) => `<tr class="${a.hidden ? "nq-dim" : ""}"><td><b>${esc(a.title)}</b>${a.hidden ? ` <span class="chip c-closed">ซ่อน</span>` : ""}<div class="muted" style="font-size:12px">${a.builtIn ? "มากับระบบ" : "เพิ่มเอง"}</div></td><td>${esc((a.roles || []).map((r) => ROLE[r] || r).join(", ") || "ทุกคน")}</td><td style="font-size:12px">${esc((a.keywords || []).join(", "))}</td><td>${a.steps.length}</td><td class="right"><button class="btn" type="button" data-ha-edit="${esc(a.id)}">แก้ไข</button></td></tr>`).join("")}</tbody></table></div></section>`;
+    const edit = (a) => {
+      const dlg = document.getElementById("dlg") || document.body.appendChild(Object.assign(document.createElement("dialog"), { id: "dlg" }));
+      const roles = ["engineer", "manager", "admin", "observer", "viewer", "requester"];
+      dlg.innerHTML = `<form class="card stack" id="ha-f" style="width:min(640px,92vw)"><h2 style="margin:0">${a.id ? "แก้ไขคำตอบ" : "เพิ่มคำตอบ"}</h2>
+<label class="f">หัวข้อ<input name="title" required maxlength="120" value="${esc(a.title || "")}"></label>
+<label class="f">คำค้น (คั่นด้วยจุลภาค · ไทยและอังกฤษ)<input name="keywords" value="${esc((a.keywords || []).join(", "))}" placeholder="เช่น ขยาย, ขยาย due, extend"></label>
+<label class="f">ขั้นตอน (บรรทัดละ 1 ขั้น)<textarea name="steps" rows="6" required>${esc((a.steps || []).join("\n"))}</textarea></label>
+<div class="formgrid"><label class="f">ลิงก์ไปหน้า (เช่น #/mine)<input name="href" value="${esc(a.href || "")}"></label><label class="f">ข้อความปุ่ม<input name="hrefLabel" value="${esc(a.hrefLabel || "")}"></label></div>
+<div><span class="hint">แสดงให้ (ไม่เลือก = ทุกคน)</span><div style="display:flex;gap:12px;flex-wrap:wrap">${roles.map((r) => `<label class="chk"><input type="checkbox" name="roles" value="${r}" ${(a.roles || []).includes(r) ? "checked" : ""}> ${esc(ROLE[r] || r)}</label>`).join("")}</div></div>
+<label class="chk"><input type="checkbox" name="hidden" ${a.hidden ? "checked" : ""}> ซ่อนคำตอบนี้</label>
+<div class="right"><button class="btn" type="button" id="ha-x">ยกเลิก</button> <button class="btn primary">บันทึก</button></div></form>`;
+      dlg.showModal();
+      dlg.querySelector("#ha-x").onclick = () => dlg.close();
+      dlg.querySelector("#ha-f").onsubmit = async (e) => {
+        e.preventDefault();
+        const f = e.target;
+        try {
+          await post("/help-admin/article", { id: a.id || "", title: f.title.value, keywords: f.keywords.value, steps: f.steps.value, href: f.href.value, hrefLabel: f.hrefLabel.value, roles: [...f.querySelectorAll("[name=roles]:checked")].map((x) => x.value), hidden: f.hidden.checked }, "PUT");
+          dlg.close(); HELP = null; toast("บันทึกแล้ว"); viewHelpAdmin();
+        } catch (err) { toast(err.message, 6000); }
+      };
+    };
+    document.getElementById("ha-new").onclick = () => edit({});
+    $app.querySelectorAll("[data-ha-edit]").forEach((b) => (b.onclick = () => edit(d.items.find((x) => x.id === b.dataset.haEdit))));
+    $app.querySelectorAll("[data-ha-ans]").forEach((b) => (b.onclick = () => edit({ title: b.dataset.haAns })));
+    $app.querySelectorAll("[data-ha-done]").forEach((b) => (b.onclick = async () => { await post(`/help-admin/question/${b.dataset.haDone}/done`); viewHelpAdmin(); }));
+  }
+
   async function viewManagers(params) {
     setNav("managers");
     const d = await api("/reports/managers?" + qs({ month: params.month || "" }));
@@ -7817,6 +7980,7 @@ ${rows.slice(0, 12).map(([p, t]) => `<tr class="click" data-href="#/projects/${p
         case "nice-admin": return await viewNiceAdmin();
         case "nice-queue": return await viewNiceQueue();
         case "managers": return await viewManagers(params);
+        case "help-admin": return await viewHelpAdmin();
         case "nice-response": return await viewNiceResponse(params);
         case "skills": return await viewSkills(params);
         case "kpi": return await viewKpi(params);

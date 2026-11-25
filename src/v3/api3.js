@@ -71,6 +71,7 @@ api.put("/profile/lang", wrap(async (req, res) => {
 require("./customers").mount(api, { wrap });
 require("./portal").mountStaff(api, { wrap });
 require("./workboard").mount(api, { wrap });
+require("./help").mount(api, { wrap });
 require("./teamsnotify").mount(api, { wrap, need });
 require("./adminnotify").mount(api, { wrap, need });
 require("./workload").mount(api, { wrap });
