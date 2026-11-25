@@ -1115,7 +1115,7 @@ ${workBoard({
   tilesTitle: `เดือน ${d.month}`,
   tiles: [
     { label: "รออนุมัติรวม", value: rows.reduce((a, r) => a + r.waiting, 0), tone: rows.some((r) => r.waiting) ? "red" : "" },
-    { label: "ตอบอนุมัติช้า", value: rows.reduce((a, r) => a + r.late, 0), sub: `จาก ${rows.reduce((a, r) => a + r.answered, 0)} เรื่อง`, tone: rows.some((r) => r.late) ? "amb" : "" },
+    { label: "ตอบอนุมัติช้า", value: rows.reduce((a, r) => a + r.late, 0), sub: `จาก ${rows.reduce((a, r) => a + r.answered, 0)} เรื่องอนุมัติ`, tone: rows.some((r) => r.late) ? "amb" : "" },
     { label: "Manager ที่มีเรื่องรออนุมัติ", value: rows.filter((r) => r.waiting).length, sub: `จาก ${rows.length} คน` },
     { label: "Manager ที่ตอบช้าเดือนนี้", value: rows.filter((r) => r.late).length, sub: `จาก ${rows.length} คน` },
   ],
@@ -1123,7 +1123,7 @@ ${workBoard({
 <section class="card"><div class="tablewrap"><table><thead><tr><th>Manager</th><th>ทีม</th><th>รออนุมัติตอนนี้</th><th>ตอบอนุมัติทันเวลา</th><th>ตอบช้า</th><th>ทีมเกิน Due ตอนนี้</th><th>ทีมปิดทัน SLA</th><th>CSAT ทีม</th></tr></thead><tbody>
 ${rows.map((r) => `<tr id="mg-${r.id}"><td><b>${esc(r.name)}</b></td><td>${esc(r.teams.map(teamLabel).join(", ") || "-")}</td>
 <td>${r.waiting ? `<b class="t-over">${r.waiting}</b> <span class="muted" style="font-size:12px">ปิด ${r.waitingClose} · ขยาย ${r.waitingExt}${r.oldestWaiting ? ` · เก่าสุด ${fdt(r.oldestWaiting)}` : ""}</span>` : "0"}</td>
-<td>${bar(r.score)} <span class="muted" style="font-size:12px">${r.answered} เรื่อง</span></td>
+<td>${bar(r.score)} <span class="muted" style="font-size:12px">${r.answered} เรื่องอนุมัติ</span></td>
 <td>${r.late ? `<details><summary class="t-over">${r.late}</summary><div style="font-size:12px">${r.lateItems.map((x) => `${esc(x.kind)} ${esc(x.ref)} · ${x.pending ? "ยังไม่ตอบ" : "ตอบ"} ${x.days} วันทำการ`).join("<br>")}</div></details>` : "0"}</td>
 <td>${r.team.overdue ? `<b class="t-over">${r.team.overdue}</b>` : "0"} <span class="muted" style="font-size:12px">/ ${r.team.open} เปิดอยู่</span></td>
 <td>${bar(r.team.sla)} <span class="muted" style="font-size:12px">${r.team.onTime}/${r.team.closed}</span></td>
