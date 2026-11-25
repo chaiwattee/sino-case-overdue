@@ -362,6 +362,7 @@ ${edit || !csOf(c) ? "" : `<div class="rca-sec" id="rca-sec"></div>`}
       ["owner", "#/owner", "ราย User", true],
       ["customer", "#/customer", "ราย ลูกค้า", true],
       ["team", "#/team", "ราย ทีม", ["admin", "manager", "observer", "viewer"].includes(ME.user.role)],
+      ["managers", "#/managers", "ผลงาน Manager", ["admin", "observer"].includes(ME.user.role)],
       ["pm", "#/pm", "Preventive Maintenance job", lvl("pm_manage") !== "none"],
       ["skills", "#/skills", "Skill Map", ["admin", "manager", "observer"].includes(ME.user.role)],
       ["kpi", "#/kpi", "KPI (ทดลองใช้)", ME.user.role !== "viewer" && ME.user.role !== "requester" && (!["response", "none"].includes(ME.kpiProfile) || ["admin", "manager", "observer"].includes(ME.user.role))],
@@ -432,7 +433,7 @@ ${edit || !csOf(c) ? "" : `<div class="rca-sec" id="rca-sec"></div>`}
   const NAV_GROUPS = [
     ["work", "งานของฉัน", ["mine", "intake", "sr", "projects", "pm"]],
     ["view", "ภาพรวม", ["overview", "team", "owner", "customer"]],
-    ["team", "ทีมและผลงาน", ["kpi", "response", "rank", "skills", "workload"]],
+    ["team", "ทีมและผลงาน", ["kpi", "managers", "response", "rank", "skills", "workload"]],
     ["report", "Report", ["reports", "csat", "nicequeue", "niceresp"]],
     ["admin", "ผู้ดูแลระบบ", ["users", "settings", "audit"]],
   ];
@@ -905,6 +906,68 @@ ${caseTable(cases, { missingRes: showRes, empty: "ไม่พบเคสตา
 <div>${hasKpi ? "งานที่เกินกำหนดมีผลต่อคะแนน KPI เดือนนี้ (ด้าน SLA / ตรงเวลา และงานค้าง) และหัวหน้างานใช้ข้อมูลนี้ประกอบการพิจารณา" : "หัวหน้างานใช้ข้อมูลงานที่เกินกำหนดประกอบการพิจารณา"} กรุณาอัปเดตความคืบหน้า ปิดงาน หรือขอขยายเวลาพร้อมเหตุผล</div>
 <div class="lw-act">${nCase ? `<a class="btn" href="#/mine?tab=open" data-lw="cases">ดูเคสเกินกำหนด (${nCase})</a>` : ""}${nSr ? `<a class="btn" href="#mine-sr">ดูคำขอบริการเลย Target (${nSr})</a>` : ""}</div></div></div>`;
   }
+  // ------------------------------------------------------------ work summary (donut + groups + "today" tiles)
+  function donutSvg(segs, total, sub) {
+    const tot = segs.reduce((a, x) => a + x.n, 0), R = 92, W = 30, C = 2 * Math.PI * R;
+    let off = 0;
+    const arcs = tot ? segs.filter((x) => x.n).map((x) => {
+      const len = (x.n / tot) * C, gap = segs.filter((y) => y.n).length > 1 ? 3 : 0;
+      const a = `<circle class="wb-arc" data-wb="${x.key}" r="${R}" cx="120" cy="120" fill="none" stroke="${x.color}" stroke-width="${W}" stroke-dasharray="${Math.max(0, len - gap)} ${C}" stroke-dashoffset="${-off}" transform="rotate(-90 120 120)"><title>${esc(x.label)}: ${x.n}</title></circle>`;
+      off += len;
+      return a;
+    }).join("") : `<circle r="${R}" cx="120" cy="120" fill="none" stroke="var(--line)" stroke-width="${W}"></circle>`;
+    return `<svg class="wb-donut" viewBox="0 0 240 240" width="220" height="220" role="img" aria-label="${esc(sub)} ${total}">${arcs}<text x="120" y="118" text-anchor="middle" class="wb-tot">${esc(String(total))}</text><text x="120" y="146" text-anchor="middle" class="wb-sub">${esc(sub)}</text></svg>`;
+  }
+  function workBoard({ title, sub, segs, tilesTitle, tiles, active }) {
+    const tot = segs.reduce((a, x) => a + x.n, 0);
+    return `<section class="card wb"><div class="wb-chart">${donutSvg(segs, tot, sub)}</div>
+<div class="wb-groups"><div class="wb-h">${esc(title)}</div>${segs.map((x) => `<a class="wb-g ${active === x.key ? "on" : ""} ${x.n ? "" : "zero"}" href="${x.href}" data-wb="${x.key}"><i style="background:${x.color}"></i><span>${esc(x.label)}</span><b>${x.n}</b><em>${x.n ? "ดูรายการ →" : ""}</em></a>`).join("")}</div>
+<div class="wb-tiles"><div class="wb-h">${esc(tilesTitle)}</div><div class="wb-tg">${tiles.map((t) => `<${t.href ? `a href="${t.href}"` : "div"} class="wb-t ${t.tone || ""}"><div class="l">${esc(t.label)}</div><div class="v">${esc(String(t.value))}</div><div class="s">${t.sub || ""}</div></${t.href ? "a" : "div"}>`).join("")}</div></div></section>`;
+  }
+  /** Group links that point at a section of this page scroll there instead of changing the route. */
+  function bindWorkBoard(host) {
+    host.querySelectorAll(".wb-arc").forEach((a) => a.addEventListener("click", () => { const g = host.querySelector(`.wb-g[data-wb="${a.dataset.wb}"]`); if (g) g.click(); }));
+    host.querySelectorAll('.wb a[href^="#scroll:"], .wb-g[href^="#scroll:"]').forEach((a) => a.addEventListener("click", (e) => {
+      e.preventDefault();
+      const el = document.querySelector(a.getAttribute("href").slice(8));
+      if (el) { el.scrollIntoView({ behavior: "smooth", block: "start" }); el.classList.add("wb-flash"); setTimeout(() => el.classList.remove("wb-flash"), 1600); }
+    }));
+  }
+
+  // Admin: each manager's approvals (now and this month) and their team's results.
+  async function viewManagers(params) {
+    setNav("managers");
+    const d = await api("/reports/managers?" + qs({ month: params.month || "" }));
+    const bar = (v) => v == null ? `<span class="muted">-</span>` : `<span class="mg-bar"><i style="width:${v}%;background:${v >= 90 ? "#2F9E6A" : v >= 80 ? "#E8833A" : "#C8372D"}"></i></span> ${v}%`;
+    const rows = d.rows.slice().sort((a, b) => b.waiting - a.waiting || (a.score ?? 101) - (b.score ?? 101));
+    $app.innerHTML = `
+<div class="head"><div><h1>ผลงาน Manager</h1><p>งานรออนุมัติตอนนี้ การตอบอนุมัติในเดือน (ปิดเคส, ขยาย Due, คำขอบริการ · เป้า ${d.respondDays} วันทำการ) และผลของทีมในเดือน</p></div>
+<div class="actions"><input type="month" id="mg-m" value="${d.month}"></div></div>
+${workBoard({
+  title: "งานรอ Manager อนุมัติตอนนี้", sub: "รออนุมัติ",
+  segs: rows.map((r, i) => ({ key: "m" + r.id, label: r.name, n: r.waiting, color: ["#C8372D", "#E8833A", "#E9B93A", "#2F9E6A", "#3D6FD8", "#7B5BD6", "#0E7C86", "#B5562E"][i % 8], href: `#scroll:#mg-${r.id}` })),
+  tilesTitle: `เดือน ${d.month}`,
+  tiles: [
+    { label: "รออนุมัติรวม", value: rows.reduce((a, r) => a + r.waiting, 0), tone: rows.some((r) => r.waiting) ? "red" : "" },
+    { label: "ตอบอนุมัติช้า", value: rows.reduce((a, r) => a + r.late, 0), sub: `จาก ${rows.reduce((a, r) => a + r.answered, 0)} เรื่อง`, tone: rows.some((r) => r.late) ? "amb" : "" },
+    { label: "Manager ที่มีเรื่องรออนุมัติ", value: rows.filter((r) => r.waiting).length, sub: `จาก ${rows.length} คน` },
+    { label: "Manager ที่ตอบช้าเดือนนี้", value: rows.filter((r) => r.late).length, sub: `จาก ${rows.length} คน` },
+  ],
+})}
+<section class="card"><div class="tablewrap"><table><thead><tr><th>Manager</th><th>ทีม</th><th>รออนุมัติตอนนี้</th><th>ตอบอนุมัติทันเวลา</th><th>ตอบช้า</th><th>ทีมเกิน Due ตอนนี้</th><th>ทีมปิดทัน SLA</th><th>CSAT ทีม</th></tr></thead><tbody>
+${rows.map((r) => `<tr id="mg-${r.id}"><td><b>${esc(r.name)}</b></td><td>${esc(r.teams.map(teamLabel).join(", ") || "-")}</td>
+<td>${r.waiting ? `<b class="t-over">${r.waiting}</b> <span class="muted" style="font-size:12px">ปิด ${r.waitingClose} · ขยาย ${r.waitingExt}${r.oldestWaiting ? ` · เก่าสุด ${fdt(r.oldestWaiting)}` : ""}</span>` : "0"}</td>
+<td>${bar(r.score)} <span class="muted" style="font-size:12px">${r.answered} เรื่อง</span></td>
+<td>${r.late ? `<details><summary class="t-over">${r.late}</summary><div style="font-size:12px">${r.lateItems.map((x) => `${esc(x.kind)} ${esc(x.ref)} · ${x.pending ? "ยังไม่ตอบ" : "ตอบ"} ${x.days} วันทำการ`).join("<br>")}</div></details>` : "0"}</td>
+<td>${r.team.overdue ? `<b class="t-over">${r.team.overdue}</b>` : "0"} <span class="muted" style="font-size:12px">/ ${r.team.open} เปิดอยู่</span></td>
+<td>${bar(r.team.sla)} <span class="muted" style="font-size:12px">${r.team.onTime}/${r.team.closed}</span></td>
+<td>${r.team.csat == null ? "-" : `${r.team.csat}/5 <span class="muted" style="font-size:12px">${r.team.csatN} คำตอบ</span>`}</td></tr>`).join("") || `<tr><td colspan="8" class="empty">ไม่มี Manager</td></tr>`}</tbody></table></div>
+<p class="hint">ตอบอนุมัติทันเวลา = เรื่องที่ตอบภายใน ${d.respondDays} วันทำการ หารเรื่องทั้งหมดในเดือน (เรื่องที่ยังไม่ตอบและเลยกำหนดนับเป็นช้า) · ทีมปิดทัน SLA นับเคสที่ปิดในเดือน · CSAT นับคำตอบในเดือน</p></section>`;
+    bindWorkBoard($app);
+    const mm = document.getElementById("mg-m");
+    mm.onchange = () => (location.hash = "#/managers?" + qs({ month: mm.value }));
+  }
+
   async function viewMine(params) {
     setNav("mine");
     const kpiP = api(`/kpi/card/${ME.user.id}`).catch(() => ({ card: null }));
@@ -924,11 +987,49 @@ ${caseTable(cases, { missingRes: showRes, empty: "ไม่พบเคสตา
     list.sort((a, b) => (a.stage === "closed") - (b.stage === "closed") || (b.age || 0) - (a.age || 0));
     const cnt = (s) => open.filter((c) => c.stage === s).length;
     const soon = open.filter((c) => c.stage === "r2" || c.stage === "overdue");
+    if (params.stage) list = list.filter((c) => c.stage === params.stage);
     const sla = (() => {
       const cl = closed30;
       const ok = cl.filter((c) => c.closedOnTime === true).length;
       return cl.length ? Math.round((ok / cl.length) * 100) + "%" : "-";
-    })();
+    })();    const mgrSum = ME.user.role === "manager" ? await api("/mywork/summary").catch(() => null) : null;
+    const ikN = (ikHtml.match(/data-ik-claim=|data-claim=/g) || []).length;
+    const stageHref = (st) => "#/mine?" + qs({ tab: "open", stage: st });
+    const caseSegs = [
+      { key: "overdue", label: "เกิน Due", n: cnt("overdue"), color: "#C8372D", href: stageHref("overdue") },
+      { key: "r2", label: "แจ้งรอบ 2", n: cnt("r2"), color: "#E8833A", href: stageHref("r2") },
+      { key: "r1", label: "แจ้งรอบ 1", n: cnt("r1"), color: "#E9B93A", href: stageHref("r1") },
+      { key: "normal", label: "ปกติ", n: cnt("normal"), color: "#2F9E6A", href: stageHref("normal") },
+      { key: "sr", label: "คำขอบริการ", n: srMine.length, color: "#3D6FD8", href: "#scroll:#mine-sr" },
+    ];
+    const dueTomorrow = open.filter((c) => c.stage !== "overdue" && c.daysLeft === 1);
+    const board = mgrSum && mgrSum.me ? workBoard({
+      title: "งานรอฉัน + งานของฉัน", sub: "งานที่ต้องดูแล", active: params.stage,
+      segs: [
+        { key: "close", label: "รออนุมัติปิดเคส", n: mgrSum.me.waitingClose, color: "#8C2A22", href: "#scroll:#cl-wrap" },
+        { key: "ext", label: "รออนุมัติขยาย Due", n: mgrSum.me.waitingExt, color: "#B5562E", href: "#scroll:.ext-wrap" },
+        { key: "intake", label: "คำขอรอรับ (ทีม)", n: mgrSum.intake, color: "#7B5BD6", href: "#scroll:.ik-wrap" },
+        { key: "srp", label: "SR รออนุมัติ (ทีม)", n: mgrSum.srPending, color: "#5B8DEF", href: "#/sr?scope=team" },
+        ...caseSegs,
+      ],
+      tilesTitle: `ทีมของฉันเดือนนี้ (${(mgrSum.me.teams || []).map(teamLabel).join(", ")})`,
+      tiles: [
+        { label: "รอฉันอนุมัติ", value: mgrSum.me.waiting, sub: mgrSum.me.oldestWaiting ? `เก่าสุด ${fdt(mgrSum.me.oldestWaiting)}` : "ไม่มีค้าง", tone: mgrSum.me.waiting ? "red" : "" },
+        { label: "ทีมเกิน Due ตอนนี้", value: mgrSum.me.team.overdue, sub: `จาก ${mgrSum.me.team.open} เคสที่เปิดอยู่`, tone: mgrSum.me.team.overdue ? "amb" : "", href: "#/overview" },
+        { label: "ทีมปิดทัน SLA", value: mgrSum.me.team.sla == null ? "-" : mgrSum.me.team.sla + "%", sub: `${mgrSum.me.team.onTime}/${mgrSum.me.team.closed} เคสที่ปิดเดือนนี้` },
+        { label: "ตอบอนุมัติทันเวลา", value: mgrSum.me.score == null ? "-" : mgrSum.me.score + "%", sub: `${mgrSum.me.answered} เรื่อง · ช้า ${mgrSum.me.late}` },
+      ],
+    }) : workBoard({
+      title: "งานค้างแยกตามกลุ่ม", sub: "งานค้างทั้งหมด", active: params.stage, segs: caseSegs,
+      tilesTitle: "ต้องทำวันนี้",
+      tiles: [
+        { label: "เกิน Due", value: cnt("overdue"), sub: cnt("overdue") ? "ขอขยาย Due หรือปิดเคส" : "ไม่มี", tone: cnt("overdue") ? "red" : "", href: stageHref("overdue") },
+        { label: "ครบ Due พรุ่งนี้", value: dueTomorrow.length, sub: dueTomorrow.slice(0, 3).map((c) => esc(caseRef(c))).join(", ") || "ไม่มี", tone: dueTomorrow.length ? "amb" : "" },
+        { label: "คำขอรอรับเรื่อง", value: ikN, sub: ikN ? "กดเพื่อรับเรื่อง" : "ไม่มี", href: ikN ? "#scroll:.ik-wrap" : "" },
+        { label: "ปิดทัน SLA (30 วัน)", value: sla, sub: `${closed30.length} เคสที่ปิด` },
+      ],
+    });
+
     const statusSel = (c) => {
       const editable = can("case_edit", c);
       if (!editable) return `${esc(c.status)}`;
@@ -936,9 +1037,10 @@ ${caseTable(cases, { missingRes: showRes, empty: "ไม่พบเคสตา
       return `<label><span class="sr">Status ของ ${esc(c.csNumber || c.id)}</span><select class="inline" data-status="${c.id}" data-prev="${esc(c.status)}">${opts}</select></label>`;
     };
     $app.innerHTML = `
-<div class="head"><div><h1>เคสของฉัน</h1><p>เปิดเคสใหม่ อัปเดตความคืบหน้า และปิดเคสได้จากหน้านี้</p></div>
+<div class="head"><div><h1>เคสของฉัน</h1><p>เปิดเคสใหม่ อัปเดตความคืบหน้า และปิดเคสได้จากหน้านี้ · กดกลุ่มในสรุปด้านบนเพื่อไปที่รายการ</p></div>
 <div class="actions">${lvl("export") !== "none" ? `<a class="btn" href="api/export?${qs({ from: daysAgo(89), to: daysAgo(0), owner: ME.user.email })}">Export เคสของฉัน</a>` : ""}
 ${can("case_create") ? `<a class="btn primary" href="#/case/new">เปิดเคสใหม่</a>` : ""}</div></div>
+${board}
 ${lateWarn(cases.filter((c) => c.stage === "overdue").length, srMine.filter((r) => r.status === "overdue").length, hasKpi)}
 ${extHtml}
 ${ikHtml}
@@ -955,7 +1057,8 @@ ${srMine.length ? `<a class="kpi k-sr" href="#mine-sr"><div class="l">คำข�
 </div>
 <div id="mine-kpi"></div>
 ${srLate.length ? `<div class="banner warn" role="status">คำขอบริการ: ${srLate.map((r) => `<a href="#/sr/${r.id}">${esc(r.srNo)}</a> ${esc(r.title)} ${r.status === "overdue" ? `เลย Target ${r.overdueDays} วันทำการ` : r.daysLeft === 0 ? "ครบ Target วันนี้" : "ครบ Target วันทำการถัดไป"}`).join(" · ")}</div>` : ""}
-<section class="card">
+<section class="card" id="mine-cases">
+${params.stage ? `<p style="margin:0 0 10px"><a class="wb-chip" href="#/mine?${qs({ tab })}">กรอง: ${esc((caseSegs.find((x) => x.key === params.stage) || {}).label || params.stage)} ✕</a> <span class="muted">${list.length} เคส</span></p>` : ""}
 <div class="title"><div class="tabs2" role="tablist">
 <a role="tab" href="#/mine?tab=open" class="${tab === "open" ? "on" : ""}" aria-selected="${tab === "open"}">ยังเปิดอยู่ (${open.length})</a>
 <a role="tab" href="#/mine?tab=closed" class="${tab === "closed" ? "on" : ""}" aria-selected="${tab === "closed"}">ปิดแล้ว 30 วัน (${closed30.length})</a>
@@ -979,6 +1082,8 @@ ${list.map((c) => `<tr class="click" data-href="#/case/${c.id}">
 ${srWorkTable(srMine)}</section>
 <p class="hint">เปลี่ยน Status ในตารางแล้วบันทึกทันที ถ้าเลือก Success, Resolved, Cancel หรือ N/A ระบบจะให้กรอก Resolution ก่อนปิด แล้วใส่ End date ให้และหยุดแจ้งเตือน เคสที่มี CS Number ต้องใส่ RCA จาก NICE ด้วย (ยกเว้น Cancel / N/A)</p>`;
     bindRowLinks();
+    bindWorkBoard($app);
+    if (params.stage) { const mc = document.getElementById("mine-cases"); if (mc) setTimeout(() => mc.scrollIntoView({ block: "start" }), 50); }
     loadKpiCard("mine-kpi", ME.user.id, "", { compact: true });
     bindIntakeActions($app, () => route());
     bindExtPending($app);
@@ -7696,6 +7801,7 @@ ${rows.slice(0, 12).map(([p, t]) => `<tr class="click" data-href="#/projects/${p
         case "intake-admin": return await viewIntakeAdmin();
         case "nice-admin": return await viewNiceAdmin();
         case "nice-queue": return await viewNiceQueue();
+        case "managers": return await viewManagers(params);
         case "nice-response": return await viewNiceResponse(params);
         case "skills": return await viewSkills(params);
         case "kpi": return await viewKpi(params);
