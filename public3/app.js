@@ -7948,7 +7948,43 @@ ${rows.slice(0, 12).map(([p, t]) => `<tr class="click" data-href="#/projects/${p
     trackNav();
     await routeView();
     addBackButton();
+    LAST_LOAD = Date.now();
   }
+
+  // ------------------------------------------------------------ auto refresh: reload the open page's data every few
+  // minutes while the tab is visible, and on coming back to the tab after a while; never while someone is typing,
+  // has a dialog or a details panel open, or has an unsaved form.
+  const AUTO_REFRESH_MS = 3 * 60 * 1000;
+  const BACK_AFTER_MS = 60 * 1000;
+  let LAST_LOAD = Date.now(), HIDDEN_AT = 0, REFRESHING = false;
+  const NO_AUTO = /^#\/(case\/new|case\/\d+\/edit|settings|users|help-admin|nice-admin|intake-admin)/;
+  function busy() {
+    if (document.querySelector("dialog[open]")) return true;
+    const a = document.activeElement;
+    if (a && a !== document.body && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.type !== "search") return true;
+    if ($app.querySelector("textarea")) { for (const t of $app.querySelectorAll("textarea")) if (t.value.trim()) return true; }
+    if ($app.querySelector("form[data-dirty]")) return true;
+    if (NO_AUTO.test(location.hash)) return true;
+    return false;
+  }
+  async function autoRefresh() {
+    if (REFRESHING || !ME || busy()) return;
+    REFRESHING = true;
+    const y = window.scrollY;
+    try {
+      await routeView();
+      addBackButton();
+      LAST_LOAD = Date.now();
+      window.scrollTo(0, y);
+    } catch (e) {} finally { REFRESHING = false; }
+  }
+  setInterval(() => { if (document.visibilityState === "visible" && Date.now() - LAST_LOAD >= AUTO_REFRESH_MS) autoRefresh(); }, 30000);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") HIDDEN_AT = Date.now();
+    else if (HIDDEN_AT && Date.now() - HIDDEN_AT >= BACK_AFTER_MS) autoRefresh();
+  });
+  // Typing in any form marks it, so a refresh never throws away what someone entered.
+  document.addEventListener("input", (e) => { const f = e.target.closest && e.target.closest("form"); if (f && e.target.type !== "search") f.dataset.dirty = "1"; }, true);
   // Views that re-render themselves (after closing a case, saving, approving…) replace the whole page without route():
   // put the back button back whenever the page content is replaced.
   new MutationObserver(() => addBackButton()).observe($app, { childList: true });
