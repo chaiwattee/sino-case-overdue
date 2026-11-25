@@ -479,6 +479,7 @@ ${edit || !csOf(c) ? "" : `<div class="rca-sec" id="rca-sec"></div>`}
     const go = (it) => {
       if (!it) return;
       if (it.kind === "help") { showAnswer(it.a); return; }
+      if (it.kind === "ask") { post("/help/ask", { q: inp.value.trim(), page: location.hash }).then(() => { box.innerHTML = `<div class="gs-none">ส่งคำถามแล้ว ผู้ดูแลจะเพิ่มคำตอบในคู่มือ</div>`; items = []; }).catch((err) => toast(err.message)); return; }
       d.close();
       if (it.href) location.hash = it.href.replace(/^#/, "#");
     };
@@ -497,14 +498,16 @@ ${edit || !csOf(c) ? "" : `<div class="rca-sec" id="rca-sec"></div>`}
         .filter((x) => !t || x.sc > 0).sort((a, b) => b.sc - a.sc).slice(0, t ? 5 : 8).map(({ m }) => ({ kind: "menu", href: m.href, html: `<b>${hl(m.label, t)}</b><small>${esc(m.group)}</small>`, ic: "≡" }));
       const helps = (HELP || []).map((a) => ({ a, sc: helpScore(a, t) })).filter((x) => t && x.sc > 0).sort((a, b) => b.sc - a.sc).slice(0, 4)
         .map(({ a }) => ({ kind: "help", a, html: `<b>${hl(a.title, t)}</b><small>${a.steps.length} ขั้นตอน</small>`, ic: "?" }));
-      const question = /[?？]|ยังไง|อย่างไร|ทำไง|วิธี|how|ไม่ได้|ทำไม/i.test(t);
-      if (helps.length && question) groups.push(["วิธีใช้", helps]);
+      // A question (or several words): the how-to answer comes first, so Enter opens the steps, not a page.
+      const question = /[?？]|ยังไง|อย่างไร|ทำไง|ทำยังไง|วิธี|ได้ไหม|ไหม|ต้อง|ทำไม|ไม่ได้|ตรงไหน|ที่ไหน|how|what|where|why|can i/i.test(t) || t.trim().split(/\s+/).length >= 3;
+      if (helps.length && question) groups.push(["วิธีใช้ (กด Enter เพื่อดูขั้นตอน)", helps]);
       if (data) {
         if (data.cases.length) groups.push(["เคส", data.cases.map((c) => ({ kind: "case", href: `#/case/${c.id}`, ic: "#", html: `<b class="mono">${hl(c.ref, t)}</b> · ${hl(c.site, t)}<small>${c.cs ? hl(c.cs, t) + " · " : ""}${hl(c.task, t)} · ${esc(c.status)}${c.owner ? " · " + esc(c.owner) : ""}</small>` }))]);
         if (data.requests.length) groups.push(["คำขอจากลูกค้า", data.requests.map((r) => ({ kind: "req", href: `#/intake/${r.id}`, ic: "R", html: `<b class="mono">${hl(r.req_no, t)}</b> · ${hl(r.site || "-", t)}<small>${hl(r.subject, t)}</small>` }))]);
         if (data.customers.length) groups.push(["ลูกค้า", data.customers.map((c) => ({ kind: "cust", href: `#/customer?${qs({ site: c.site })}`, ic: "C", html: `<b>${hl(c.site, t)}</b><small>หน้าลูกค้า · เคส · Portal</small>` }))]);
         if (data.people.length) groups.push(["คน", data.people.map((p) => ({ kind: "person", href: `#/owner/${p.id}`, ic: "@", html: `<b>${hl(p.display_name, t)}</b><small>${esc(ROLE[p.role] || p.role)}</small>` }))]);
       }
+      if (question && !helps.length && t.length >= 3) groups.push(["วิธีใช้", [{ kind: "ask", ic: "?", html: `<b>ยังไม่มีคำตอบสำหรับคำถามนี้</b><small>กด Enter เพื่อส่งคำถามให้ผู้ดูแลเพิ่มในคู่มือ</small>` }]]);
       if (menus.length) groups.push(["เมนู", menus]);
       if (helps.length && !question) groups.push(["วิธีใช้", helps]);
       items = groups.flatMap((g) => g[1]);
