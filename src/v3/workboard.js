@@ -61,6 +61,16 @@ function mount(api, { wrap }) {
   // Manager part of the My Work summary (engineers build theirs from data the page already has).
   api.get("/mywork/summary", wrap(async (req, res) => {
     const u = req.user;
+    if (u.role === "admin") {
+      // Only an admin can give the final approval of a Due extension: show what waits for that step.
+      const a = await one(
+        `SELECT (SELECT count(*)::int FROM case_extensions WHERE status = 'pending' AND stage = 'admin') AS ext,
+                (SELECT min(coalesce(forwarded_at, requested_at)) FROM case_extensions WHERE status = 'pending' AND stage = 'admin') AS ext_oldest,
+                (SELECT count(*)::int FROM case_extensions WHERE status = 'pending' AND stage = 'manager') AS ext_mgr,
+                (SELECT count(*)::int FROM case_close_requests WHERE state = 'pending') AS close,
+                (SELECT count(*)::int FROM intakes WHERE status = 'pending' AND NOT is_test) AS intake`);
+      return res.json({ role: "admin", extAdmin: a.ext, extOldest: a.ext_oldest, extAtManager: a.ext_mgr, close: a.close, intake: a.intake });
+    }
     if (u.role !== "manager") return res.json({ role: u.role });
     const r = monthRange();
     const [row] = await managerRows(r, u.id);

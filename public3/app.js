@@ -992,7 +992,7 @@ ${rows.map((r) => `<tr id="mg-${r.id}"><td><b>${esc(r.name)}</b></td><td>${esc(r
       const cl = closed30;
       const ok = cl.filter((c) => c.closedOnTime === true).length;
       return cl.length ? Math.round((ok / cl.length) * 100) + "%" : "-";
-    })();    const mgrSum = ME.user.role === "manager" ? await api("/mywork/summary").catch(() => null) : null;
+    })();    const mgrSum = ["manager", "admin"].includes(ME.user.role) ? await api("/mywork/summary").catch(() => null) : null;
     const ikN = (ikHtml.match(/data-ik-claim=|data-claim=/g) || []).length;
     const stageHref = (st) => "#/mine?" + qs({ tab: "open", stage: st });
     const caseSegs = [
@@ -1003,11 +1003,26 @@ ${rows.map((r) => `<tr id="mg-${r.id}"><td><b>${esc(r.name)}</b></td><td>${esc(r
       { key: "sr", label: "คำขอบริการ", n: srMine.length, color: "#3D6FD8", href: "#scroll:#mine-sr" },
     ];
     const dueTomorrow = open.filter((c) => c.stage !== "overdue" && c.daysLeft === 1);
-    const board = mgrSum && mgrSum.me ? workBoard({
+    const board = mgrSum && mgrSum.role === "admin" ? workBoard({
+      title: "งานรอ Admin + งานของฉัน", sub: "งานที่ต้องดูแล", active: params.stage,
+      segs: [
+        { key: "extA", label: "ขยาย Due รอ Admin อนุมัติ", n: mgrSum.extAdmin, color: "#8C2A22", href: "#scroll:#ext-pend" },
+        { key: "closeA", label: "ขอปิดเคสรออนุมัติ (ทุกทีม)", n: mgrSum.close, color: "#B5562E", href: "#scroll:#cl-wrap" },
+        { key: "intakeA", label: "คำขอรอรับ (ทุกทีม)", n: mgrSum.intake, color: "#7B5BD6", href: "#scroll:.ik-wrap" },
+        ...caseSegs,
+      ],
+      tilesTitle: "รอ Admin",
+      tiles: [
+        { label: "ขยาย Due รอฉันอนุมัติ", value: mgrSum.extAdmin, sub: mgrSum.extOldest ? `เก่าสุด ${fdt(mgrSum.extOldest)} · กดเพื่อไปอนุมัติ` : "ไม่มีค้าง", tone: mgrSum.extAdmin ? "red" : "", href: mgrSum.extAdmin ? "#scroll:#ext-pend" : "" },
+        { label: "ขยาย Due รอ Manager ตรวจ", value: mgrSum.extAtManager, sub: "จะมาถึง Admin หลัง Manager ส่งต่อ" },
+        { label: "ขอปิดเคสรออนุมัติ", value: mgrSum.close, sub: "ทุกทีม", tone: mgrSum.close ? "amb" : "", href: mgrSum.close ? "#scroll:#cl-wrap" : "" },
+        { label: "ผลงาน Manager", value: "→", sub: "ดูการตอบอนุมัติของแต่ละ Manager", href: "#/managers" },
+      ],
+    }) : mgrSum && mgrSum.me ? workBoard({
       title: "งานรอฉัน + งานของฉัน", sub: "งานที่ต้องดูแล", active: params.stage,
       segs: [
         { key: "close", label: "รออนุมัติปิดเคส", n: mgrSum.me.waitingClose, color: "#8C2A22", href: "#scroll:#cl-wrap" },
-        { key: "ext", label: "รออนุมัติขยาย Due", n: mgrSum.me.waitingExt, color: "#B5562E", href: "#scroll:.ext-wrap" },
+        { key: "ext", label: "รออนุมัติขยาย Due", n: mgrSum.me.waitingExt, color: "#B5562E", href: "#scroll:#ext-pend" },
         { key: "intake", label: "คำขอรอรับ (ทีม)", n: mgrSum.intake, color: "#7B5BD6", href: "#scroll:.ik-wrap" },
         { key: "srp", label: "SR รออนุมัติ (ทีม)", n: mgrSum.srPending, color: "#5B8DEF", href: "#/sr?scope=team" },
         ...caseSegs,
@@ -2935,7 +2950,7 @@ ${!pending && !hist.length && closed ? `<div class="hint">เคสปิดแ�
 <div class="ext-reason">${esc(e.reason)}</div>
 ${e.stage === "admin" ? `<div class="muted" style="font-size:13px">ส่งต่อโดย ${esc(e.forwarded_by_name || "-")} · ${fdt(e.forwarded_at)}${e.forward_note ? ` · ความเห็น Manager: “${esc(e.forward_note)}”` : ""}</div>` : ""}
 ${forMe ? extActions(e) : ""}</div>`;
-    return `${d.forMe.length ? `<section class="card ext-wrap"><div class="title"><h2>${d.isAdmin ? "คำขอขยายเวลา รอคุณอนุมัติ" : "คำขอขยายเวลา รอคุณตรวจและส่งต่อ"} (${d.forMe.length})</h2><span>${d.isAdmin ? "Admin อนุมัติขั้นสุดท้ายและกำหนดจำนวนวันทำการ" : "ตรวจเหตุผลแล้วส่งขออนุมัติ Admin · เคสขยายเวลาเมื่อ Admin อนุมัติเท่านั้น"}</span></div>${d.forMe.map((e) => row(e, true)).join("")}</section>` : ""}
+    return `${d.forMe.length ? `<section class="card ext-wrap" id="ext-pend"><div class="title"><h2>${d.isAdmin ? "คำขอขยายเวลา รอคุณอนุมัติ" : "คำขอขยายเวลา รอคุณตรวจและส่งต่อ"} (${d.forMe.length})</h2><span>${d.isAdmin ? "Admin อนุมัติขั้นสุดท้ายและกำหนดจำนวนวันทำการ" : "ตรวจเหตุผลแล้วส่งขออนุมัติ Admin · เคสขยายเวลาเมื่อ Admin อนุมัติเท่านั้น"}</span></div>${d.forMe.map((e) => row(e, true)).join("")}</section>` : ""}
 ${d.mine.length ? `<section class="card"><div class="title"><h2>คำขอขยายเวลาของคุณ รอพิจารณา (${d.mine.length})</h2></div>${d.mine.map((e) => row(e, false)).join("")}</section>` : ""}`;
   }
   function bindExtPending(root) {
